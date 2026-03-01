@@ -54,7 +54,7 @@ export default function InstallPWA() {
     <div className="fixed bottom-20 left-4 right-4 z-50 bg-surface-dark border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center justify-between animate-in slide-in-from-bottom-5">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-[#6221dd] rounded-xl flex items-center justify-center overflow-hidden">
-          <img src="/assets/mima-logo.png" alt="Mima" className="w-full h-full object-cover scale-[1.25]" />
+          <img src="/assets/mima-logo.jpg" alt="Mima" className="w-full h-full object-cover" />
         </div>
         <div>
           <h3 className="text-white font-medium text-sm">Instalar Mima AI</h3>
