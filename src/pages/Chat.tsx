@@ -121,7 +121,7 @@ export default function Chat() {
           </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-[#6221dd] flex items-center justify-center overflow-hidden">
-              <img src="/assets/mima-logo.jpg" alt="Mima" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              <img src="/assets/mima-logo.jpg?v=2" alt="Mima" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             </div>
             <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
           </div>
@@ -164,7 +164,7 @@ export default function Chat() {
           >
             {msg.sender === "Mima" && (
               <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
-                <img src="/assets/mima-logo.jpg" alt="Mima" className="w-full h-full object-cover" onError={(e) => {
+                <img src="/assets/mima-logo.jpg?v=2" alt="Mima" className="w-full h-full object-cover" onError={(e) => {
                   e.currentTarget.style.display = 'none';
                   e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
                 }} />
@@ -208,7 +208,7 @@ export default function Chat() {
         {isLoading && (
           <div className="flex items-start gap-3 max-w-[85%]">
             <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
-              <img src="/assets/mima-logo.jpg" alt="Mima" className="w-full h-full object-cover" onError={(e) => {
+              <img src="/assets/mima-logo.jpg?v=2" alt="Mima" className="w-full h-full object-cover" onError={(e) => {
                 e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
               }} />

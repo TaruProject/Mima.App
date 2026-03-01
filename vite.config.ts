@@ -13,6 +13,11 @@ export default defineConfig(({mode}) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['assets/mima-logo.jpg', 'assets/mima-logo.png'],
+        workbox: {
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+        },
         manifest: {
           name: 'Mima AI',
           short_name: 'Mima',
@@ -22,14 +27,14 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: '/assets/mima-logo.png',
+              src: '/assets/mima-logo.jpg',
               sizes: '192x192',
-              type: 'image/png'
+              type: 'image/jpeg'
             },
             {
-              src: '/assets/mima-logo.png',
+              src: '/assets/mima-logo.jpg',
               sizes: '512x512',
-              type: 'image/png'
+              type: 'image/jpeg'
             }
           ]
         },
