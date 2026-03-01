@@ -119,7 +119,12 @@ export default function Chat() {
           <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-slate-100">
             <Menu className="w-6 h-6" />
           </button>
-          <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-[#6221dd] flex items-center justify-center overflow-hidden">
+              <img src="/assets/mima-logo.png" alt="Mima" className="w-full h-full object-cover scale-[1.25]" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative group">
@@ -158,8 +163,11 @@ export default function Chat() {
             }`}
           >
             {msg.sender === "Mima" && (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20">
-                <span className="text-white text-xs font-bold">M</span>
+              <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
+                <img src="/assets/mima-logo.png" alt="Mima" className="w-full h-full object-cover scale-[1.25]" onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
+                }} />
               </div>
             )}
             <div className={`flex flex-col gap-1 ${msg.sender === "You" ? "items-end" : ""}`}>
@@ -199,8 +207,11 @@ export default function Chat() {
         ))}
         {isLoading && (
           <div className="flex items-start gap-3 max-w-[85%]">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20">
-              <span className="text-white text-xs font-bold">M</span>
+            <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
+              <img src="/assets/mima-logo.png" alt="Mima" className="w-full h-full object-cover scale-[1.25]" onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
+              }} />
             </div>
             <div className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary ml-1">Mima</span>

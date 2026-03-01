@@ -7,6 +7,7 @@ import Inbox from "./pages/Inbox";
 import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
 import UpdateOverlay from "./components/UpdateOverlay";
+import InstallPWA from "./components/InstallPWA";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -45,6 +46,7 @@ function AppRoutes() {
   return (
     <>
       {needsUpdate && <UpdateOverlay onUpdate={handleUpdate} />}
+      <InstallPWA />
       <Routes>
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />
         <Route

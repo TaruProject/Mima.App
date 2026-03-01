@@ -46,8 +46,11 @@ export default function Auth() {
 
         <div className="relative z-10">
           <div className="flex justify-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center shadow-lg shadow-primary/30">
-              <Zap className="w-8 h-8 text-white" />
+            <div className="w-20 h-20 rounded-2xl bg-[#6221dd] flex items-center justify-center shadow-lg shadow-primary/30 overflow-hidden">
+              <img src="/assets/mima-logo.png" alt="Mima Logo" className="w-full h-full object-cover scale-[1.25]" onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-3xl font-bold">M</span>';
+              }} />
             </div>
           </div>
 
