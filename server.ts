@@ -86,26 +86,55 @@ app.get("/api/auth/callback/google", async (req, res) => {
     
     // Send HTML to close the popup window and notify the parent window
     res.send(`
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Authentication Successful</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Conexión Exitosa - Mima AI</title>
           <style>
-            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
-            .container { text-align: center; padding: 2rem; background-color: #1a1820; border-radius: 1rem; border: 1px solid rgba(255,255,255,0.1); }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
+            .container { text-align: center; padding: 2.5rem; background-color: #1a1820; border-radius: 1.5rem; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 90%; width: 400px; }
+            .icon { width: 64px; height: 64px; background-color: #10b981; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 1.5rem; }
+            .icon svg { width: 32px; height: 32px; color: white; }
+            h2 { margin: 0 0 1rem; font-size: 1.5rem; font-weight: 600; }
+            p { margin: 0 0 2rem; color: #94a3b8; line-height: 1.5; }
+            .btn { display: inline-block; background-color: #6221dd; color: white; text-decoration: none; padding: 0.75rem 1.5rem; border-radius: 9999px; font-weight: 500; transition: background-color 0.2s; border: none; cursor: pointer; font-size: 1rem; }
+            .btn:hover { background-color: #501bb5; }
           </style>
         </head>
         <body>
           <div class="container">
-            <h2>Authentication Successful</h2>
-            <p>This window should close automatically.</p>
+            <div class="icon">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <h2>¡Conexión Exitosa!</h2>
+            <p>Tu cuenta de Google se ha conectado correctamente con Mima AI. Esta ventana debería cerrarse automáticamente.</p>
+            <button class="btn" onclick="closeOrRedirect()">Continuar a la aplicación</button>
           </div>
           <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-              setTimeout(() => window.close(), 500);
-            } else {
-              window.location.href = '/';
+            function closeOrRedirect() {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+                window.close();
+              }
+              // If window didn't close (e.g. mobile browser restrictions), redirect
+              setTimeout(() => {
+                window.location.href = '/calendar';
+              }, 300);
             }
+
+            // Auto-execute on load
+            window.onload = () => {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+                setTimeout(() => window.close(), 1000);
+              } else {
+                setTimeout(() => {
+                  window.location.href = '/calendar';
+                }, 1500);
+              }
+            };
           </script>
         </body>
       </html>
@@ -114,26 +143,53 @@ app.get("/api/auth/callback/google", async (req, res) => {
     console.error('Error retrieving access token:', error);
     // Send HTML to close the popup window and notify the parent window of failure
     res.send(`
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Authentication Failed</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Error de Conexión - Mima AI</title>
           <style>
-            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
-            .container { text-align: center; padding: 2rem; background-color: #1a1820; border-radius: 1rem; border: 1px solid rgba(255,0,0,0.3); }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
+            .container { text-align: center; padding: 2.5rem; background-color: #1a1820; border-radius: 1.5rem; border: 1px solid rgba(239,68,68,0.3); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 90%; width: 400px; }
+            .icon { width: 64px; height: 64px; background-color: rgba(239,68,68,0.2); border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 1.5rem; }
+            .icon svg { width: 32px; height: 32px; color: #ef4444; }
+            h2 { margin: 0 0 1rem; font-size: 1.5rem; font-weight: 600; color: #ef4444; }
+            p { margin: 0 0 2rem; color: #94a3b8; line-height: 1.5; }
+            .btn { display: inline-block; background-color: #334155; color: white; text-decoration: none; padding: 0.75rem 1.5rem; border-radius: 9999px; font-weight: 500; transition: background-color 0.2s; border: none; cursor: pointer; font-size: 1rem; }
+            .btn:hover { background-color: #475569; }
           </style>
         </head>
         <body>
           <div class="container">
-            <h2 style="color: #ef4444;">Authentication Failed</h2>
-            <p>Please close this window and try again.</p>
+            <div class="icon">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </div>
+            <h2>Error de Conexión</h2>
+            <p>No se pudo conectar tu cuenta de Google. Por favor, inténtalo de nuevo.</p>
+            <button class="btn" onclick="closeOrRedirect()">Volver a la aplicación</button>
           </div>
           <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
-              setTimeout(() => window.close(), 2000);
-            } else {
-              window.location.href = '/auth?error=auth_failed';
+            function closeOrRedirect() {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
+                window.close();
+              }
+              setTimeout(() => {
+                window.location.href = '/calendar';
+              }, 300);
             }
+
+            window.onload = () => {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
+                setTimeout(() => window.close(), 2000);
+              } else {
+                setTimeout(() => {
+                  window.location.href = '/calendar';
+                }, 3000);
+              }
+            };
           </script>
         </body>
       </html>

@@ -9,8 +9,8 @@ export default function Calendar() {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      // Allow messages from same origin or AI Studio preview
-      if (!event.origin.endsWith('.run.app') && !event.origin.includes('localhost')) {
+      // Allow messages from same origin, AI Studio preview, or the production domain
+      if (!event.origin.endsWith('.run.app') && !event.origin.includes('localhost') && !event.origin.includes('mima-app.com')) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
