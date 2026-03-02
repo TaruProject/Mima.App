@@ -84,12 +84,60 @@ app.get("/auth/callback/google", async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code as string);
     req.session.tokens = tokens;
     
-    // Redirect to the main app (dashboard equivalent)
-    res.redirect('/');
+    // Send HTML to close the popup window and notify the parent window
+    res.send(`
+      <html>
+        <head>
+          <title>Authentication Successful</title>
+          <style>
+            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
+            .container { text-align: center; padding: 2rem; background-color: #1a1820; border-radius: 1rem; border: 1px solid rgba(255,255,255,0.1); }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h2>Authentication Successful</h2>
+            <p>This window should close automatically.</p>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+              setTimeout(() => window.close(), 500);
+            } else {
+              window.location.href = '/';
+            }
+          </script>
+        </body>
+      </html>
+    `);
   } catch (error) {
     console.error('Error retrieving access token:', error);
-    // Redirect back to login with error parameter
-    res.redirect('/auth?error=auth_failed');
+    // Send HTML to close the popup window and notify the parent window of failure
+    res.send(`
+      <html>
+        <head>
+          <title>Authentication Failed</title>
+          <style>
+            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
+            .container { text-align: center; padding: 2rem; background-color: #1a1820; border-radius: 1rem; border: 1px solid rgba(255,0,0,0.3); }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h2 style="color: #ef4444;">Authentication Failed</h2>
+            <p>Please close this window and try again.</p>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
+              setTimeout(() => window.close(), 2000);
+            } else {
+              window.location.href = '/auth?error=auth_failed';
+            }
+          </script>
+        </body>
+      </html>
+    `);
   }
 });
 
