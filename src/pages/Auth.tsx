@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Zap, Mail, Lock, Loader2 } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
@@ -8,6 +9,18 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const urlError = searchParams.get('error');
+    if (urlError === 'auth_failed') {
+      setError('Google authentication failed. Please try again.');
+      // Remove the error from URL so it doesn't persist on refresh
+      searchParams.delete('error');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();

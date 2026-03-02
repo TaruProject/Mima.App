@@ -69,30 +69,27 @@ app.get("/api/auth/url", (req, res) => {
 });
 
 app.get("/auth/callback/google", async (req, res) => {
-  const { code } = req.query;
+  const { code, error } = req.query;
+  
   try {
+    if (error) {
+      throw new Error(`Google OAuth error: ${error}`);
+    }
+    
+    if (!code) {
+      throw new Error("No authorization code provided");
+    }
+
     const oauth2Client = getOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code as string);
     req.session.tokens = tokens;
     
-    res.send(`
-      <html>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
-          <p>Authentication successful. This window should close automatically.</p>
-        </body>
-      </html>
-    `);
+    // Redirect to the main app (dashboard equivalent)
+    res.redirect('/');
   } catch (error) {
-    console.error('Error retrieving access token', error);
-    res.status(500).send('Authentication failed');
+    console.error('Error retrieving access token:', error);
+    // Redirect back to login with error parameter
+    res.redirect('/auth?error=auth_failed');
   }
 });
 
