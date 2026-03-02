@@ -12,7 +12,7 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['logo.jpg', 'assets/mima-logo.jpg', 'assets/mima-logo.png'],
+        includeAssets: ['assets/logo.jpg', 'assets/mima-logo.jpg', 'assets/mima-logo.png'],
         workbox: {
           cleanupOutdatedCaches: true,
           skipWaiting: true,
@@ -27,12 +27,12 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: '/logo.jpg',
+              src: '/assets/logo.jpg',
               sizes: '192x192',
               type: 'image/jpeg'
             },
             {
-              src: '/logo.jpg',
+              src: '/assets/logo.jpg',
               sizes: '512x512',
               type: 'image/jpeg'
             }

@@ -47,7 +47,7 @@ export default function Auth() {
         <div className="relative z-10">
           <div className="flex justify-center mb-8">
             <div className="w-20 h-20 rounded-2xl bg-[#6221dd] flex items-center justify-center shadow-lg shadow-primary/50 overflow-hidden">
-              <img src="/logo.jpg?v=3" alt="Mima Logo" className="w-full h-full object-cover" onError={(e) => {
+              <img src="/assets/logo.jpg?v=4" alt="Mima Logo" className="w-full h-full object-cover" onError={(e) => {
                 e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-3xl font-bold">M</span>';
               }} />
