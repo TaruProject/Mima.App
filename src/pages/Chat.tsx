@@ -114,6 +114,7 @@ export default function Chat() {
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, audio: audioData } : m));
       } else {
         setPlayingAudio(null);
+        alert("Error: No se pudo generar el audio. Verifica que el servidor backend esté corriendo y que la API key de ElevenLabs esté configurada.");
         return;
       }
     }
