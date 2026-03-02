@@ -108,9 +108,9 @@ export default function Chat() {
     
     if (!audioData) {
       setPlayingAudio("loading-" + msgId);
-      const base64Audio = await generateSpeech(text, voiceId);
-      if (base64Audio) {
-        audioData = `data:audio/pcm;rate=24000;base64,${base64Audio}`;
+      const generatedAudio = await generateSpeech(text, voiceId);
+      if (generatedAudio) {
+        audioData = generatedAudio;
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, audio: audioData } : m));
       } else {
         setPlayingAudio(null);
