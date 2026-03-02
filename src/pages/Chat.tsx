@@ -139,7 +139,7 @@ export default function Chat() {
           </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-[#6221dd] flex items-center justify-center overflow-hidden">
-              <img src="/assets/logo.jpg?v=5" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              <img src="https://me.mima-app.com/assets/logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
           </div>
@@ -196,10 +196,7 @@ export default function Chat() {
           >
             {msg.sender === "Mima" && (
               <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
-                <img src="/assets/logo.jpg?v=5" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
-                }} />
+                <img src="https://me.mima-app.com/assets/logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
               </div>
             )}
             <div className={`flex flex-col gap-1 ${msg.sender === "You" ? "items-end" : ""}`}>
@@ -242,10 +239,7 @@ export default function Chat() {
         {isLoading && (
           <div className="flex items-start gap-3 max-w-[85%]">
             <div className="w-8 h-8 rounded-full bg-[#6221dd] shrink-0 flex items-center justify-center shadow-lg shadow-purple-900/20 overflow-hidden">
-              <img src="/assets/logo.jpg?v=5" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement!.innerHTML = '<span class="text-white text-xs font-bold">M</span>';
-              }} />
+              <img src="https://me.mima-app.com/assets/logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary ml-1">Mima</span>

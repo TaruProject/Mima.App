@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Priorizar archivos físicos (Imágenes, CSS, JS)
+# Esto evita el error "Invalid source image" al saltarse el proceso de Node.js
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# Regla existente para el Proxy de Node.js
+RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
