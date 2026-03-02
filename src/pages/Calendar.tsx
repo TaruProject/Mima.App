@@ -51,19 +51,25 @@ export default function Calendar() {
 
   const handleConnect = async () => {
     try {
-      const response = await fetch('/api/auth/url');
-      if (!response.ok) throw new Error('Failed to get auth URL');
-      const { url } = await response.json();
-      
       const authWindow = window.open(
-        url,
+        '',
         'oauth_popup',
         'width=600,height=700'
       );
       
       if (!authWindow) {
         alert('Please allow popups for this site to connect your account.');
+        return;
       }
+
+      const response = await fetch('/api/auth/url');
+      if (!response.ok) {
+        authWindow.close();
+        throw new Error('Failed to get auth URL');
+      }
+      const { url } = await response.json();
+      
+      authWindow.location.href = url;
     } catch (error) {
       console.error('OAuth error:', error);
     }

@@ -2,7 +2,7 @@ import { RefreshCw, Download } from "lucide-react";
 
 export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
   return (
-    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-in fade-in duration-300">
       <div className="w-full max-w-sm bg-surface-dark border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col relative">
         <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary/20 to-transparent pointer-events-none"></div>
         

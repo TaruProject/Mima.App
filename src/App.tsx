@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useRegisterSW } from "virtual:pwa-register/react";
 import Layout from "./components/Layout";
 import Chat from "./pages/Chat";
 import Calendar from "./pages/Calendar";
@@ -29,23 +30,52 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const [needsUpdate, setNeedsUpdate] = useState(false);
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegistered(r) {
+      if (r) {
+        setInterval(() => {
+          r.update();
+        }, 15 * 60 * 1000); // Check every 15 minutes
+      }
+    },
+    onRegisterError(error) {
+      console.log('SW registration error', error);
+    },
+  });
+
   const { user } = useAuth();
 
   useEffect(() => {
-    const checkVersion = async () => {
-      // In a real app, this would fetch from an API
+    // Check for updates when the app comes back to focus
+    const handleFocus = () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((registration) => {
+          registration.update();
+        });
+      }
     };
-    checkVersion();
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        handleFocus();
+      }
+    });
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+    };
   }, []);
 
   const handleUpdate = () => {
-    window.location.reload();
+    updateServiceWorker(true);
   };
 
   return (
     <>
-      {needsUpdate && <UpdateOverlay onUpdate={handleUpdate} />}
+      {needRefresh && <UpdateOverlay onUpdate={handleUpdate} />}
       <InstallPWA />
       <Routes>
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />

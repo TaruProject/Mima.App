@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Menu, Settings, Mic, ArrowUp, Plus, Volume2 } from "lucide-react";
 import { generateChatResponse, generateSpeech } from "../services/geminiService";
+import Markdown from "react-markdown";
 
 export default function Chat() {
   const [messages, setMessages] = useState([
@@ -14,10 +15,27 @@ export default function Chat() {
   ]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState("Neutral Mode");
+  const [voiceId, setVoiceId] = useState(() => localStorage.getItem('mima_voice_id') || "DODLEQrClDo8wCz460ld");
   const [isLoading, setIsLoading] = useState(false);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const voices = [
+    { id: "DODLEQrClDo8wCz460ld", name: "Mima US-1" },
+    { id: "L0yTtpRXzdyzQlzALhgD", name: "Mima US-2" },
+    { id: "d3MFdIuCfbAIwiu7jC4a", name: "Mima US-3" },
+    { id: "l4Coq6695JDX9xtLqXDE", name: "Mima US-4" },
+    { id: "jP5jSWhfXz3nfQENMtf4", name: "Mima UK-1" },
+    { id: "ZtcPZrt9K4w8e1OB9M6w", name: "Mima UK-2" },
+    { id: "6fZce9LFNG3iEITDfqZZ", name: "Mima UK-3" },
+  ];
+
+  const handleVoiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newVoiceId = e.target.value;
+    setVoiceId(newVoiceId);
+    localStorage.setItem('mima_voice_id', newVoiceId);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,7 +108,7 @@ export default function Chat() {
     
     if (!audioData) {
       setPlayingAudio("loading-" + msgId);
-      const base64Audio = await generateSpeech(text);
+      const base64Audio = await generateSpeech(text, voiceId);
       if (base64Audio) {
         audioData = `data:audio/pcm;rate=24000;base64,${base64Audio}`;
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, audio: audioData } : m));
@@ -127,6 +145,20 @@ export default function Chat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative group hidden sm:block">
+            <select 
+              value={voiceId}
+              onChange={handleVoiceChange}
+              className="appearance-none bg-transparent pl-3 pr-8 py-1.5 text-sm font-medium text-text-secondary border border-surface-highlight rounded-full focus:outline-none focus:border-primary transition-colors cursor-pointer"
+            >
+              {voices.map(v => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+          </div>
           <div className="relative group">
             <select 
               value={mode}
@@ -181,7 +213,9 @@ export default function Chat() {
                     : "bg-surface-highlight text-slate-100 rounded-tl-sm"
                 }`}
               >
-                {msg.text}
+                <div className="markdown-body">
+                  <Markdown>{msg.text}</Markdown>
+                </div>
               </div>
               <div className={`flex items-center gap-2 ${msg.sender === "You" ? "mr-1" : "ml-1"}`}>
                 <span className="text-xs text-text-secondary">

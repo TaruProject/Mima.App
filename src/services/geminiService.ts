@@ -42,14 +42,14 @@ export async function generateChatResponse(
   return response.text || "I'm sorry, I couldn't process that.";
 }
 
-export async function generateSpeech(text: string): Promise<string | null> {
+export async function generateSpeech(text: string, voiceId?: string): Promise<string | null> {
   try {
     const response = await fetch('/api/tts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, voiceId }),
     });
 
     if (!response.ok) {

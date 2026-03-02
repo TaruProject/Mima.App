@@ -101,16 +101,15 @@ app.get("/api/auth/status", (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
-  const { text } = req.body;
+  const { text, voiceId } = req.body;
   
   if (!process.env.ELEVENLABS_API_KEY) {
     return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
   }
 
   try {
-    // Using a default voice ID (Rachel). You can change this to any voice ID from your ElevenLabs account.
-    const voiceId = "21m00Tcm4TlvDq8ikWAM"; 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld"; 
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
       method: 'POST',
       headers: {
         'Accept': 'audio/mpeg',

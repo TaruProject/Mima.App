@@ -11,19 +11,17 @@ export default defineConfig(({mode}) => {
       react(), 
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         includeAssets: ['assets/logo.jpg', 'assets/mima-logo.jpg', 'assets/mima-logo.png'],
         workbox: {
           cleanupOutdatedCaches: true,
-          skipWaiting: true,
-          clientsClaim: true,
         },
         manifest: {
           name: 'Mima AI',
           short_name: 'Mima',
           description: 'Your personal AI assistant.',
-          theme_color: '#ffffff',
-          background_color: '#ffffff',
+          theme_color: '#131117',
+          background_color: '#131117',
           display: 'standalone',
           icons: [
             {
