@@ -102,7 +102,7 @@ function AppRoutes() {
       {needRefresh && <UpdateOverlay onUpdate={handleUpdate} />}
       <InstallPWA />
       <Routes>
-        <Route path="/auth/callback/google" element={<OAuthCallbackFallback />} />
+        <Route path="/api/auth/callback/google" element={<OAuthCallbackFallback />} />
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />
         <Route
           path="/"

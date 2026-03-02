@@ -35,7 +35,7 @@ declare module 'express-session' {
 }
 
 const getOAuth2Client = () => {
-  const redirectUri = "https://me.mima-app.com/auth/callback/google";
+  const redirectUri = "https://me.mima-app.com/api/auth/callback/google";
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -68,7 +68,7 @@ app.get("/api/auth/url", (req, res) => {
   }
 });
 
-app.get("/auth/callback/google", async (req, res) => {
+app.get("/api/auth/callback/google", async (req, res) => {
   const { code, error } = req.query;
   
   try {
