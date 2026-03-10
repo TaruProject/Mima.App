@@ -5,6 +5,8 @@ import session from "express-session";
 import { google } from "googleapis";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +15,30 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET || 'mima-super-secret-key-2026', 'salt', 32);
+const IV_LENGTH = 16;
+
+function encrypt(text: string) {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decrypt(text: string) {
+  const textParts = text.split(':');
+  const iv = Buffer.from(textParts.shift()!, 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+}
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 
 app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
@@ -69,6 +95,7 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/auth/url", (req, res) => {
   try {
+    const { user_id } = req.query;
     const oauth2Client = getOAuth2Client(req);
     const scopes = [
       'https://www.googleapis.com/auth/calendar.readonly',
@@ -78,7 +105,8 @@ app.get("/api/auth/url", (req, res) => {
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
-      prompt: 'consent'
+      prompt: 'consent',
+      state: user_id as string || ''
     });
     console.log("Generated Auth URL:", url);
     res.json({ url });
@@ -107,8 +135,8 @@ app.get("/api/debug", (req, res) => {
 });
 
 app.get("/api/auth/callback/google", async (req, res) => {
-  const { code, error } = req.query;
-  console.log("OAuth callback received", { code: code ? "present" : "absent", error });
+  const { code, error, state } = req.query;
+  console.log("OAuth callback received", { code: code ? "present" : "absent", error, state });
   
   try {
     if (error) {
@@ -123,6 +151,28 @@ app.get("/api/auth/callback/google", async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("Tokens retrieved successfully");
     req.session.tokens = tokens;
+
+    // Save tokens to Supabase if user_id (state) is provided
+    if (state && supabaseUrl && supabaseAnonKey) {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      
+      // We need to encrypt the tokens before saving
+      const encryptedTokens = encrypt(JSON.stringify(tokens));
+      
+      const { error: dbError } = await supabase
+        .from('user_google_tokens')
+        .upsert({ 
+          user_id: state as string, 
+          tokens: encryptedTokens,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+        
+      if (dbError) {
+        console.error("Failed to save tokens to Supabase:", dbError);
+      } else {
+        console.log("Tokens saved to Supabase successfully");
+      }
+    }
     
     // Simplified HTML to ensure it works even in restrictive environments
     res.send(`
@@ -185,8 +235,40 @@ app.get("/api/auth/callback/google", async (req, res) => {
   }
 });
 
-app.get("/api/auth/status", (req, res) => {
-  res.json({ isConnected: !!req.session.tokens });
+app.get("/api/auth/status", async (req, res) => {
+  const { user_id } = req.query;
+  
+  // If we already have tokens in session, we're connected
+  if (req.session.tokens) {
+    return res.json({ isConnected: true });
+  }
+  
+  // If no user_id provided, we can't check Supabase
+  if (!user_id || !supabaseUrl || !supabaseAnonKey) {
+    return res.json({ isConnected: false });
+  }
+  
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data, error } = await supabase
+      .from('user_google_tokens')
+      .select('tokens')
+      .eq('user_id', user_id as string)
+      .single();
+      
+    if (error || !data || !data.tokens) {
+      return res.json({ isConnected: false });
+    }
+    
+    // Decrypt tokens and save to session
+    const decryptedTokens = JSON.parse(decrypt(data.tokens));
+    req.session.tokens = decryptedTokens;
+    
+    return res.json({ isConnected: true });
+  } catch (error) {
+    console.error("Error checking token status in Supabase:", error);
+    return res.json({ isConnected: false });
+  }
 });
 
 app.post("/api/tts", async (req, res) => {

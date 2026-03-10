@@ -11,8 +11,6 @@ import UpdateOverlay from "./components/UpdateOverlay";
 import InstallPWA from "./components/InstallPWA";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
-import { GoogleOAuthProvider } from '@react-oauth/google';
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
 
@@ -100,15 +98,11 @@ function AppRoutes() {
 }
 
 export default function App() {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
-  
   return (
-    <GoogleOAuthProvider clientId={clientId}>
-      <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </AuthProvider>
-    </GoogleOAuthProvider>
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

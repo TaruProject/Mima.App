@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Menu, Settings, Mic, ArrowUp, Plus, Volume2 } from "lucide-react";
+import { Menu, Settings, Mic, ArrowUp, Plus, Volume2, Square, Play } from "lucide-react";
 import { generateChatResponse, generateSpeech } from "../services/geminiService";
 import Markdown from "react-markdown";
 
@@ -15,9 +15,16 @@ export default function Chat() {
   ]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState("Neutral Mode");
-  const [voiceId, setVoiceId] = useState(() => localStorage.getItem('mima_voice_id') || "DODLEQrClDo8wCz460ld");
+  const [voiceId, setVoiceId] = useState(() => {
+    try {
+      return localStorage.getItem('mima_voice_id') || "DODLEQrClDo8wCz460ld";
+    } catch (e) {
+      return "DODLEQrClDo8wCz460ld";
+    }
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -34,7 +41,11 @@ export default function Chat() {
   const handleVoiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newVoiceId = e.target.value;
     setVoiceId(newVoiceId);
-    localStorage.setItem('mima_voice_id', newVoiceId);
+    try {
+      localStorage.setItem('mima_voice_id', newVoiceId);
+    } catch (e) {
+      // Ignore
+    }
   };
 
   const scrollToBottom = () => {
@@ -44,6 +55,28 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const updateProgress = () => {
+      if (audioRef.current && playingAudio && !playingAudio.startsWith('loading-')) {
+        const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+        setAudioProgress(isNaN(progress) ? 0 : progress);
+        animationFrameId = requestAnimationFrame(updateProgress);
+      }
+    };
+
+    if (playingAudio && !playingAudio.startsWith('loading-')) {
+      animationFrameId = requestAnimationFrame(updateProgress);
+    } else {
+      setAudioProgress(0);
+    }
+
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [playingAudio]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -94,15 +127,26 @@ export default function Chat() {
     }
   };
 
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setPlayingAudio(null);
+    setAudioProgress(0);
+  };
+
   const handlePlayAudio = async (msgId: number, text: string) => {
     const msg = messages.find(m => m.id === msgId);
     if (!msg) return;
 
     if (playingAudio === msgId.toString()) {
-      audioRef.current?.pause();
-      setPlayingAudio(null);
+      stopAudio();
       return;
     }
+
+    // Stop any currently playing audio
+    stopAudio();
 
     let audioData = msg.audio;
     
@@ -120,14 +164,14 @@ export default function Chat() {
     }
 
     if (audioData) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
       const audio = new Audio(audioData);
       audioRef.current = audio;
       audio.play();
       setPlayingAudio(msgId.toString());
-      audio.onended = () => setPlayingAudio(null);
+      audio.onended = () => {
+        setPlayingAudio(null);
+        setAudioProgress(0);
+      };
     }
   };
 
@@ -220,18 +264,36 @@ export default function Chat() {
                   {msg.time}
                 </span>
                 {msg.sender === "Mima" && (
-                  <button 
-                    onClick={() => handlePlayAudio(msg.id, msg.text)}
-                    className={`p-1 rounded-full transition-colors ${
-                      playingAudio === msg.id.toString() 
-                        ? "text-primary bg-primary/10" 
-                        : playingAudio === "loading-" + msg.id
-                        ? "text-text-secondary animate-pulse"
-                        : "text-text-secondary hover:bg-surface-highlight hover:text-white"
-                    }`}
-                  >
-                    <Volume2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button 
+                      onClick={() => handlePlayAudio(msg.id, msg.text)}
+                      className={`p-1.5 rounded-full transition-all ${
+                        playingAudio === msg.id.toString() 
+                          ? "text-primary bg-primary/10 hover:bg-primary/20" 
+                          : playingAudio === "loading-" + msg.id
+                          ? "text-text-secondary animate-pulse"
+                          : "text-text-secondary hover:bg-surface-highlight hover:text-white"
+                      }`}
+                      title={playingAudio === msg.id.toString() ? "Stop audio" : "Play audio"}
+                    >
+                      {playingAudio === msg.id.toString() ? (
+                        <Square className="w-4 h-4 fill-current" />
+                      ) : playingAudio === "loading-" + msg.id ? (
+                        <div className="w-4 h-4 border-2 border-text-secondary border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <Play className="w-4 h-4 fill-current ml-0.5" />
+                      )}
+                    </button>
+                    
+                    {playingAudio === msg.id.toString() && (
+                      <div className="w-24 h-1.5 bg-surface-highlight rounded-full overflow-hidden ml-1">
+                        <div 
+                          className="h-full bg-primary transition-all duration-100 ease-linear"
+                          style={{ width: `${audioProgress}%` }}
+                        ></div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -1,71 +1,47 @@
 import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useGoogleLogin } from '@react-oauth/google';
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Inbox() {
   const [isConnected, setIsConnected] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
-    // Check if we have a saved token in localStorage
-    const savedToken = localStorage.getItem('google_access_token');
-    if (savedToken) {
-      setAccessToken(savedToken);
-      setIsConnected(true);
+    if (user) {
+      checkConnectionStatus();
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (isConnected && accessToken) {
-      fetchEmails(accessToken);
+    if (isConnected) {
+      fetchEmails();
     }
-  }, [isConnected, accessToken]);
+  }, [isConnected]);
 
-  const fetchEmails = async (token: string) => {
+  const checkConnectionStatus = async () => {
+    try {
+      const response = await fetch(`/api/auth/status?user_id=${user?.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setIsConnected(data.isConnected);
+      }
+    } catch (error) {
+      console.error("Failed to check status", error);
+    }
+  };
+
+  const fetchEmails = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5&q=is:unread`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await fetch('/api/gmail/messages');
 
       if (response.ok) {
         const data = await response.json();
-        
-        if (data.messages) {
-          const messagesData = await Promise.all(
-            data.messages.map(async (msg: any) => {
-              const msgResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-              });
-              const msgData = await msgResponse.json();
-              
-              const headers = msgData.payload?.headers;
-              const subject = headers?.find((h: any) => h.name === 'Subject')?.value || 'No Subject';
-              const fromHeader = headers?.find((h: any) => h.name === 'From')?.value || 'Unknown';
-              const date = headers?.find((h: any) => h.name === 'Date')?.value || '';
-              
-              // Clean up "From" name
-              const fromMatch = fromHeader.match(/^(.*?)\s*</);
-              const from = fromMatch ? fromMatch[1].replace(/"/g, '') : fromHeader;
-              
-              return { id: msg.id, subject, from, date, snippet: msgData.snippet };
-            })
-          );
-          setEmails(messagesData);
-        } else {
-          setEmails([]);
-        }
+        setEmails(data || []);
       } else if (response.status === 401) {
-        // Token expired
         setIsConnected(false);
-        setAccessToken(null);
-        localStorage.removeItem('google_access_token');
       }
     } catch (error) {
       console.error("Failed to fetch emails", error);
@@ -74,15 +50,39 @@ export default function Inbox() {
     }
   };
 
-  const handleConnect = useGoogleLogin({
-    onSuccess: (tokenResponse) => {
-      setAccessToken(tokenResponse.access_token);
-      setIsConnected(true);
-      localStorage.setItem('google_access_token', tokenResponse.access_token);
-    },
-    onError: (error) => console.log('Login Failed:', error),
-    scope: 'https://www.googleapis.com/auth/gmail.readonly',
-  });
+  const handleConnect = async () => {
+    try {
+      const response = await fetch(`/api/auth/url?user_id=${user?.id}`);
+      if (!response.ok) {
+        throw new Error('Failed to get auth URL');
+      }
+      const { url } = await response.json();
+
+      const authWindow = window.open(
+        url,
+        'oauth_popup',
+        'width=600,height=700'
+      );
+
+      if (!authWindow) {
+        alert('Please allow popups for this site to connect your account.');
+      }
+    } catch (error) {
+      console.error('OAuth error:', error);
+    }
+  };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        setIsConnected(true);
+      } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
+        alert('Authentication failed. Please try again.');
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
