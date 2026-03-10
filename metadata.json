@@ -1,5 +1,5 @@
 {
   "name": "Mima AI Assistant",
   "description": "A high-efficiency personal assistant PWA managed entirely via chat interface.",
-  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+  "requestFramePermissions": []
 }
