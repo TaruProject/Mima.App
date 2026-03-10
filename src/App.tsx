@@ -11,29 +11,7 @@ import UpdateOverlay from "./components/UpdateOverlay";
 import InstallPWA from "./components/InstallPWA";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
-// Fallback component if the backend is not running and React handles the callback
-function OAuthCallbackFallback() {
-  return (
-    <div className="min-h-screen bg-background-dark flex flex-col items-center justify-center text-center p-6">
-      <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
-        <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      </div>
-      <h2 className="text-xl font-bold text-white mb-2">Backend Not Running</h2>
-      <p className="text-slate-400 max-w-md">
-        The Google authentication callback reached the frontend React app instead of the Express backend. 
-        This means your Node.js server (server.ts) is not running on your hosting provider.
-      </p>
-      <button 
-        onClick={() => window.close()}
-        className="mt-8 px-6 py-2 bg-surface-highlight text-white rounded-full hover:bg-surface-light transition-colors"
-      >
-        Close Window
-      </button>
-    </div>
-  );
-}
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -102,7 +80,6 @@ function AppRoutes() {
       {needRefresh && <UpdateOverlay onUpdate={handleUpdate} />}
       <InstallPWA />
       <Routes>
-        <Route path="/api/auth/callback/google" element={<OAuthCallbackFallback />} />
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />
         <Route
           path="/"
@@ -123,11 +100,15 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
+  
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <GoogleOAuthProvider clientId={clientId}>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }

@@ -1,45 +1,71 @@
 import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useGoogleLogin } from '@react-oauth/google';
 
 export default function Inbox() {
   const [isConnected, setIsConnected] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // Allow messages from same origin, AI Studio preview, or the production domain
-      if (!event.origin.endsWith('.run.app') && !event.origin.includes('localhost') && !event.origin.includes('mima-app.com')) {
-        return;
-      }
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        setIsConnected(true);
-        fetchEmails();
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    
-    // Check initial status
-    fetch('/api/auth/status')
-      .then(res => res.json())
-      .then(data => {
-        setIsConnected(data.isConnected);
-        if (data.isConnected) fetchEmails();
-      })
-      .catch(err => console.error("Error checking auth status", err));
-      
-    return () => window.removeEventListener('message', handleMessage);
+    // Check if we have a saved token in localStorage
+    const savedToken = localStorage.getItem('google_access_token');
+    if (savedToken) {
+      setAccessToken(savedToken);
+      setIsConnected(true);
+    }
   }, []);
 
-  const fetchEmails = async () => {
+  useEffect(() => {
+    if (isConnected && accessToken) {
+      fetchEmails(accessToken);
+    }
+  }, [isConnected, accessToken]);
+
+  const fetchEmails = async (token: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/gmail/messages');
-      if (res.ok) {
-        const data = await res.json();
-        setEmails(data);
-      } else if (res.status === 401) {
+      const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5&q=is:unread`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.messages) {
+          const messagesData = await Promise.all(
+            data.messages.map(async (msg: any) => {
+              const msgResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              });
+              const msgData = await msgResponse.json();
+              
+              const headers = msgData.payload?.headers;
+              const subject = headers?.find((h: any) => h.name === 'Subject')?.value || 'No Subject';
+              const fromHeader = headers?.find((h: any) => h.name === 'From')?.value || 'Unknown';
+              const date = headers?.find((h: any) => h.name === 'Date')?.value || '';
+              
+              // Clean up "From" name
+              const fromMatch = fromHeader.match(/^(.*?)\s*</);
+              const from = fromMatch ? fromMatch[1].replace(/"/g, '') : fromHeader;
+              
+              return { id: msg.id, subject, from, date, snippet: msgData.snippet };
+            })
+          );
+          setEmails(messagesData);
+        } else {
+          setEmails([]);
+        }
+      } else if (response.status === 401) {
+        // Token expired
         setIsConnected(false);
+        setAccessToken(null);
+        localStorage.removeItem('google_access_token');
       }
     } catch (error) {
       console.error("Failed to fetch emails", error);
@@ -48,31 +74,15 @@ export default function Inbox() {
     }
   };
 
-  const handleConnect = async () => {
-    try {
-      const authWindow = window.open(
-        '',
-        'oauth_popup',
-        'width=600,height=700'
-      );
-      
-      if (!authWindow) {
-        alert('Please allow popups for this site to connect your account.');
-        return;
-      }
-
-      const response = await fetch('/api/auth/url');
-      if (!response.ok) {
-        authWindow.close();
-        throw new Error('Failed to get auth URL');
-      }
-      const { url } = await response.json();
-      
-      authWindow.location.href = url;
-    } catch (error) {
-      console.error('OAuth error:', error);
-    }
-  };
+  const handleConnect = useGoogleLogin({
+    onSuccess: (tokenResponse) => {
+      setAccessToken(tokenResponse.access_token);
+      setIsConnected(true);
+      localStorage.setItem('google_access_token', tokenResponse.access_token);
+    },
+    onError: (error) => console.log('Login Failed:', error),
+    scope: 'https://www.googleapis.com/auth/gmail.readonly',
+  });
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
@@ -117,7 +127,7 @@ export default function Inbox() {
               Link your Google account to allow Mima to read, summarize, and draft replies to your emails.
             </p>
             <button 
-              onClick={handleConnect}
+              onClick={() => handleConnect()}
               className="w-full py-3 px-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">

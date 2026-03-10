@@ -46,30 +46,6 @@ export async function generateSpeech(text: string, voiceId?: string): Promise<st
   const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld";
   
   try {
-    // Try backend first
-    const response = await fetch('/api/tts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text, voiceId: selectedVoiceId }),
-    });
-
-    // If backend returns HTML (SPA fallback) or fails, it means backend is not running
-    const contentType = response.headers.get("content-type");
-    if (response.ok && contentType && contentType.includes("application/json")) {
-      const data = await response.json();
-      if (data.audio) return data.audio;
-    }
-    
-    console.warn("Backend TTS failed or not available, falling back to direct API call...");
-  } catch (error) {
-    console.warn("Backend TTS error, falling back to direct API call...", error);
-  }
-
-  // Fallback: Direct call to ElevenLabs from frontend
-  try {
-    // We try to use VITE_ELEVENLABS_API_KEY if available in the environment
     const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
     
     if (!apiKey) {
@@ -95,10 +71,12 @@ export async function generateSpeech(text: string, voiceId?: string): Promise<st
     });
 
     if (!response.ok) {
-      console.error("Direct ElevenLabs API failed:", response.status);
+      const errorText = await response.text();
+      console.error(`Direct ElevenLabs API failed with status ${response.status}:`, errorText);
       return null;
     }
 
+    console.log("Direct ElevenLabs API success, processing audio...");
     const arrayBuffer = await response.arrayBuffer();
     
     // Convert ArrayBuffer to Base64 in the browser

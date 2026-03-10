@@ -60,7 +60,7 @@ export default function Auth() {
         <div className="relative z-10">
           <div className="flex justify-center mb-8">
             <div className="w-20 h-20 rounded-2xl bg-[#6221dd] flex items-center justify-center shadow-lg shadow-primary/50 overflow-hidden">
-              <img src="/assets/mima-logo.jpg?v=2" alt="Mima Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              <img src="/assets/logo.jpg?v=4" alt="Mima Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
           </div>
 

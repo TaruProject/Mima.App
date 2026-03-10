@@ -12,7 +12,7 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'prompt',
-        includeAssets: ['assets/mima-logo.jpg'],
+        includeAssets: ['assets/logo.jpg'],
         workbox: {
           cleanupOutdatedCaches: true,
         },
@@ -25,12 +25,12 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: '/assets/mima-logo.jpg?v=2',
+              src: '/assets/logo.jpg?v=4',
               sizes: '192x192',
               type: 'image/jpeg'
             },
             {
-              src: '/assets/mima-logo.jpg?v=2',
+              src: '/assets/logo.jpg?v=4',
               sizes: '512x512',
               type: 'image/jpeg'
             }
@@ -50,8 +50,7 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      allowedHosts: true,
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

@@ -34,8 +34,17 @@ declare module 'express-session' {
   }
 }
 
-const getOAuth2Client = () => {
-  const redirectUri = "https://me.mima-app.com/api/auth/callback/google";
+const getOAuth2Client = (req?: express.Request) => {
+  // Use APP_URL if set, otherwise try to derive from request or fallback to default
+  let baseUrl = process.env.APP_URL || "https://me.mima-app.com";
+  
+  // Ensure no trailing slash
+  baseUrl = baseUrl.replace(/\/$/, "");
+  
+  const redirectUri = `${baseUrl}/api/auth/callback/google`;
+  
+  console.log(`Using redirectUri: ${redirectUri}`);
+  
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -45,12 +54,22 @@ const getOAuth2Client = () => {
 
 // API routes FIRST
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+  console.log("Health check requested");
+  res.json({ 
+    status: "ok", 
+    env: {
+      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
+      hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+      hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+      appUrl: process.env.APP_URL,
+      nodeEnv: process.env.NODE_ENV
+    }
+  });
 });
 
 app.get("/api/auth/url", (req, res) => {
   try {
-    const oauth2Client = getOAuth2Client();
+    const oauth2Client = getOAuth2Client(req);
     const scopes = [
       'https://www.googleapis.com/auth/calendar.readonly',
       'https://www.googleapis.com/auth/gmail.readonly',
@@ -61,15 +80,35 @@ app.get("/api/auth/url", (req, res) => {
       scope: scopes,
       prompt: 'consent'
     });
+    console.log("Generated Auth URL:", url);
     res.json({ url });
   } catch (error) {
     console.error('Error generating auth url', error);
-    res.status(500).json({ error: "Failed to generate auth url" });
+    res.status(500).json({ error: "Failed to generate auth url", details: error instanceof Error ? error.message : String(error) });
   }
+});
+
+app.get("/api/debug", (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      APP_URL: process.env.APP_URL,
+      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
+      hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+      hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+      hasGeminiKey: !!process.env.GEMINI_API_KEY,
+      hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
+      hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY
+    },
+    headers: req.headers,
+    session: !!req.session
+  });
 });
 
 app.get("/api/auth/callback/google", async (req, res) => {
   const { code, error } = req.query;
+  console.log("OAuth callback received", { code: code ? "present" : "absent", error });
   
   try {
     if (error) {
@@ -80,59 +119,43 @@ app.get("/api/auth/callback/google", async (req, res) => {
       throw new Error("No authorization code provided");
     }
 
-    const oauth2Client = getOAuth2Client();
+    const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
+    console.log("Tokens retrieved successfully");
     req.session.tokens = tokens;
     
-    // Send HTML to close the popup window and notify the parent window
+    // Simplified HTML to ensure it works even in restrictive environments
     res.send(`
       <!DOCTYPE html>
       <html>
         <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>Conexión Exitosa - Mima AI</title>
+          <title>Mima AI - Autenticación</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
-            .container { text-align: center; padding: 2.5rem; background-color: #1a1820; border-radius: 1.5rem; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 90%; width: 400px; }
-            .icon { width: 64px; height: 64px; background-color: #10b981; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 1.5rem; }
-            .icon svg { width: 32px; height: 32px; color: white; }
-            h2 { margin: 0 0 1rem; font-size: 1.5rem; font-weight: 600; }
-            p { margin: 0 0 2rem; color: #94a3b8; line-height: 1.5; }
-            .btn { display: inline-block; background-color: #6221dd; color: white; text-decoration: none; padding: 0.75rem 1.5rem; border-radius: 9999px; font-weight: 500; transition: background-color 0.2s; border: none; cursor: pointer; font-size: 1rem; }
-            .btn:hover { background-color: #501bb5; }
+            body { background: #131117; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #1a1820; padding: 2rem; border-radius: 1rem; text-align: center; border: 1px solid #333; }
+            .btn { background: #6221dd; color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 2rem; cursor: pointer; font-weight: bold; margin-top: 1rem; }
           </style>
         </head>
         <body>
-          <div class="container">
-            <div class="icon">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
-            </div>
+          <div class="card">
             <h2>¡Conexión Exitosa!</h2>
-            <p>Tu cuenta de Google se ha conectado correctamente con Mima AI. Esta ventana debería cerrarse automáticamente.</p>
-            <button class="btn" onclick="closeOrRedirect()">Continuar a la aplicación</button>
+            <p>Se ha conectado con Google correctamente.</p>
+            <button class="btn" onclick="finish()">Volver a Mima</button>
           </div>
           <script>
-            function closeOrRedirect() {
-              if (window.opener && !window.opener.closed) {
+            function finish() {
+              if (window.opener) {
                 window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
                 window.close();
               }
-              // If window didn't close (e.g. mobile browser restrictions), redirect
-              setTimeout(() => {
-                window.location.href = '/calendar';
-              }, 300);
+              setTimeout(() => { window.location.href = '/calendar'; }, 500);
             }
-
-            // Auto-execute on load
+            // Auto-finish
             window.onload = () => {
-              if (window.opener && !window.opener.closed) {
+              console.log("Notifying parent...");
+              if (window.opener) {
                 window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-                setTimeout(() => window.close(), 1000);
-              } else {
-                setTimeout(() => {
-                  window.location.href = '/calendar';
-                }, 1500);
+                setTimeout(() => { window.close(); }, 1500);
               }
             };
           </script>
@@ -141,55 +164,20 @@ app.get("/api/auth/callback/google", async (req, res) => {
     `);
   } catch (error) {
     console.error('Error retrieving access token:', error);
-    // Send HTML to close the popup window and notify the parent window of failure
     res.send(`
       <!DOCTYPE html>
       <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>Error de Conexión - Mima AI</title>
-          <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #131117; color: white; margin: 0; }
-            .container { text-align: center; padding: 2.5rem; background-color: #1a1820; border-radius: 1.5rem; border: 1px solid rgba(239,68,68,0.3); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 90%; width: 400px; }
-            .icon { width: 64px; height: 64px; background-color: rgba(239,68,68,0.2); border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 1.5rem; }
-            .icon svg { width: 32px; height: 32px; color: #ef4444; }
-            h2 { margin: 0 0 1rem; font-size: 1.5rem; font-weight: 600; color: #ef4444; }
-            p { margin: 0 0 2rem; color: #94a3b8; line-height: 1.5; }
-            .btn { display: inline-block; background-color: #334155; color: white; text-decoration: none; padding: 0.75rem 1.5rem; border-radius: 9999px; font-weight: 500; transition: background-color 0.2s; border: none; cursor: pointer; font-size: 1rem; }
-            .btn:hover { background-color: #475569; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="icon">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </div>
-            <h2>Error de Conexión</h2>
-            <p>No se pudo conectar tu cuenta de Google. Por favor, inténtalo de nuevo.</p>
-            <button class="btn" onclick="closeOrRedirect()">Volver a la aplicación</button>
+        <head><title>Error</title></head>
+        <body style="background: #131117; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh;">
+          <div style="text-align: center;">
+            <h2 style="color: #ef4444;">Error de Autenticación</h2>
+            <p>${error instanceof Error ? error.message : 'Error desconocido'}</p>
+            <button onclick="window.close()" style="background: #333; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer;">Cerrar</button>
           </div>
           <script>
-            function closeOrRedirect() {
-              if (window.opener && !window.opener.closed) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
-                window.close();
-              }
-              setTimeout(() => {
-                window.location.href = '/calendar';
-              }, 300);
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
             }
-
-            window.onload = () => {
-              if (window.opener && !window.opener.closed) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED' }, '*');
-                setTimeout(() => window.close(), 2000);
-              } else {
-                setTimeout(() => {
-                  window.location.href = '/calendar';
-                }, 3000);
-              }
-            };
           </script>
         </body>
       </html>
@@ -203,13 +191,17 @@ app.get("/api/auth/status", (req, res) => {
 
 app.post("/api/tts", async (req, res) => {
   const { text, voiceId } = req.body;
+  console.log("TTS request received", { textLength: text?.length, voiceId });
   
   if (!process.env.ELEVENLABS_API_KEY) {
+    console.error("ELEVENLABS_API_KEY is missing");
     return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
   }
 
   try {
     const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld"; 
+    console.log(`Calling ElevenLabs with voiceId: ${selectedVoiceId}`);
+    
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
       method: 'POST',
       headers: {
@@ -229,6 +221,7 @@ app.post("/api/tts", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`ElevenLabs API error: ${response.status}`, errorText);
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
@@ -236,10 +229,11 @@ app.post("/api/tts", async (req, res) => {
     const buffer = Buffer.from(arrayBuffer);
     const base64Audio = buffer.toString('base64');
     
+    console.log("TTS generated successfully, sending base64 audio");
     res.json({ audio: `data:audio/mpeg;base64,${base64Audio}` });
   } catch (error) {
     console.error('TTS Error:', error);
-    res.status(500).json({ error: "Failed to generate speech" });
+    res.status(500).json({ error: "Failed to generate speech", details: error instanceof Error ? error.message : String(error) });
   }
 });
 
