@@ -77,9 +77,9 @@ export default function InstallPWA() {
               <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div>
-              <h3 className="text-white font-bold text-base">Instalar Mima AI</h3>
+              <h3 className="text-white font-bold text-base">Install Mima AI</h3>
               <p className="text-white/70 text-sm leading-tight mt-1">
-                Instala esta app en tu iPhone para una mejor experiencia.
+                Install this app on your iPhone for a better experience.
               </p>
             </div>
           </div>
@@ -92,10 +92,10 @@ export default function InstallPWA() {
         </div>
         <div className="bg-white/5 rounded-xl p-3 mt-1 border border-white/5">
           <p className="text-sm text-white/90 flex items-center gap-2">
-            1. Toca el botón <Share size={16} className="text-primary" /> en la barra inferior.
+            1. Tap the <Share size={16} className="text-primary" /> button below.
           </p>
           <p className="text-sm text-white/90 flex items-center gap-2 mt-2">
-            2. Selecciona <strong className="text-white">"Añadir a la pantalla de inicio"</strong>.
+            2. Select <strong className="text-white">"Add to Home Screen"</strong>.
           </p>
         </div>
       </div>
@@ -113,8 +113,8 @@ export default function InstallPWA() {
           <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
         </div>
         <div>
-          <h3 className="text-white font-medium text-sm">Instalar Mima AI</h3>
-          <p className="text-white/60 text-xs">Añade la app a tu pantalla de inicio</p>
+          <h3 className="text-white font-medium text-sm">Install Mima AI</h3>
+          <p className="text-white/60 text-xs">Add the app to your home screen</p>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -129,7 +129,7 @@ export default function InstallPWA() {
           className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-primary/90 transition-colors"
         >
           <Download size={16} />
-          Instalar
+          Install
         </button>
       </div>
     </div>

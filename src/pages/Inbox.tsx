@@ -1,11 +1,13 @@
 import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 
 export default function Inbox() {
   const [isConnected, setIsConnected] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -20,9 +22,17 @@ export default function Inbox() {
     }
   }, [isConnected]);
 
+  const getAuthHeaders = async () => {
+    const { data } = await supabase.auth.getSession();
+    return {
+      'Authorization': `Bearer ${data.session?.access_token}`
+    };
+  };
+
   const checkConnectionStatus = async () => {
     try {
-      const response = await fetch(`/api/auth/status?user_id=${user?.id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/auth/status`, { headers });
       if (response.ok) {
         const data = await response.json();
         setIsConnected(data.isConnected);
@@ -34,17 +44,22 @@ export default function Inbox() {
 
   const fetchEmails = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      const response = await fetch('/api/gmail/messages');
+      const headers = await getAuthHeaders();
+      const response = await fetch('/api/gmail/messages', { headers });
 
       if (response.ok) {
         const data = await response.json();
         setEmails(data || []);
       } else if (response.status === 401) {
         setIsConnected(false);
+      } else {
+        setError("Failed to load emails. Please try again.");
       }
     } catch (error) {
       console.error("Failed to fetch emails", error);
+      setError("Network error. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -52,7 +67,8 @@ export default function Inbox() {
 
   const handleConnect = async () => {
     try {
-      const response = await fetch(`/api/auth/url?user_id=${user?.id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/auth/url`, { headers });
       if (!response.ok) {
         throw new Error('Failed to get auth URL');
       }
@@ -69,6 +85,7 @@ export default function Inbox() {
       }
     } catch (error) {
       console.error('OAuth error:', error);
+      setError("Failed to initiate connection.");
     }
   };
 
@@ -97,24 +114,25 @@ export default function Inbox() {
             <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full"></span>
           </button>
         </div>
-        <div className="px-6 pt-2 pb-4">
-          <h1 className="text-3xl font-bold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Action Items</h1>
-          <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
-            <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-primary text-white text-sm font-semibold shadow-lg shadow-primary/25 transition-transform active:scale-95">
-              All
-            </button>
-            <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-              Urgent
-            </button>
-            <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-              Newsletters
-            </button>
-            <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-              Updates
-            </button>
-          </div>
-        </div>
       </header>
+      
+      <div className="px-6 pt-2 pb-4">
+        <h1 className="text-3xl font-bold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Action Items</h1>
+        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+          <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-primary text-white text-sm font-semibold shadow-lg shadow-primary/25 transition-transform active:scale-95">
+            All
+          </button>
+          <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
+            Urgent
+          </button>
+          <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
+            Newsletters
+          </button>
+          <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
+            Updates
+          </button>
+        </div>
+      </div>
 
       <main className="flex-1 overflow-y-auto px-4 space-y-4 flex flex-col">
         {!isConnected ? (
@@ -142,6 +160,11 @@ export default function Inbox() {
         ) : isLoading ? (
           <div className="flex justify-center mt-10">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : error ? (
+          <div className="text-center mt-10 flex flex-col items-center gap-4">
+            <p className="text-red-400">{error}</p>
+            <button onClick={fetchEmails} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">Try Again</button>
           </div>
         ) : emails.length === 0 ? (
           <div className="text-center text-slate-400 mt-10">

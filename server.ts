@@ -57,17 +57,16 @@ app.use(session({
 declare module 'express-session' {
   interface SessionData {
     tokens: any;
+    userId?: string;
   }
 }
 
 const getOAuth2Client = (req?: express.Request) => {
-  // Use APP_URL if set, otherwise try to derive from request or fallback to default
-  let baseUrl = process.env.APP_URL || "https://me.mima-app.com";
-  
-  // Ensure no trailing slash
-  baseUrl = baseUrl.replace(/\/$/, "");
-  
-  const redirectUri = `${baseUrl}/api/auth/callback/google`;
+  const baseUrl = process.env.APP_URL;
+  if (!baseUrl) {
+    console.warn("APP_URL environment variable is not set. OAuth redirects may fail.");
+  }
+  const redirectUri = `${(baseUrl || "http://localhost:3000").replace(/\/$/, "")}/api/auth/callback/google`;
   
   console.log(`Using redirectUri: ${redirectUri}`);
   
@@ -93,9 +92,18 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-app.get("/api/auth/url", (req, res) => {
+app.get("/api/auth/url", async (req, res) => {
   try {
-    const { user_id } = req.query;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+    const token = authHeader.split(' ')[1];
+    
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+
+    req.session.userId = user.id;
+
     const oauth2Client = getOAuth2Client(req);
     const scopes = [
       'https://www.googleapis.com/auth/calendar.readonly',
@@ -106,7 +114,7 @@ app.get("/api/auth/url", (req, res) => {
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent',
-      state: user_id as string || ''
+      state: 'google_auth'
     });
     console.log("Generated Auth URL:", url);
     res.json({ url });
@@ -135,8 +143,9 @@ app.get("/api/debug", (req, res) => {
 });
 
 app.get("/api/auth/callback/google", async (req, res) => {
-  const { code, error, state } = req.query;
-  console.log("OAuth callback received", { code: code ? "present" : "absent", error, state });
+  const { code, error } = req.query;
+  const userId = req.session.userId;
+  console.log("OAuth callback received", { code: code ? "present" : "absent", error, hasUserId: !!userId });
   
   try {
     if (error) {
@@ -146,23 +155,27 @@ app.get("/api/auth/callback/google", async (req, res) => {
     if (!code) {
       throw new Error("No authorization code provided");
     }
+    
+    if (!userId) {
+      throw new Error("Session expired or invalid. Please try again.");
+    }
 
     const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("Tokens retrieved successfully");
     req.session.tokens = tokens;
 
-    // Save tokens to Supabase if user_id (state) is provided
-    if (state && supabaseUrl && supabaseAnonKey) {
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    // Save tokens to Supabase
+    if (supabaseUrl && supabaseAnonKey) {
+      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
       
       // We need to encrypt the tokens before saving
       const encryptedTokens = encrypt(JSON.stringify(tokens));
       
-      const { error: dbError } = await supabase
+      const { error: dbError } = await supabaseAdmin
         .from('user_google_tokens')
         .upsert({ 
-          user_id: state as string, 
+          user_id: userId, 
           tokens: encryptedTokens,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
@@ -179,7 +192,7 @@ app.get("/api/auth/callback/google", async (req, res) => {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Mima AI - Autenticación</title>
+          <title>Mima AI - Authentication</title>
           <style>
             body { background: #131117; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
             .card { background: #1a1820; padding: 2rem; border-radius: 1rem; text-align: center; border: 1px solid #333; }
@@ -188,9 +201,9 @@ app.get("/api/auth/callback/google", async (req, res) => {
         </head>
         <body>
           <div class="card">
-            <h2>¡Conexión Exitosa!</h2>
-            <p>Se ha conectado con Google correctamente.</p>
-            <button class="btn" onclick="finish()">Volver a Mima</button>
+            <h2>Connection Successful!</h2>
+            <p>You have successfully connected with Google.</p>
+            <button class="btn" onclick="finish()">Return to Mima</button>
           </div>
           <script>
             function finish() {
@@ -220,9 +233,9 @@ app.get("/api/auth/callback/google", async (req, res) => {
         <head><title>Error</title></head>
         <body style="background: #131117; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh;">
           <div style="text-align: center;">
-            <h2 style="color: #ef4444;">Error de Autenticación</h2>
-            <p>${error instanceof Error ? error.message : 'Error desconocido'}</p>
-            <button onclick="window.close()" style="background: #333; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer;">Cerrar</button>
+            <h2 style="color: #ef4444;">Authentication Error</h2>
+            <p>${error instanceof Error ? error.message : 'Unknown error'}</p>
+            <button onclick="window.close()" style="background: #333; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer;">Close</button>
           </div>
           <script>
             if (window.opener) {
@@ -236,24 +249,26 @@ app.get("/api/auth/callback/google", async (req, res) => {
 });
 
 app.get("/api/auth/status", async (req, res) => {
-  const { user_id } = req.query;
-  
   // If we already have tokens in session, we're connected
   if (req.session.tokens) {
     return res.json({ isConnected: true });
   }
   
-  // If no user_id provided, we can't check Supabase
-  if (!user_id || !supabaseUrl || !supabaseAnonKey) {
-    return res.json({ isConnected: false });
-  }
-  
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.json({ isConnected: false });
+    const token = authHeader.split(' ')[1];
+    
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data, error } = await supabase
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) return res.json({ isConnected: false });
+
+    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { data, error } = await supabaseAdmin
       .from('user_google_tokens')
       .select('tokens')
-      .eq('user_id', user_id as string)
+      .eq('user_id', user.id)
       .single();
       
     if (error || !data || !data.tokens) {

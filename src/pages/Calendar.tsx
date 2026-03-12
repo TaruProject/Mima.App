@@ -1,13 +1,16 @@
 import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
-import { format, parseISO, isToday } from "date-fns";
+import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO } from "date-fns";
 import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 
 export default function Calendar() {
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
+  const [currentDate, setCurrentDate] = useState(new Date());
 
   useEffect(() => {
     if (user) {
@@ -21,9 +24,17 @@ export default function Calendar() {
     }
   }, [isConnected]);
 
+  const getAuthHeaders = async () => {
+    const { data } = await supabase.auth.getSession();
+    return {
+      'Authorization': `Bearer ${data.session?.access_token}`
+    };
+  };
+
   const checkConnectionStatus = async () => {
     try {
-      const response = await fetch(`/api/auth/status?user_id=${user?.id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/auth/status`, { headers });
       if (response.ok) {
         const data = await response.json();
         setIsConnected(data.isConnected);
@@ -35,17 +46,22 @@ export default function Calendar() {
 
   const fetchEvents = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      const response = await fetch('/api/calendar/events');
+      const headers = await getAuthHeaders();
+      const response = await fetch('/api/calendar/events', { headers });
 
       if (response.ok) {
         const data = await response.json();
         setEvents(data || []);
       } else if (response.status === 401) {
         setIsConnected(false);
+      } else {
+        setError("Failed to load events. Please try again.");
       }
     } catch (error) {
       console.error("Failed to fetch events", error);
+      setError("Network error. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -53,7 +69,8 @@ export default function Calendar() {
 
   const handleConnect = async () => {
     try {
-      const response = await fetch(`/api/auth/url?user_id=${user?.id}`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/auth/url`, { headers });
       if (!response.ok) {
         throw new Error('Failed to get auth URL');
       }
@@ -70,6 +87,7 @@ export default function Calendar() {
       }
     } catch (error) {
       console.error('OAuth error:', error);
+      setError("Failed to initiate connection.");
     }
   };
 
@@ -107,37 +125,53 @@ export default function Calendar() {
       <div className="px-4 pb-2">
         <div className="bg-surface-dark rounded-2xl p-4 shadow-lg border border-surface-highlight/50">
           <div className="flex items-center justify-between mb-4 px-2">
-            <button className="text-text-secondary hover:text-white transition-colors">
+            <button 
+              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
+              className="text-text-secondary hover:text-white transition-colors"
+            >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <h2 className="text-lg font-bold">Today</h2>
-            <button className="text-text-secondary hover:text-white transition-colors">
+            <h2 className="text-lg font-bold">{format(currentDate, 'MMMM yyyy')}</h2>
+            <button 
+              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
+              className="text-text-secondary hover:text-white transition-colors"
+            >
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
           <div className="grid grid-cols-7 gap-y-2 mb-2">
-            {['S','M','T','W','T','F','S'].map(d => (
-              <div key={d} className="text-center text-xs font-semibold text-text-secondary uppercase tracking-wider">{d}</div>
+            {['S','M','T','W','T','F','S'].map((d, i) => (
+              <div key={i} className="text-center text-xs font-semibold text-text-secondary uppercase tracking-wider">{d}</div>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-y-1 justify-items-center">
-            <div className="h-8 w-8"></div><div className="h-8 w-8"></div><div className="h-8 w-8"></div>
-            {[1,2,3,4].map(d => (
-              <button key={d} className="h-9 w-9 flex items-center justify-center rounded-full text-sm text-text-secondary hover:bg-surface-highlight transition-colors">{d}</button>
-            ))}
-            <button className="h-9 w-9 flex items-center justify-center rounded-full text-sm font-bold bg-primary text-white shadow-md shadow-primary/30">5</button>
-            {[6,7,8].map(d => (
-              <button key={d} className="h-9 w-9 flex items-center justify-center rounded-full text-sm text-white hover:bg-surface-highlight transition-colors">{d}</button>
-            ))}
-            <button className="h-9 w-9 flex items-center justify-center rounded-full text-sm text-white hover:bg-surface-highlight transition-colors relative">
-              9
-            </button>
-            {[10,11,12,13].map(d => (
-              <button key={d} className="h-9 w-9 flex items-center justify-center rounded-full text-sm text-white hover:bg-surface-highlight transition-colors">{d}</button>
-            ))}
-            <button className="h-9 w-9 flex items-center justify-center rounded-full text-sm text-white hover:bg-surface-highlight transition-colors relative">
-              14
-            </button>
+            {eachDayOfInterval({
+              start: startOfWeek(startOfMonth(currentDate)),
+              end: endOfWeek(endOfMonth(currentDate))
+            }).map((day, i) => {
+              const isCurrentMonth = isSameMonth(day, currentDate);
+              const isTodayDate = isToday(day);
+              // Check if day has events
+              const hasEvents = events.some(e => {
+                const eventDate = e.start.dateTime ? parseISO(e.start.dateTime) : parseISO(e.start.date);
+                return format(eventDate, 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd');
+              });
+
+              return (
+                <button 
+                  key={i} 
+                  className={`h-9 w-9 flex items-center justify-center rounded-full text-sm transition-colors relative
+                    ${!isCurrentMonth ? 'text-text-secondary/50' : ''}
+                    ${isTodayDate ? 'bg-primary text-white font-bold shadow-md shadow-primary/30' : 'text-white hover:bg-surface-highlight'}
+                  `}
+                >
+                  {format(day, 'd')}
+                  {hasEvents && !isTodayDate && (
+                    <div className="absolute bottom-1 w-1 h-1 bg-primary rounded-full"></div>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div className="flex justify-center mt-2">
             <div className="h-1 w-12 bg-surface-highlight rounded-full"></div>
@@ -171,6 +205,11 @@ export default function Calendar() {
         ) : isLoading ? (
           <div className="flex justify-center mt-10">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : error ? (
+          <div className="text-center mt-10 flex flex-col items-center gap-4">
+            <p className="text-red-400">{error}</p>
+            <button onClick={fetchEvents} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">Try Again</button>
           </div>
         ) : events.length === 0 ? (
           <div className="text-center text-slate-400 mt-10">

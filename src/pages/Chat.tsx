@@ -26,6 +26,7 @@ export default function Chat() {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const voices = [
@@ -128,6 +129,10 @@ export default function Chat() {
   };
 
   const stopAudio = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -152,10 +157,15 @@ export default function Chat() {
     
     if (!audioData) {
       setPlayingAudio("loading-" + msgId);
-      const generatedAudio = await generateSpeech(text, voiceId);
+      
+      abortControllerRef.current = new AbortController();
+      const generatedAudio = await generateSpeech(text, voiceId, abortControllerRef.current.signal);
+      
       if (generatedAudio) {
         audioData = generatedAudio;
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, audio: audioData } : m));
+      } else if (abortControllerRef.current?.signal.aborted) {
+        return; // Silently return if aborted
       } else {
         setPlayingAudio(null);
         alert("Error: No se pudo generar el audio. Verifica que el servidor backend esté corriendo y que la API key de ElevenLabs esté configurada.");

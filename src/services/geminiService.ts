@@ -42,7 +42,7 @@ export async function generateChatResponse(
   return response.text || "I'm sorry, I couldn't process that.";
 }
 
-export async function generateSpeech(text: string, voiceId?: string): Promise<string | null> {
+export async function generateSpeech(text: string, voiceId?: string, signal?: AbortSignal): Promise<string | null> {
   const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld";
   
   try {
@@ -54,7 +54,8 @@ export async function generateSpeech(text: string, voiceId?: string): Promise<st
       body: JSON.stringify({
         text,
         voiceId: selectedVoiceId
-      })
+      }),
+      signal
     });
 
     if (!response.ok) {
@@ -65,7 +66,11 @@ export async function generateSpeech(text: string, voiceId?: string): Promise<st
 
     const data = await response.json();
     return data.audio;
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.log('TTS request aborted');
+      return null;
+    }
     console.error("Backend TTS Error:", error);
     return null;
   }
