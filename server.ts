@@ -286,6 +286,59 @@ app.get("/api/auth/status", async (req, res) => {
   }
 });
 
+const ttsPreviewCache: Record<string, string> = {};
+
+app.get("/api/tts/preview", async (req, res) => {
+  const { voiceId } = req.query;
+  if (!voiceId || typeof voiceId !== 'string') {
+    return res.status(400).json({ error: "voiceId is required" });
+  }
+
+  if (ttsPreviewCache[voiceId]) {
+    return res.json({ audio: ttsPreviewCache[voiceId] });
+  }
+
+  if (!process.env.ELEVENLABS_API_KEY) {
+    return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
+  }
+
+  try {
+    const text = "Hi, I am Mima. This is how I sound.";
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'xi-api-key': process.env.ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.5
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64Audio = buffer.toString('base64');
+    const audioDataUri = `data:audio/mpeg;base64,${base64Audio}`;
+
+    ttsPreviewCache[voiceId] = audioDataUri;
+    res.json({ audio: audioDataUri });
+  } catch (error) {
+    console.error("Preview TTS Error:", error);
+    res.status(500).json({ error: "Failed to generate preview audio" });
+  }
+});
+
 app.post("/api/tts", async (req, res) => {
   const { text, voiceId } = req.body;
   console.log("TTS request received", { textLength: text?.length, voiceId });
@@ -308,7 +361,7 @@ app.post("/api/tts", async (req, res) => {
       },
       body: JSON.stringify({
         text,
-        model_id: 'eleven_monolingual_v1',
+        model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.5
@@ -410,8 +463,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    app.use(express.static("dist", {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      }
+    }));
     app.get("*", (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.resolve(__dirname, "dist", "index.html"));
     });
   }

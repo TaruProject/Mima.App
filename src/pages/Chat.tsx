@@ -25,7 +25,10 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +50,12 @@ export default function Chat() {
     } catch (e) {
       // Ignore
     }
+    
+    // Stop any currently playing audio
+    stopAudio();
+    
+    // Clear cached audio for all messages so they regenerate with the new voice
+    setMessages(prev => prev.map(m => ({ ...m, audio: null })));
   };
 
   const scrollToBottom = () => {
@@ -137,8 +146,52 @@ export default function Chat() {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.currentTime = 0;
+      setIsPreviewPlaying(false);
+    }
     setPlayingAudio(null);
     setAudioProgress(0);
+  };
+
+  const playVoicePreview = async () => {
+    if (isPreviewPlaying && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.currentTime = 0;
+      setIsPreviewPlaying(false);
+      return;
+    }
+
+    stopAudio();
+    setIsPreviewLoading(true);
+
+    try {
+      const response = await fetch(`/api/tts/preview?voiceId=${voiceId}`);
+      if (!response.ok) throw new Error("Failed to fetch preview");
+      const data = await response.json();
+      
+      if (data.audio) {
+        if (previewAudioRef.current) {
+          previewAudioRef.current.pause();
+        }
+        const audio = new Audio(data.audio);
+        previewAudioRef.current = audio;
+        
+        audio.onended = () => setIsPreviewPlaying(false);
+        audio.onerror = () => {
+          setIsPreviewPlaying(false);
+          setIsPreviewLoading(false);
+        };
+        
+        await audio.play();
+        setIsPreviewPlaying(true);
+      }
+    } catch (error) {
+      console.error("Error playing voice preview:", error);
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
   const handlePlayAudio = async (msgId: number, text: string) => {
@@ -200,19 +253,35 @@ export default function Chat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative group hidden sm:block">
-            <select 
-              value={voiceId}
-              onChange={handleVoiceChange}
-              className="appearance-none bg-transparent pl-3 pr-8 py-1.5 text-sm font-medium text-text-secondary border border-surface-highlight rounded-full focus:outline-none focus:border-primary transition-colors cursor-pointer"
-            >
-              {voices.map(v => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+          <div className="flex items-center gap-1 bg-surface-dark px-3 py-1.5 rounded-full border border-surface-highlight">
+            <div className="relative group hidden sm:block">
+              <select 
+                value={voiceId}
+                onChange={handleVoiceChange}
+                className="appearance-none bg-transparent pr-6 text-sm font-medium text-text-secondary focus:outline-none focus:text-primary transition-colors cursor-pointer"
+              >
+                {voices.map(v => (
+                  <option key={v.id} value={v.id} className="bg-background-dark">{v.name}</option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center text-text-secondary">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+              </div>
             </div>
+            <button 
+              onClick={playVoicePreview}
+              disabled={isPreviewLoading}
+              className="p-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center shrink-0"
+              title="Listen to voice sample"
+            >
+              {isPreviewLoading ? (
+                 <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+              ) : isPreviewPlaying ? (
+                 <Square className="w-3.5 h-3.5 fill-current" />
+              ) : (
+                 <Volume2 className="w-3.5 h-3.5" />
+              )}
+            </button>
           </div>
           <div className="relative group">
             <select 
