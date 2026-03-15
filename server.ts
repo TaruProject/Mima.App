@@ -186,6 +186,65 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       throw new Error("Session expired or invalid. Please try again from the main app.");
     }
 
+    // 1. Send immediate success response to avoid "black screen" while processing
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Mima AI - Connected</title>
+          <style>
+            body { 
+              background: #131117; 
+              color: white; 
+              font-family: -apple-system, sans-serif; 
+              display: flex; 
+              align-items: center; 
+              justify-content: center; 
+              height: 100vh; 
+              margin: 0; 
+            }
+            .card { 
+              background: #1a1820; 
+              padding: 2.5rem; 
+              border-radius: 1.5rem; 
+              text-align: center; 
+              border: 1px solid rgba(255,255,255,0.1); 
+              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+              max-width: 400px;
+            }
+            .icon { font-size: 48px; margin-bottom: 1rem; }
+            h2 { margin: 0 0 1rem; }
+            .btn { 
+              background: #6221dd; 
+              color: white; 
+              border: none; 
+              padding: 0.8rem 2rem; 
+              border-radius: 2rem; 
+              cursor: pointer; 
+              font-weight: bold; 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">✅</div>
+            <h2>Google Connected!</h2>
+            <p>Mima is now linked to your Google account. This window will close automatically.</p>
+            <button class="btn" onclick="window.close()">Close Now</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+              setTimeout(() => { window.close(); }, 2000);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+
+    // 2. Process tokens in background
     const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("Tokens retrieved successfully");
@@ -219,10 +278,9 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
       req.session.tokens = finalTokens;
       
-      // We need to encrypt the tokens before saving
       const encryptedTokens = encrypt(JSON.stringify(finalTokens));
       
-      const { error: dbError } = await supabaseAdmin
+      await supabaseAdmin
         .from('user_google_tokens')
         .upsert({ 
           user_id: userId, 
@@ -230,175 +288,23 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
         
-      if (dbError) {
-        console.error("Failed to save tokens to Supabase:", dbError);
-      } else {
-        console.log("Tokens saved to Supabase successfully");
-      }
+      console.log("Tokens saved to Supabase successfully");
     } else {
       req.session.tokens = finalTokens;
     }
-    
-    // Improved HTML with better visibility and explicit error handling
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Mima AI - Authentication Successful</title>
-          <style>
-            :root {
-              --primary: #6221dd;
-              --bg: #131117;
-              --card: #1a1820;
-              --text: #ffffff;
-              --text-dim: #a0a0a0;
-            }
-            body { 
-              background: var(--bg); 
-              color: var(--text); 
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              justify-content: center; 
-              height: 100vh; 
-              margin: 0; 
-              overflow: hidden;
-            }
-            .card { 
-              background: var(--card); 
-              padding: 2.5rem; 
-              border-radius: 1.5rem; 
-              text-align: center; 
-              border: 1px solid rgba(255,255,255,0.1); 
-              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-              max-width: 400px;
-              width: 90%;
-              animation: slideUp 0.5s ease-out;
-            }
-            @keyframes slideUp {
-              from { transform: translateY(20px); opacity: 0; }
-              to { transform: translateY(0); opacity: 1; }
-            }
-            .icon {
-              width: 64px;
-              height: 64px;
-              background: var(--primary);
-              border-radius: 1rem;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              margin: 0 auto 1.5rem;
-              box-shadow: 0 10px 20px rgba(98, 33, 221, 0.3);
-            }
-            h2 { margin: 0 0 0.5rem; font-size: 1.5rem; }
-            p { color: var(--text-dim); margin: 0 0 2rem; line-height: 1.5; }
-            .btn { 
-              background: var(--primary); 
-              color: white; 
-              border: none; 
-              padding: 0.8rem 2rem; 
-              border-radius: 2rem; 
-              cursor: pointer; 
-              font-weight: bold; 
-              font-size: 1rem;
-              transition: all 0.2s;
-              width: 100%;
-            }
-            .btn:hover { transform: scale(1.02); background: #733be6; }
-            .loader {
-              width: 20px;
-              height: 20px;
-              border: 2px solid rgba(255,255,255,0.1);
-              border-top-color: white;
-              border-radius: 50%;
-              animation: spin 1s linear infinite;
-              display: inline-block;
-              vertical-align: middle;
-              margin-right: 8px;
-            }
-            @keyframes spin { to { transform: rotate(360deg); } }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <div class="icon">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </div>
-            <h2>Connected!</h2>
-            <p>Your Google account is now linked to Mima AI. You can close this window.</p>
-            <button class="btn" id="finishBtn" onclick="finish()">
-              <span id="btnText">Closing in 2s...</span>
-            </button>
-          </div>
-          <script>
-            function finish() {
-              console.log("Finishing OAuth flow...");
-              if (window.opener) {
-                try {
-                  window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-                  console.log("Message sent to opener");
-                } catch (e) {
-                  console.error("Failed to postMessage:", e);
-                }
-                setTimeout(() => { window.close(); }, 100);
-              } else {
-                window.location.href = '/calendar';
-              }
-            }
-            
-            // Auto-finish with countdown
-            let seconds = 2;
-            const btnText = document.getElementById('btnText');
-            
-            const timer = setInterval(() => {
-              seconds--;
-              if (seconds <= 0) {
-                clearInterval(timer);
-                finish();
-              } else {
-                btnText.innerText = "Closing in " + seconds + "s...";
-              }
-            }, 1000);
-
-            // Immediate notification
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-            }
-          </script>
-        </body>
-      </html>
-    `);
   } catch (error) {
-    console.error('Error retrieving access token:', error);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Authentication Error</title>
-          <style>
-            body { background: #131117; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-            .card { background: #1a1820; padding: 2rem; border-radius: 1rem; text-align: center; border: 1px solid #333; max-width: 400px; }
-            h2 { color: #ef4444; }
-            .btn { background: #333; color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 0.5rem; cursor: pointer; margin-top: 1rem; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h2>Authentication Error</h2>
-            <p>${error instanceof Error ? error.message : 'An unknown error occurred during authentication.'}</p>
-            <button class="btn" onclick="window.close()">Close Window</button>
+    console.error('OAuth Error:', error);
+    if (!res.headersSent) {
+      res.status(500).send(`
+        <body style="background: #450a0a; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif;">
+          <div style="text-align: center; padding: 2rem; background: #7f1d1d; border-radius: 1rem; max-width: 400px;">
+            <h2 style="margin-top: 0;">Authentication Error</h2>
+            <p>${error instanceof Error ? error.message : 'Unknown error'}</p>
+            <button onclick="window.close()" style="background: white; color: black; border: none; padding: 0.5rem 1.5rem; border-radius: 0.5rem; cursor: pointer; font-weight: bold;">Close</button>
           </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED', error: "${error instanceof Error ? error.message : 'Unknown error'}" }, '*');
-            }
-          </script>
         </body>
-      </html>
-    `);
+      `);
+    }
   }
 });
 
