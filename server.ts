@@ -62,11 +62,23 @@ declare module 'express-session' {
 }
 
 const getOAuth2Client = (req?: express.Request) => {
-  const baseUrl = process.env.APP_URL;
-  if (!baseUrl) {
-    console.warn("APP_URL environment variable is not set. OAuth redirects may fail.");
+  // Use the custom domain as the primary one
+  const customDomain = "https://me.mima-app.com";
+  
+  // Use the custom domain if we are on it, otherwise fallback to APP_URL (preview)
+  let baseUrl = customDomain;
+  
+  if (req) {
+    const host = req.get('host');
+    if (host && !host.includes('mima-app.com')) {
+      // If not on custom domain, use APP_URL (preview)
+      baseUrl = process.env.APP_URL || `https://${host}`;
+    }
+  } else if (process.env.NODE_ENV !== 'production') {
+    baseUrl = process.env.APP_URL || "http://localhost:3000";
   }
-  const redirectUri = `${(baseUrl || "http://localhost:3000").replace(/\/$/, "")}/api/auth/callback/google`;
+
+  const redirectUri = `${baseUrl.replace(/\/$/, "")}/api/auth/callback/google`;
   
   console.log(`Using redirectUri: ${redirectUri}`);
   
@@ -142,7 +154,7 @@ app.get("/api/debug", (req, res) => {
   });
 });
 
-app.get("/api/auth/callback/google", async (req, res) => {
+app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res) => {
   const { code, error } = req.query;
   const userId = req.session.userId;
   console.log("OAuth callback received", { code: code ? "present" : "absent", error, hasUserId: !!userId });
