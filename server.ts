@@ -193,7 +193,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Mima AI - Connected</title>
+          <title>Mima - Connected</title>
           <style>
             body { 
               background: #131117; 

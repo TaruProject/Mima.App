@@ -19,7 +19,7 @@ export default defineConfig(({mode}) => {
           clientsClaim: true
         },
         manifest: {
-          name: 'Mima AI',
+          name: 'Mima',
           short_name: 'Mima',
           description: 'Your personal AI assistant.',
           theme_color: '#131117',

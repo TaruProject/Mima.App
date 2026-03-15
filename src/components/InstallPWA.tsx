@@ -77,7 +77,7 @@ export default function InstallPWA() {
               <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div>
-              <h3 className="text-white font-bold text-base">Install Mima AI</h3>
+              <h3 className="text-white font-bold text-base">Install Mima</h3>
               <p className="text-white/70 text-sm leading-tight mt-1">
                 Install this app on your iPhone for a better experience.
               </p>
@@ -113,7 +113,7 @@ export default function InstallPWA() {
           <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
         </div>
         <div>
-          <h3 className="text-white font-medium text-sm">Install Mima AI</h3>
+          <h3 className="text-white font-medium text-sm">Install Mima</h3>
           <p className="text-white/60 text-xs">Add the app to your home screen</p>
         </div>
       </div>

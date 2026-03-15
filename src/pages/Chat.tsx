@@ -249,7 +249,7 @@ export default function Chat() {
             <div className="w-8 h-8 rounded-full bg-[#6221dd] flex items-center justify-center overflow-hidden">
               <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
+            <h1 className="text-xl font-bold tracking-tight">Mima</h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
