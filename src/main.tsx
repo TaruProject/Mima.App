@@ -4,9 +4,18 @@ import App from './App.tsx';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
-// Register service worker
+// Register service worker with auto-update
 if ('serviceWorker' in navigator) {
-  registerSW({ immediate: true });
+  const updateSW = registerSW({
+    onNeedRefresh() {
+      // When a new version is found, force the update immediately
+      updateSW(true);
+    },
+    onOfflineReady() {
+      console.log('App is ready to work offline');
+    },
+    immediate: true
+  });
 }
 
 createRoot(document.getElementById('root')!).render(

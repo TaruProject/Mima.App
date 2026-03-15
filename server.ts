@@ -163,14 +163,38 @@ app.get("/api/auth/callback/google", async (req, res) => {
     const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("Tokens retrieved successfully");
-    req.session.tokens = tokens;
+    
+    let finalTokens = tokens;
 
     // Save tokens to Supabase
     if (supabaseUrl && supabaseAnonKey) {
       const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
       
+      // If we didn't get a refresh token, try to preserve the existing one
+      if (!tokens.refresh_token) {
+        const { data } = await supabaseAdmin
+          .from('user_google_tokens')
+          .select('tokens')
+          .eq('user_id', userId)
+          .single();
+          
+        if (data && data.tokens) {
+          try {
+            const existingTokens = JSON.parse(decrypt(data.tokens));
+            if (existingTokens.refresh_token) {
+              finalTokens = { ...existingTokens, ...tokens };
+              console.log("Merged existing refresh token with new tokens");
+            }
+          } catch (e) {
+            console.error("Failed to decrypt existing tokens for merge", e);
+          }
+        }
+      }
+
+      req.session.tokens = finalTokens;
+      
       // We need to encrypt the tokens before saving
-      const encryptedTokens = encrypt(JSON.stringify(tokens));
+      const encryptedTokens = encrypt(JSON.stringify(finalTokens));
       
       const { error: dbError } = await supabaseAdmin
         .from('user_google_tokens')
@@ -185,6 +209,8 @@ app.get("/api/auth/callback/google", async (req, res) => {
       } else {
         console.log("Tokens saved to Supabase successfully");
       }
+    } else {
+      req.session.tokens = finalTokens;
     }
     
     // Simplified HTML to ensure it works even in restrictive environments
@@ -387,6 +413,32 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
+async function handleGoogleApiError(error: any, req: any, res: any, serviceName: string) {
+  console.error(`Error fetching ${serviceName}`, error);
+  if (error.message?.includes('Refresh Token') || error.message?.includes('invalid_grant')) {
+    req.session.tokens = undefined;
+    
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && supabaseUrl && supabaseAnonKey) {
+        const token = authHeader.split(' ')[1];
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (user) {
+          const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+          await supabaseAdmin.from('user_google_tokens').delete().eq('user_id', user.id);
+          console.log(`Deleted invalid tokens for user ${user.id}`);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to delete invalid tokens from Supabase", e);
+    }
+    
+    return res.status(401).json({ error: "Google authentication expired. Please reconnect." });
+  }
+  res.status(500).json({ error: `Failed to fetch ${serviceName}` });
+}
+
 app.get("/api/calendar/events", async (req, res) => {
   if (!req.session.tokens) return res.status(401).json({ error: "Unauthorized" });
   
@@ -405,8 +457,7 @@ app.get("/api/calendar/events", async (req, res) => {
     
     res.json(response.data.items);
   } catch (error) {
-    console.error('Error fetching calendar', error);
-    res.status(500).json({ error: "Failed to fetch calendar" });
+    await handleGoogleApiError(error, req, res, 'calendar');
   }
 });
 
@@ -449,8 +500,7 @@ app.get("/api/gmail/messages", async (req, res) => {
     
     res.json(messages);
   } catch (error) {
-    console.error('Error fetching gmail', error);
-    res.status(500).json({ error: "Failed to fetch emails" });
+    await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
