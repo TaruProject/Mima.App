@@ -74,7 +74,7 @@ export default function InstallPWA() {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-[#6221dd] rounded-xl flex items-center justify-center overflow-hidden shrink-0">
-              <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div>
               <h3 className="text-white font-bold text-base">Install Mima AI</h3>
@@ -110,7 +110,7 @@ export default function InstallPWA() {
     <div className="fixed bottom-20 left-4 right-4 z-50 bg-surface-dark border border-white/10 p-4 rounded-2xl shadow-2xl flex items-center justify-between animate-in slide-in-from-bottom-5">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-[#6221dd] rounded-xl flex items-center justify-center overflow-hidden">
-          <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+          <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
         </div>
         <div>
           <h3 className="text-white font-medium text-sm">Install Mima AI</h3>

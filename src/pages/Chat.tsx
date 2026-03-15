@@ -247,7 +247,7 @@ export default function Chat() {
           </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-[#6221dd] flex items-center justify-center overflow-hidden">
-              <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <h1 className="text-xl font-bold tracking-tight">Mima AI</h1>
           </div>

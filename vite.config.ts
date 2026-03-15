@@ -27,12 +27,12 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: '/assets/logo.jpg?v=4',
+              src: 'https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg',
               sizes: '192x192',
               type: 'image/jpeg'
             },
             {
-              src: '/assets/logo.jpg?v=4',
+              src: 'https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg',
               sizes: '512x512',
               type: 'image/jpeg'
             }
