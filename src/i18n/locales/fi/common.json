@@ -1,0 +1,123 @@
+{
+  "onboarding": {
+    "step0": {
+      "title": "Valitse kieli",
+      "subtitle": "Valitse kieli, jota haluat käyttää Miman kanssa"
+    },
+    "step1": {
+      "title": "Hei, olen Mima 👋",
+      "subtitle": "Älykäs henkilökohtainen avustajasi. Ennen kuin aloitamme, personoidaan kokemuksesi.",
+      "cta": "Jatka"
+    },
+    "step2": {
+      "title": "Miltä haluat Mimasi kuulostavan?",
+      "subtitle": "Voit muuttaa tätä milloin tahansa profiilistasi ⚙️",
+      "preview": "Näyte",
+      "playing": "Toistetaan",
+      "cta": "Jatka",
+      "back": "Takaisin"
+    },
+    "step3": {
+      "title": "Kaikki valmiina!",
+      "subtitle": "Olet valmis aloittamaan Miman käytön.",
+      "note": "Muista: voit muuttaa ääntä ja muita asetuksia profiilistasi.",
+      "cta": "Siirry chattiin"
+    }
+  },
+  "chat": {
+    "header": {
+      "title": "Mima"
+    },
+    "input": {
+      "placeholder": "Kysy Mimalta..."
+    },
+    "actions": {
+      "attach": "Liitä tiedosto",
+      "screenshot": "Ota kuvakaappaus",
+      "selectMode": "Valitse tila",
+      "currentMode": "Nykyinen tila"
+    },
+    "modes": {
+      "neutral": "Neutraali tila",
+      "professional": "Bisnestila",
+      "creative": "Luova tila",
+      "zen": "Zen-tila",
+      "family": "Perhetila"
+    }
+  },
+  "profile": {
+    "sections": {
+      "info": "Käyttäjätiedot",
+      "voice": "Miman ääni",
+      "language": "Käyttöliittymän kieli"
+    },
+    "fields": {
+      "fullName": "Koko nimi",
+      "username": "Käyttäjänimi",
+      "email": "Sähköposti (Vain luku)",
+      "emailHelper": "Sähköpostiasi ei voi muuttaa"
+    },
+    "voice": {
+      "title": "Miman ääni",
+      "subtitle": "Valitse, miten avustajasi puhuu sinulle",
+      "updated": "Ääni päivitetty ✓",
+      "names": {
+        "voice1": "Mima US-1",
+        "voice2": "Mima US-2",
+        "voice3": "Mima US-3",
+        "voice4": "Mima US-4",
+        "voice5": "Mima UK-1",
+        "voice6": "Mima UK-2",
+        "voice7": "Mima UK-3"
+      },
+      "descriptions": {
+        "voice1": "Selkeä ja ammattimainen amerikkalainen naisääni",
+        "voice2": "Lämmin ja ystävällinen amerikkalainen naisääni",
+        "voice3": "Suora ja tehokas amerikkalainen miesääni",
+        "voice4": "Pehmeä ja rauhallinen amerikkalainen naisääni",
+        "voice5": "Hienostunut brittiläinen naisääni",
+        "voice6": "Ammattimainen brittiläinen miesääni",
+        "voice7": "Ystävällinen brittiläinen naisääni"
+      }
+    },
+    "language": {
+      "title": "Käyttöliittymän kieli",
+      "subtitle": "Valitse haluamasi kieli"
+    },
+    "actions": {
+      "save": "Tallenna muutokset",
+      "saving": "Tallennetaan...",
+      "saved": "Tallennettu",
+      "uploadPhoto": "Lataa kuva"
+    }
+  },
+  "common": {
+    "buttons": {
+      "continue": "Jatka",
+      "back": "Takaisin",
+      "cancel": "Peruuta",
+      "confirm": "Vahvista"
+    },
+    "errors": {
+      "generic": "Tapahtui virhe",
+      "network": "Verkkovirhe, yritä uudelleen",
+      "audioPreview": "Virhe ääninäytteen toistossa",
+      "uploadFailed": "Lataus epäonnistui",
+      "saveFailed": "Muutosten tallennus epäonnistui",
+      "fieldRequired": "Tämä kenttä on pakollinen",
+      "usernameTaken": "Käyttäjänimi on jo varattu",
+      "fileTooLarge": "Tiedosto on liian suuri (max 5MB)"
+    },
+    "loading": {
+      "generic": "Ladataan...",
+      "saving": "Tallennetaan...",
+      "uploading": "Ladataan palvelimelle..."
+    },
+    "languages": {
+      "fi": "Suomi",
+      "sv": "Svenska",
+      "en": "English",
+      "es": "Español"
+    }
+  }
+}

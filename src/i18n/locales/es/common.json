@@ -1,0 +1,123 @@
+{
+  "onboarding": {
+    "step0": {
+      "title": "Elige tu idioma",
+      "subtitle": "Selecciona el idioma que deseas usar con Mima"
+    },
+    "step1": {
+      "title": "Hola, soy Mima 👋",
+      "subtitle": "Tu asistente personal inteligente. Antes de empezar, personalicemos tu experiencia.",
+      "cta": "Continuar"
+    },
+    "step2": {
+      "title": "¿Cómo quieres que suene tu Mima?",
+      "subtitle": "Puedes cambiar esto en cualquier momento desde tu Perfil ⚙️",
+      "preview": "Muestra",
+      "playing": "Reproduciendo",
+      "cta": "Continuar",
+      "back": "Atrás"
+    },
+    "step3": {
+      "title": "¡Todo listo!",
+      "subtitle": "Ya puedes empezar a usar Mima.",
+      "note": "Recuerda: puedes cambiar la voz y otros ajustes en tu Perfil.",
+      "cta": "Ir al chat"
+    }
+  },
+  "chat": {
+    "header": {
+      "title": "Mima"
+    },
+    "input": {
+      "placeholder": "Pregunta a Mima..."
+    },
+    "actions": {
+      "attach": "Adjuntar archivo",
+      "screenshot": "Tomar captura",
+      "selectMode": "Seleccionar modo",
+      "currentMode": "Modo Actual"
+    },
+    "modes": {
+      "neutral": "Modo Neutral",
+      "professional": "Modo Negocios",
+      "creative": "Modo Creativo",
+      "zen": "Modo Zen",
+      "family": "Modo Familiar"
+    }
+  },
+  "profile": {
+    "sections": {
+      "info": "Información de Usuario",
+      "voice": "Voz de Mima",
+      "language": "Idioma de la Interfaz"
+    },
+    "fields": {
+      "fullName": "Nombre Completo",
+      "username": "Nombre de Usuario",
+      "email": "Correo (Solo lectura)",
+      "emailHelper": "Tu correo no se puede cambiar"
+    },
+    "voice": {
+      "title": "Voz de Mima",
+      "subtitle": "Elige cómo te habla tu asistente",
+      "updated": "Voz actualizada ✓",
+      "names": {
+        "voice1": "Mima US-1",
+        "voice2": "Mima US-2",
+        "voice3": "Mima US-3",
+        "voice4": "Mima US-4",
+        "voice5": "Mima UK-1",
+        "voice6": "Mima UK-2",
+        "voice7": "Mima UK-3"
+      },
+      "descriptions": {
+        "voice1": "Voz femenina americana clara y profesional",
+        "voice2": "Voz femenina americana cálida y amable",
+        "voice3": "Voz masculina americana directa y eficiente",
+        "voice4": "Voz femenina americana suave y tranquila",
+        "voice5": "Voz femenina británica sofisticada",
+        "voice6": "Voz masculina británica profesional",
+        "voice7": "Voz femenina británica amable"
+      }
+    },
+    "language": {
+      "title": "Idioma de la Interfaz",
+      "subtitle": "Selecciona tu idioma preferido"
+    },
+    "actions": {
+      "save": "Guardar cambios",
+      "saving": "Guardando...",
+      "saved": "Guardado",
+      "uploadPhoto": "Subir Foto"
+    }
+  },
+  "common": {
+    "buttons": {
+      "continue": "Continuar",
+      "back": "Atrás",
+      "cancel": "Cancelar",
+      "confirm": "Confirmar"
+    },
+    "errors": {
+      "generic": "Ha ocurrido un error",
+      "network": "Error de red, inténtalo de nuevo",
+      "audioPreview": "Error al reproducir la muestra de audio",
+      "uploadFailed": "Error en la subida",
+      "saveFailed": "Error al guardar los cambios",
+      "fieldRequired": "Este campo es obligatorio",
+      "usernameTaken": "El nombre de usuario ya está en uso",
+      "fileTooLarge": "El archivo es demasiado grande (máx 5MB)"
+    },
+    "loading": {
+      "generic": "Cargando...",
+      "saving": "Guardando...",
+      "uploading": "Subiendo..."
+    },
+    "languages": {
+      "fi": "Suomi",
+      "sv": "Svenska",
+      "en": "English",
+      "es": "Español"
+    }
+  }
+}

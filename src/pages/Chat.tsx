@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { Menu, Settings, Mic, ArrowUp, Plus, Volume2, Square, Play } from "lucide-react";
 import { generateChatResponse, generateSpeech } from "../services/geminiService";
 import Markdown from "react-markdown";
+import { ActionMenu } from "../components/ui/ActionMenu";
+import { ModeBottomSheet } from "../components/ui/ModeBottomSheet";
+import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
 
 export default function Chat() {
   const [messages, setMessages] = useState([
@@ -30,6 +33,15 @@ export default function Chat() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return localStorage.getItem('mima_onboarding_done') !== 'true';
+    } catch (e) {
+      return false;
+    }
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const voices = [
@@ -239,7 +251,10 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
+      {showOnboarding && (
+        <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+      )}
       <header className="flex items-center justify-between p-4 pt-6 shrink-0 z-10 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md sticky top-0">
         <div className="flex items-center gap-3">
           <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-slate-100">
@@ -253,58 +268,30 @@ export default function Chat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-surface-dark px-3 py-1.5 rounded-full border border-surface-highlight">
-            <div className="relative group hidden sm:block">
-              <select 
-                value={voiceId}
-                onChange={handleVoiceChange}
-                className="appearance-none bg-transparent pr-6 text-sm font-medium text-text-secondary focus:outline-none focus:text-primary transition-colors cursor-pointer"
-              >
-                {voices.map(v => (
-                  <option key={v.id} value={v.id} className="bg-background-dark">{v.name}</option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center text-text-secondary">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
-            </div>
-            <button 
-              onClick={playVoicePreview}
-              disabled={isPreviewLoading}
-              className="p-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center shrink-0"
-              title="Listen to voice sample"
-            >
-              {isPreviewLoading ? (
-                 <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-              ) : isPreviewPlaying ? (
-                 <Square className="w-3.5 h-3.5 fill-current" />
-              ) : (
-                 <Volume2 className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-          <div className="relative group">
-            <select 
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              className="appearance-none bg-transparent pl-3 pr-8 py-1.5 text-sm font-medium text-text-secondary border border-surface-highlight rounded-full focus:outline-none focus:border-primary transition-colors cursor-pointer"
-            >
-              <option>Business Mode</option>
-              <option>Neutral Mode</option>
-              <option>Family Mode</option>
-              <option>Zen Mode</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-            </div>
-          </div>
-          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary">
+          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary" aria-label="Configuración">
             <Settings className="w-6 h-6" />
           </button>
         </div>
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-2 space-y-6 scroll-smooth">
+        <ActionMenu 
+          isOpen={isActionMenuOpen}
+          onClose={() => setIsActionMenuOpen(false)}
+          currentMode={mode}
+          onSelectMode={() => {
+            setIsActionMenuOpen(false);
+            setIsModeSheetOpen(true);
+          }}
+          onAttachFile={() => console.log("Attach file")}
+          onTakeScreenshot={() => console.log("Take screenshot")}
+        />
+        <ModeBottomSheet
+          isOpen={isModeSheetOpen}
+          onClose={() => setIsModeSheetOpen(false)}
+          currentMode={mode}
+          onSelectMode={(newMode) => setMode(newMode)}
+        />
         <div className="flex justify-center my-4">
           <span className="text-xs font-medium text-text-secondary bg-surface-highlight px-3 py-1 rounded-full">
             Today
@@ -399,7 +386,11 @@ export default function Chat() {
       <footer className="p-4 bg-background-dark pb-8 shrink-0 relative">
         <div className="absolute bottom-1/2 left-1/2 -translate-x-1/2 translate-y-1/2 w-full h-32 bg-primary/10 blur-[60px] rounded-full pointer-events-none"></div>
         <div className="relative flex items-end gap-3 max-w-3xl mx-auto">
-          <button className="flex-shrink-0 w-10 h-10 mb-1 flex items-center justify-center rounded-full bg-surface-highlight text-text-secondary hover:text-primary transition-colors">
+          <button 
+            onClick={() => setIsActionMenuOpen(true)}
+            className="flex-shrink-0 w-10 h-10 mb-1 flex items-center justify-center rounded-full bg-surface-highlight text-text-secondary hover:text-primary transition-colors active:scale-95"
+            aria-label="Menú de acciones"
+          >
             <Plus className="w-5 h-5" />
           </button>
           <div className="flex-1 bg-surface-dark rounded-[24px] border border-surface-highlight focus-within:border-primary transition-colors flex items-center shadow-sm">

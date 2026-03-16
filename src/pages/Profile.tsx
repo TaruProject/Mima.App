@@ -1,63 +1,305 @@
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, User, Settings, Shield, Bell } from 'lucide-react';
+import { useToast } from '../hooks/useToast';
+import { generateSpeech } from '../services/geminiService';
+import { LogOut, User, Settings, Shield, Bell, Camera, Check, Loader2, Globe, Volume2, Play, Square } from 'lucide-react';
 
 export default function Profile() {
   const { user, signOut } = useAuth();
+  const { showToast } = useToast();
+  
+  const voices = [
+    { id: "DODLEQrClDo8wCz460ld", name: "Mima US-1" },
+    { id: "L0yTtpRXzdyzQlzALhgD", name: "Mima US-2" },
+    { id: "d3MFdIuCfbAIwiu7jC4a", name: "Mima US-3" },
+    { id: "l4Coq6695JDX9xtLqXDE", name: "Mima US-4" },
+    { id: "jP5jSWhfXz3nfQENMtf4", name: "Mima UK-1" },
+    { id: "ZtcPZrt9K4w8e1OB9M6w", name: "Mima UK-2" },
+    { id: "6fZce9LFNG3iEITDfqZZ", name: "Mima UK-3" },
+  ];
+
+  const [fullName, setFullName] = useState("Mima User");
+  const [username, setUsername] = useState("mima_user");
+  const [language, setLanguage] = useState("en");
+  const [voiceId, setVoiceId] = useState(() => {
+    try {
+      return localStorage.getItem('mima_voice_id') || voices[0].id;
+    } catch (e) {
+      return voices[0].id;
+    }
+  });
+  
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initial values to track changes
+  const initialValues = {
+    fullName: "Mima User",
+    username: "mima_user",
+    language: "en"
+  };
+
+  useEffect(() => {
+    const changed = 
+      fullName !== initialValues.fullName || 
+      username !== initialValues.username || 
+      language !== initialValues.language;
+    setHasChanges(changed);
+  }, [fullName, username, language]);
+
+  const handleVoiceSelect = (id: string) => {
+    if (id === voiceId) return;
+    setVoiceId(id);
+    try {
+      localStorage.setItem('mima_voice_id', id);
+      showToast("Voz actualizada ✓", "success");
+    } catch (e) {
+      console.error("Error saving voice preference", e);
+    }
+  };
+
+  const playVoicePreview = async (id: string) => {
+    if (previewPlayingId === id) {
+      previewAudioRef.current?.pause();
+      setPreviewPlayingId(null);
+      return;
+    }
+
+    try {
+      setPreviewLoadingId(id);
+      const audioBase64 = await generateSpeech("Hola, soy Mima, tu asistente personal inteligente.", id);
+      
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+      }
+
+      const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`);
+      previewAudioRef.current = audio;
+      
+      audio.onplay = () => {
+        setPreviewLoadingId(null);
+        setPreviewPlayingId(id);
+      };
+      
+      audio.onended = () => {
+        setPreviewPlayingId(null);
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error("Error playing preview", error);
+      setPreviewLoadingId(null);
+      showToast("Error al reproducir la muestra", "error");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!hasChanges || isSaving) return;
+    
+    setIsSaving(true);
+    setSaveStatus('saving');
+    
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    setIsSaving(false);
+    setSaveStatus('saved');
+    setHasChanges(false);
+    showToast("Cambios guardados correctamente", "success");
+    
+    setTimeout(() => {
+      setSaveStatus('idle');
+    }, 2000);
+  };
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
       <header className="sticky top-0 z-50 bg-background-dark/80 backdrop-blur-md pt-12 pb-4 px-6">
-        <h1 className="text-2xl font-bold tracking-tight">Profile</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Perfil</h1>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-        <div className="bg-surface-dark rounded-3xl p-6 border border-white/5 flex flex-col items-center text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-br from-primary/20 to-purple-500/20"></div>
-          
-          <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center mb-4 border-4 border-background-dark shadow-xl">
-            <span className="text-3xl font-bold text-white">
-              {user?.email?.charAt(0).toUpperCase() || 'U'}
-            </span>
+      <main className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
+        {/* BLOQUE A — Información del usuario */}
+        <section className="space-y-6">
+          <div className="flex flex-col items-center">
+            <div className="relative group">
+              <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center border-4 border-background-dark shadow-xl overflow-hidden">
+                <span className="text-4xl font-bold text-white">
+                  {fullName.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <button className="absolute bottom-0 right-0 w-10 h-10 bg-primary rounded-full flex items-center justify-center border-4 border-background-dark text-white hover:bg-primary-dark transition-colors shadow-lg">
+                <Camera className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-          
-          <h2 className="text-xl font-bold text-white mb-1">{user?.email}</h2>
-          <p className="text-sm text-slate-400 mb-6">Mima User</p>
-          
-          <button className="w-full py-2.5 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl font-semibold transition-colors border border-white/10 flex items-center justify-center gap-2">
-            <Settings className="w-4 h-4" />
-            Edit Profile
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre Completo</label>
+              <input 
+                type="text" 
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-primary transition-colors"
+                placeholder="Tu nombre"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre de Usuario</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-medium">@</span>
+                <input 
+                  type="text" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
+                  className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 pl-8 text-white focus:outline-none focus:border-primary transition-colors"
+                  placeholder="username"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5 opacity-60">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Email (Solo lectura)</label>
+              <input 
+                type="email" 
+                value={user?.email || ""} 
+                readOnly
+                className="w-full bg-surface-dark/50 border border-white/5 rounded-2xl p-4 text-slate-400 cursor-not-allowed"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Idioma de Interfaz</label>
+              <div className="relative">
+                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                <select 
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 pl-12 text-white appearance-none focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="en">🇺🇸 English</option>
+                  <option value="es" disabled>🇪🇸 Español (Próximamente)</option>
+                  <option value="fi" disabled>🇫🇮 Finlandés (Próximamente)</option>
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                  <Settings className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* BLOQUE B — Personalización de Mima (Voz) */}
+        <section className="space-y-4">
+          <div className="px-1">
+            <h3 className="text-xl font-bold text-white">Voz de Mima</h3>
+            <p className="text-sm text-slate-400">Elige cómo te habla tu asistente</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {voices.map((v) => {
+              const isSelected = voiceId === v.id;
+              const isLoading = previewLoadingId === v.id;
+              const isPlaying = previewPlayingId === v.id;
+
+              return (
+                <div 
+                  key={v.id}
+                  onClick={() => handleVoiceSelect(v.id)}
+                  className={`relative p-4 rounded-2xl border transition-all cursor-pointer group ${
+                    isSelected 
+                      ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(98,33,221,0.1)]' 
+                      : 'bg-surface-dark border-white/5 hover:border-white/10'
+                  }`}
+                >
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        isSelected ? 'bg-primary text-white' : 'bg-white/5 text-slate-400'
+                      }`}>
+                        <Volume2 className="w-4 h-4" />
+                      </div>
+                      {isSelected && (
+                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <p className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                        {v.name}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playVoicePreview(v.id);
+                      }}
+                      className={`w-full py-2 rounded-xl flex items-center justify-center gap-2 transition-colors ${
+                        isPlaying 
+                          ? 'bg-primary text-white' 
+                          : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : isPlaying ? (
+                        <Square className="w-4 h-4 fill-current" />
+                      ) : (
+                        <Play className="w-4 h-4 fill-current" />
+                      )}
+                      <span className="text-xs font-bold uppercase tracking-wider">Muestra</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <div className="pt-2">
+          <button 
+            onClick={handleSave}
+            disabled={!hasChanges || isSaving}
+            className={`w-full py-4 rounded-full font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${
+              hasChanges && !isSaving
+                ? 'bg-primary text-white shadow-primary/20 hover:bg-primary-dark active:scale-95'
+                : saveStatus === 'saved'
+                ? 'bg-emerald-500 text-white'
+                : 'bg-white/5 text-slate-500 cursor-not-allowed'
+            }`}
+          >
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Guardando...
+              </>
+            ) : saveStatus === 'saved' ? (
+              <>
+                <Check className="w-5 h-5" />
+                Guardado
+              </>
+            ) : (
+              'Guardar cambios'
+            )}
           </button>
         </div>
 
-        <div className="space-y-2">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2 mb-3">Account Settings</h3>
-          
-          <button className="w-full flex items-center justify-between p-4 bg-surface-dark hover:bg-surface-highlight rounded-2xl border border-white/5 transition-colors group">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-                <Bell className="w-5 h-5" />
-              </div>
-              <span className="font-medium text-slate-200">Notifications</span>
-            </div>
-          </button>
-
-          <button className="w-full flex items-center justify-between p-4 bg-surface-dark hover:bg-surface-highlight rounded-2xl border border-white/5 transition-colors group">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
-                <Shield className="w-5 h-5" />
-              </div>
-              <span className="font-medium text-slate-200">Privacy & Security</span>
-            </div>
-          </button>
-        </div>
-
-        <div className="pt-4">
+        <div className="pt-4 border-t border-white/5">
           <button 
             onClick={signOut}
-            className="w-full flex items-center justify-center gap-2 p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl border border-red-500/20 transition-colors font-bold"
+            className="w-full flex items-center justify-center gap-2 p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl border border-red-500/20 transition-colors font-bold active:scale-95"
           >
             <LogOut className="w-5 h-5" />
-            Sign Out
+            Cerrar Sesión
           </button>
         </div>
       </main>

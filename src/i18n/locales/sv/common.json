@@ -1,0 +1,123 @@
+{
+  "onboarding": {
+    "step0": {
+      "title": "Välj ditt språk",
+      "subtitle": "Välj det språk du vill använda med Mima"
+    },
+    "step1": {
+      "title": "Hej, jag är Mima 👋",
+      "subtitle": "Din intelligenta personliga assistent. Innan vi börjar, låt oss anpassa din upplevelse.",
+      "cta": "Fortsätt"
+    },
+    "step2": {
+      "title": "Hur vill du att din Mima ska låta?",
+      "subtitle": "Du kan ändra detta när som helst från din profil ⚙️",
+      "preview": "Prov",
+      "playing": "Spelar upp",
+      "cta": "Fortsätt",
+      "back": "Tillbaka"
+    },
+    "step3": {
+      "title": "Allt klart!",
+      "subtitle": "Du är redo att börja använda Mima.",
+      "note": "Kom ihåg: du kan ändra röst och andra inställningar i din profil.",
+      "cta": "Gå till chatten"
+    }
+  },
+  "chat": {
+    "header": {
+      "title": "Mima"
+    },
+    "input": {
+      "placeholder": "Fråga Mima..."
+    },
+    "actions": {
+      "attach": "Bifoga fil",
+      "screenshot": "Ta skärmdump",
+      "selectMode": "Välj läge",
+      "currentMode": "Nuvarande läge"
+    },
+    "modes": {
+      "neutral": "Neutralt läge",
+      "professional": "Affärsläge",
+      "creative": "Kreativt läge",
+      "zen": "Zen-läge",
+      "family": "Familjeläge"
+    }
+  },
+  "profile": {
+    "sections": {
+      "info": "Användarinformation",
+      "voice": "Mimas röst",
+      "language": "Gränssnittsspråk"
+    },
+    "fields": {
+      "fullName": "Fullständigt namn",
+      "username": "Användarnamn",
+      "email": "E-post (Endast läsning)",
+      "emailHelper": "Din e-post kan inte ändras"
+    },
+    "voice": {
+      "title": "Mimas röst",
+      "subtitle": "Välj hur din assistent pratar med dig",
+      "updated": "Rösten uppdaterad ✓",
+      "names": {
+        "voice1": "Mima US-1",
+        "voice2": "Mima US-2",
+        "voice3": "Mima US-3",
+        "voice4": "Mima US-4",
+        "voice5": "Mima UK-1",
+        "voice6": "Mima UK-2",
+        "voice7": "Mima UK-3"
+      },
+      "descriptions": {
+        "voice1": "Tydlig och professionell amerikansk kvinnoröst",
+        "voice2": "Varm och vänlig amerikansk kvinnoröst",
+        "voice3": "Direkt och effektiv amerikansk mansröst",
+        "voice4": "Mjuk och lugn amerikansk kvinnoröst",
+        "voice5": "Sofistikerad brittisk kvinnoröst",
+        "voice6": "Professionell brittisk mansröst",
+        "voice7": "Vänlig brittisk kvinnoröst"
+      }
+    },
+    "language": {
+      "title": "Gränssnittsspråk",
+      "subtitle": "Välj ditt föredragna språk"
+    },
+    "actions": {
+      "save": "Spara ändringar",
+      "saving": "Sparar...",
+      "saved": "Sparad",
+      "uploadPhoto": "Ladda upp foto"
+    }
+  },
+  "common": {
+    "buttons": {
+      "continue": "Fortsätt",
+      "back": "Tillbaka",
+      "cancel": "Avbryt",
+      "confirm": "Bekräfta"
+    },
+    "errors": {
+      "generic": "Ett fel uppstod",
+      "network": "Nätverksfel, försök igen",
+      "audioPreview": "Fel vid uppspelning av röstprov",
+      "uploadFailed": "Uppladdningen misslyckades",
+      "saveFailed": "Misslyckades med att spara ändringar",
+      "fieldRequired": "Detta fält on obligatoriskt",
+      "usernameTaken": "Användarnamnet är redan upptaget",
+      "fileTooLarge": "Filen är för stor (max 5MB)"
+    },
+    "loading": {
+      "generic": "Laddar...",
+      "saving": "Sparar...",
+      "uploading": "Laddar upp..."
+    },
+    "languages": {
+      "fi": "Suomi",
+      "sv": "Svenska",
+      "en": "English",
+      "es": "Español"
+    }
+  }
+}

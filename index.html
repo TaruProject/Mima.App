@@ -29,6 +29,30 @@
     <meta property="twitter:image" content="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" />
 
     <title>Mima</title>
+    <script>
+      // Suppress Vite HMR connection errors in the console
+      (function() {
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        const silenceVite = (msg) => {
+          if (typeof msg === 'string' && (msg.includes('[vite]') || msg.includes('WebSocket'))) return true;
+          return false;
+        };
+        console.error = function(...args) {
+          if (silenceVite(args[0])) return;
+          originalError.apply(console, args);
+        };
+        console.warn = function(...args) {
+          if (silenceVite(args[0])) return;
+          originalWarn.apply(console, args);
+        };
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event.reason && event.reason.message && event.reason.message.includes('WebSocket')) {
+            event.preventDefault();
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
