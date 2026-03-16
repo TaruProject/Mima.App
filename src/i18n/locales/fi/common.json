@@ -1,123 +1,71 @@
 {
   "onboarding": {
-    "step0": {
-      "title": "Valitse kieli",
-      "subtitle": "Valitse kieli, jota haluat käyttää Miman kanssa"
-    },
-    "step1": {
-      "title": "Hei, olen Mima 👋",
-      "subtitle": "Älykäs henkilökohtainen avustajasi. Ennen kuin aloitamme, personoidaan kokemuksesi.",
-      "cta": "Jatka"
-    },
-    "step2": {
-      "title": "Miltä haluat Mimasi kuulostavan?",
-      "subtitle": "Voit muuttaa tätä milloin tahansa profiilistasi ⚙️",
-      "preview": "Näyte",
-      "playing": "Toistetaan",
-      "cta": "Jatka",
-      "back": "Takaisin"
-    },
-    "step3": {
-      "title": "Kaikki valmiina!",
-      "subtitle": "Olet valmis aloittamaan Miman käytön.",
-      "note": "Muista: voit muuttaa ääntä ja muita asetuksia profiilistasi.",
-      "cta": "Siirry chattiin"
-    }
+    "step_language": "Valitse kieli",
+    "step_voice": "Valitse Miman ääni",
+    "step_permissions": "Luvat",
+    "step_ready": "Valmis aloittamaan",
+    "welcome_title": "Hei, olen Mima 👋",
+    "welcome_subtitle": "Älykäs henkilökohtainen avustajasi. Olen täällä auttaakseni sinua hallitsemaan päivääsi, sähköpostejasi ja paljon muuta.",
+    "voice_preview_btn": "Näyte",
+    "voice_preview_text": "Hei, olen Mima, älykäs henkilökohtainen avustajasi.",
+    "permissions_title": "Tarvitsen joitakin lupia",
+    "permissions_subtitle": "Auttaakseni sinua paremmin, tarvitsen pääsyn kalenteriisi ja sähköposteihisi.",
+    "permissions_btn": "Anna pääsy",
+    "ready_title": "Kaikki on valmista!",
+    "ready_subtitle": "Voit nyt aloittaa keskustelun kanssani.",
+    "start_btn": "Aloita keskustelu",
+    "next_btn": "Seuraava",
+    "back_btn": "Takaisin"
   },
   "chat": {
-    "header": {
-      "title": "Mima"
-    },
-    "input": {
-      "placeholder": "Kysy Mimalta..."
-    },
-    "actions": {
-      "attach": "Liitä tiedosto",
-      "screenshot": "Ota kuvakaappaus",
-      "selectMode": "Valitse tila",
-      "currentMode": "Nykyinen tila"
-    },
-    "modes": {
-      "neutral": "Neutraali tila",
-      "professional": "Bisnestila",
-      "creative": "Luova tila",
-      "zen": "Zen-tila",
-      "family": "Perhetila"
-    }
+    "input_placeholder": "Viesti Mimallle...",
+    "initial_message": "Hei! Olen Mima. Kuinka voin auttaa sinua tänään?",
+    "sender_mima": "Mima",
+    "sender_you": "Sinä",
+    "audio_error": "Virhe äänen toistossa",
+    "voice_not_found": "Ääntä ei ole määritetty. Mene profiiliin."
   },
   "profile": {
-    "sections": {
-      "info": "Käyttäjätiedot",
-      "voice": "Miman ääni",
-      "language": "Käyttöliittymän kieli"
-    },
-    "fields": {
-      "fullName": "Koko nimi",
-      "username": "Käyttäjänimi",
-      "email": "Sähköposti (Vain luku)",
-      "emailHelper": "Sähköpostiasi ei voi muuttaa"
-    },
-    "voice": {
-      "title": "Miman ääni",
-      "subtitle": "Valitse, miten avustajasi puhuu sinulle",
-      "updated": "Ääni päivitetty ✓",
-      "names": {
-        "voice1": "Mima US-1",
-        "voice2": "Mima US-2",
-        "voice3": "Mima US-3",
-        "voice4": "Mima US-4",
-        "voice5": "Mima UK-1",
-        "voice6": "Mima UK-2",
-        "voice7": "Mima UK-3"
-      },
-      "descriptions": {
-        "voice1": "Selkeä ja ammattimainen amerikkalainen naisääni",
-        "voice2": "Lämmin ja ystävällinen amerikkalainen naisääni",
-        "voice3": "Suora ja tehokas amerikkalainen miesääni",
-        "voice4": "Pehmeä ja rauhallinen amerikkalainen naisääni",
-        "voice5": "Hienostunut brittiläinen naisääni",
-        "voice6": "Ammattimainen brittiläinen miesääni",
-        "voice7": "Ystävällinen brittiläinen naisääni"
-      }
-    },
-    "language": {
-      "title": "Käyttöliittymän kieli",
-      "subtitle": "Valitse haluamasi kieli"
-    },
-    "actions": {
-      "save": "Tallenna muutokset",
-      "saving": "Tallennetaan...",
-      "saved": "Tallennettu",
-      "uploadPhoto": "Lataa kuva"
-    }
+    "title": "Profiili",
+    "full_name": "Koko nimi",
+    "username": "Käyttäjänimi",
+    "email_readonly": "Sähköposti (Vain luku)",
+    "interface_language": "Käyttöliittymän kieli",
+    "voice_title": "Miman ääni",
+    "voice_subtitle": "Valitse, miten avustajasi puhuu sinulle",
+    "voice_updated": "Ääni päivitetty ✓",
+    "save_btn": "Tallenna muutokset",
+    "saving": "Tallennetaan...",
+    "saved": "Tallennettu",
+    "save_success": "Muutokset tallennettu onnistuneesti",
+    "logout": "Kirjaudu ulos"
+  },
+  "inbox": {
+    "title": "Mima Inbox",
+    "action_items": "Tehtävät",
+    "filter_all": "Kaikki",
+    "filter_urgent": "Kiireelliset",
+    "filter_newsletters": "Uutiskirjeet",
+    "filter_updates": "Päivitykset",
+    "connect_title": "Yhdistä Gmail",
+    "connect_description": "Yhdistä Google-tilisi, jotta Mima voi lukea, tiivistää ja luonnostella vastauksia sähköposteihisi.",
+    "empty": "Sähköpostisi on tyhjä.",
+    "draft_reply": "Luonnostele vastaus Mimalla"
+  },
+  "calendar": {
+    "title": "Kalenteri",
+    "connect_title": "Yhdistä Google-kalenteri",
+    "connect_description": "Yhdistä Google-tilisi, jotta Mima voi hallita aikatauluasi, luoda tapahtumia ja löytää vapaata aikaa.",
+    "empty": "Tulevia tapahtumia ei löytynyt.",
+    "all_day": "Koko päivä",
+    "today": "Tänään"
   },
   "common": {
-    "buttons": {
-      "continue": "Jatka",
-      "back": "Takaisin",
-      "cancel": "Peruuta",
-      "confirm": "Vahvista"
-    },
-    "errors": {
-      "generic": "Tapahtui virhe",
-      "network": "Verkkovirhe, yritä uudelleen",
-      "audioPreview": "Virhe ääninäytteen toistossa",
-      "uploadFailed": "Lataus epäonnistui",
-      "saveFailed": "Muutosten tallennus epäonnistui",
-      "fieldRequired": "Tämä kenttä on pakollinen",
-      "usernameTaken": "Käyttäjänimi on jo varattu",
-      "fileTooLarge": "Tiedosto on liian suuri (max 5MB)"
-    },
-    "loading": {
-      "generic": "Ladataan...",
-      "saving": "Tallennetaan...",
-      "uploading": "Ladataan palvelimelle..."
-    },
-    "languages": {
-      "fi": "Suomi",
-      "sv": "Svenska",
-      "en": "English",
-      "es": "Español"
-    }
+    "try_again": "Yritä uudelleen",
+    "loading_failed": "Lataus epäonnistui. Yritä uudelleen.",
+    "network_error": "Verkkovirhe. Yritä uudelleen.",
+    "signin_google": "Kirjaudu sisään Googlella",
+    "auth_failed": "Kirjautuminen epäonnistui. Yritä uudelleen.",
+    "allow_popups": "Salli ponnahdusikkunat tälle sivustolle yhdistääksesi tilisi."
   }
 }

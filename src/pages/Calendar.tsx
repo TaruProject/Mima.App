@@ -3,13 +3,15 @@ import { useState, useEffect } from "react";
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO } from "date-fns";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
+import { useTranslation } from "react-i18next";
 
 export default function Calendar() {
+  const { t } = useTranslation();
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
 
   useEffect(() => {
@@ -24,16 +26,15 @@ export default function Calendar() {
     }
   }, [isConnected]);
 
-  const getAuthHeaders = async () => {
-    const { data } = await supabase.auth.getSession();
+  const getAuthHeaders = () => {
     return {
-      'Authorization': `Bearer ${data.session?.access_token}`
+      'Authorization': `Bearer ${session?.access_token}`
     };
   };
 
   const checkConnectionStatus = async () => {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch(`/api/auth/status`, { headers });
       if (response.ok) {
         const data = await response.json();
@@ -48,7 +49,7 @@ export default function Calendar() {
     setIsLoading(true);
     setError(null);
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch('/api/calendar/events', { headers });
 
       if (response.ok) {
@@ -57,11 +58,11 @@ export default function Calendar() {
       } else if (response.status === 401) {
         setIsConnected(false);
       } else {
-        setError("Failed to load events. Please try again.");
+        setError(t('common.loading_failed'));
       }
     } catch (error) {
       console.error("Failed to fetch events", error);
-      setError("Network error. Please try again.");
+      setError(t('common.network_error'));
     } finally {
       setIsLoading(false);
     }
@@ -69,7 +70,7 @@ export default function Calendar() {
 
   const handleConnect = async () => {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch(`/api/auth/url`, { headers });
       if (!response.ok) {
         throw new Error('Failed to get auth URL');
@@ -83,11 +84,11 @@ export default function Calendar() {
       );
 
       if (!authWindow) {
-        alert('Please allow popups for this site to connect your account.');
+        alert(t('common.allow_popups'));
       }
     } catch (error) {
       console.error('OAuth error:', error);
-      setError("Failed to initiate connection.");
+      setError(t('common.auth_failed'));
     }
   };
 
@@ -96,18 +97,18 @@ export default function Calendar() {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         setIsConnected(true);
       } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        alert('Authentication failed. Please try again.');
+        alert(t('common.auth_failed'));
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [t]);
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100">
       <header className="flex items-center justify-between px-6 pt-12 pb-4 bg-background-dark z-20 sticky top-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t('calendar.title')}</h1>
         </div>
         <div className="flex items-center gap-2">
           <button className="flex items-center justify-center w-10 h-10 rounded-full bg-surface-highlight text-white hover:bg-primary/20 transition-colors">
@@ -115,7 +116,7 @@ export default function Calendar() {
           </button>
           <div className="relative">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold border-2 border-surface-highlight">
-              A
+              {user?.email?.charAt(0).toUpperCase() || 'U'}
             </div>
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-background-dark rounded-full"></div>
           </div>
@@ -179,15 +180,15 @@ export default function Calendar() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-0 custom-scrollbar pb-32 flex flex-col">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-0 custom-scrollbar pb-32 flex flex-col no-scrollbar">
         {!isConnected ? (
           <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-white/5 max-w-sm w-full mt-8 mx-auto">
             <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
               <CalendarIcon className="w-8 h-8 text-primary" />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Connect Google Calendar</h3>
+            <h3 className="text-xl font-bold text-white mb-2">{t('calendar.connect_title')}</h3>
             <p className="text-sm text-slate-400 mb-6">
-              Link your Google account to allow Mima to manage your schedule, create events, and find free time.
+              {t('calendar.connect_description')}
             </p>
             <button 
               onClick={() => handleConnect()}
@@ -199,7 +200,7 @@ export default function Calendar() {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
-              Sign in with Google
+              {t('common.signin_google')}
             </button>
           </div>
         ) : isLoading ? (
@@ -209,11 +210,11 @@ export default function Calendar() {
         ) : error ? (
           <div className="text-center mt-10 flex flex-col items-center gap-4">
             <p className="text-red-400">{error}</p>
-            <button onClick={fetchEvents} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">Try Again</button>
+            <button onClick={fetchEvents} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">{t('common.try_again')}</button>
           </div>
         ) : events.length === 0 ? (
           <div className="text-center text-slate-400 mt-10">
-            <p>No upcoming events found.</p>
+            <p>{t('calendar.empty')}</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -222,9 +223,9 @@ export default function Calendar() {
               const end = event.end.dateTime || event.end.date;
               const isAllDay = !event.start.dateTime;
               
-              const startTime = isAllDay ? "All Day" : format(parseISO(start), "hh:mm a");
+              const startTime = isAllDay ? t('calendar.all_day') : format(parseISO(start), "hh:mm a");
               const endTime = isAllDay ? "" : format(parseISO(end), "hh:mm a");
-              const dateLabel = isToday(parseISO(start)) ? "Today" : format(parseISO(start), "MMM d");
+              const dateLabel = isToday(parseISO(start)) ? t('calendar.today') : format(parseISO(start), "MMM d");
 
               return (
                 <div key={event.id} className="flex gap-4 group">

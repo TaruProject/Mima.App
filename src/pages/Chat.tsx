@@ -5,13 +5,15 @@ import Markdown from "react-markdown";
 import { ActionMenu } from "../components/ui/ActionMenu";
 import { ModeBottomSheet } from "../components/ui/ModeBottomSheet";
 import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
+import { useTranslation } from "react-i18next";
 
 export default function Chat() {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState([
     {
       id: 1,
       sender: "Mima",
-      text: "Hello. I am Mima, your personal assistant. How can I help you today?",
+      text: t('chat.welcome_message'),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       audio: null as string | null,
     },
@@ -44,61 +46,15 @@ export default function Chat() {
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const voices = [
-    { id: "DODLEQrClDo8wCz460ld", name: "Mima US-1" },
-    { id: "L0yTtpRXzdyzQlzALhgD", name: "Mima US-2" },
-    { id: "d3MFdIuCfbAIwiu7jC4a", name: "Mima US-3" },
-    { id: "l4Coq6695JDX9xtLqXDE", name: "Mima US-4" },
-    { id: "jP5jSWhfXz3nfQENMtf4", name: "Mima UK-1" },
-    { id: "ZtcPZrt9K4w8e1OB9M6w", name: "Mima UK-2" },
-    { id: "6fZce9LFNG3iEITDfqZZ", name: "Mima UK-3" },
-  ];
-
-  const handleVoiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newVoiceId = e.target.value;
-    setVoiceId(newVoiceId);
-    try {
-      localStorage.setItem('mima_voice_id', newVoiceId);
-    } catch (e) {
-      // Ignore
-    }
-    
-    // Stop any currently playing audio
-    stopAudio();
-    
-    // Clear cached audio for all messages so they regenerate with the new voice
-    setMessages(prev => prev.map(m => ({ ...m, audio: null })));
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // Update initial message when language changes if it's the only message
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  useEffect(() => {
-    let animationFrameId: number;
-
-    const updateProgress = () => {
-      if (audioRef.current && playingAudio && !playingAudio.startsWith('loading-')) {
-        const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
-        setAudioProgress(isNaN(progress) ? 0 : progress);
-        animationFrameId = requestAnimationFrame(updateProgress);
-      }
-    };
-
-    if (playingAudio && !playingAudio.startsWith('loading-')) {
-      animationFrameId = requestAnimationFrame(updateProgress);
-    } else {
-      setAudioProgress(0);
+    if (messages.length === 1 && messages[0].id === 1) {
+      setMessages([{
+        ...messages[0],
+        text: t('chat.welcome_message')
+      }]);
     }
-
-    return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    };
-  }, [playingAudio]);
+  }, [t]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -110,7 +66,7 @@ export default function Chat() {
       ...prev,
       {
         id: Date.now(),
-        sender: "You",
+        sender: t('common.you'),
         text: userMsg,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         audio: null,
@@ -139,7 +95,7 @@ export default function Chat() {
         {
           id: Date.now() + 1,
           sender: "Mima",
-          text: "I encountered an error processing your request.",
+          text: t('chat.error_message'),
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           audio: null,
         },
@@ -233,7 +189,7 @@ export default function Chat() {
         return; // Silently return if aborted
       } else {
         setPlayingAudio(null);
-        alert("Error: No se pudo generar el audio. Verifica que el servidor backend esté corriendo y que la API key de ElevenLabs esté configurada.");
+        alert(t('chat.audio_error'));
         return;
       }
     }
@@ -249,6 +205,36 @@ export default function Chat() {
       };
     }
   };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const updateProgress = () => {
+      if (audioRef.current && playingAudio && !playingAudio.startsWith('loading-')) {
+        const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+        setAudioProgress(isNaN(progress) ? 0 : progress);
+        animationFrameId = requestAnimationFrame(updateProgress);
+      }
+    };
+
+    if (playingAudio && !playingAudio.startsWith('loading-')) {
+      animationFrameId = requestAnimationFrame(updateProgress);
+    } else {
+      setAudioProgress(0);
+    }
+
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [playingAudio]);
 
   return (
     <div className="flex flex-col h-full relative">
@@ -268,7 +254,7 @@ export default function Chat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary" aria-label="Configuración">
+          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary" aria-label={t('common.settings')}>
             <Settings className="w-6 h-6" />
           </button>
         </div>
@@ -294,7 +280,7 @@ export default function Chat() {
         />
         <div className="flex justify-center my-4">
           <span className="text-xs font-medium text-text-secondary bg-surface-highlight px-3 py-1 rounded-full">
-            Today
+            {t('chat.today')}
           </span>
         </div>
 
@@ -302,7 +288,7 @@ export default function Chat() {
           <div
             key={msg.id}
             className={`flex items-start gap-3 max-w-[85%] ${
-              msg.sender === "You" ? "justify-end ml-auto" : ""
+              msg.sender === t('common.you') ? "justify-end ml-auto" : ""
             }`}
           >
             {msg.sender === "Mima" && (
@@ -310,13 +296,13 @@ export default function Chat() {
                 <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
               </div>
             )}
-            <div className={`flex flex-col gap-1 ${msg.sender === "You" ? "items-end" : ""}`}>
+            <div className={`flex flex-col gap-1 ${msg.sender === t('common.you') ? "items-end" : ""}`}>
               {msg.sender === "Mima" && (
                 <span className="text-xs text-text-secondary ml-1">{msg.sender}</span>
               )}
               <div
                 className={`p-4 rounded-2xl shadow-sm leading-relaxed text-[15px] ${
-                  msg.sender === "You"
+                  msg.sender === t('common.you')
                     ? "bg-primary text-white rounded-tr-sm shadow-primary/20"
                     : "bg-surface-highlight text-slate-100 rounded-tl-sm"
                 }`}
@@ -325,7 +311,7 @@ export default function Chat() {
                   <Markdown>{msg.text}</Markdown>
                 </div>
               </div>
-              <div className={`flex items-center gap-2 ${msg.sender === "You" ? "mr-1" : "ml-1"}`}>
+              <div className={`flex items-center gap-2 ${msg.sender === t('common.you') ? "mr-1" : "ml-1"}`}>
                 <span className="text-xs text-text-secondary">
                   {msg.time}
                 </span>
@@ -340,7 +326,7 @@ export default function Chat() {
                           ? "text-text-secondary animate-pulse"
                           : "text-text-secondary hover:bg-surface-highlight hover:text-white"
                       }`}
-                      title={playingAudio === msg.id.toString() ? "Stop audio" : "Play audio"}
+                      title={playingAudio === msg.id.toString() ? t('chat.stop_audio') : t('chat.play_audio')}
                     >
                       {playingAudio === msg.id.toString() ? (
                         <Square className="w-4 h-4 fill-current" />
@@ -389,14 +375,14 @@ export default function Chat() {
           <button 
             onClick={() => setIsActionMenuOpen(true)}
             className="flex-shrink-0 w-10 h-10 mb-1 flex items-center justify-center rounded-full bg-surface-highlight text-text-secondary hover:text-primary transition-colors active:scale-95"
-            aria-label="Menú de acciones"
+            aria-label={t('chat.action_menu')}
           >
             <Plus className="w-5 h-5" />
           </button>
           <div className="flex-1 bg-surface-dark rounded-[24px] border border-surface-highlight focus-within:border-primary transition-colors flex items-center shadow-sm">
             <input
               className="w-full bg-transparent border-none focus:ring-0 text-white placeholder:text-text-secondary h-12 px-4 py-3 rounded-[24px] outline-none"
-              placeholder="Ask Mima..."
+              placeholder={t('chat.input_placeholder')}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}

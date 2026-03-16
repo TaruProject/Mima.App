@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, ChevronLeft, Check, Volume2, Play, Square, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Check, Volume2, Play, Square, Loader2, Globe } from 'lucide-react';
 import { generateSpeech } from '../../services/geminiService';
+import { useTranslation } from 'react-i18next';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -12,17 +13,28 @@ const voices = [
   { id: "L0yTtpRXzdyzQlzALhgD", name: "Mima US-2" },
   { id: "d3MFdIuCfbAIwiu7jC4a", name: "Mima US-3" },
   { id: "l4Coq6695JDX9xtLqXDE", name: "Mima US-4" },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Mima ES-1" },
+  { id: "FGY2WhTYpP6BYn95boSj", name: "Mima ES-2" },
+  { id: "IKne3meq5a9ay67vC7pY", name: "Mima ES-3" },
+];
+
+const languages = [
+  { code: 'en', name: 'English', flag: '🇺🇸' },
+  { code: 'es', name: 'Español', flag: '🇪🇸' },
+  { code: 'fi', name: 'Suomi', flag: '🇫🇮' },
+  { code: 'sv', name: 'Svenska', flag: '🇸🇪' },
 ];
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) => {
-  const [step, setStep] = useState(1);
+  const { t, i18n } = useTranslation();
+  const [step, setStep] = useState(0);
   const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const handleNext = () => {
-    if (step < 3) setStep(step + 1);
+    if (step < 4) setStep(step + 1);
     else {
       localStorage.setItem('mima_onboarding_done', 'true');
       localStorage.setItem('mima_voice_id', selectedVoice);
@@ -31,7 +43,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   };
 
   const handleBack = () => {
-    if (step > 1) setStep(step - 1);
+    if (step > 0) setStep(step - 1);
+  };
+
+  const changeLanguage = (code: string) => {
+    i18n.changeLanguage(code);
+    localStorage.setItem('mima_language', code);
   };
 
   const playPreview = async (id: string) => {
@@ -43,7 +60,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
     try {
       setPreviewLoadingId(id);
-      const audioBase64 = await generateSpeech("Hola, soy Mima, tu asistente personal inteligente.", id);
+      const previewText = t('onboarding.voice_preview_text');
+      const audioBase64 = await generateSpeech(previewText, id);
       
       if (audioRef.current) audioRef.current.pause();
 
@@ -67,7 +85,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     <div className="fixed inset-0 z-[200] bg-background-dark flex flex-col overflow-hidden">
       {/* Progress Dots */}
       <div className="flex justify-center gap-2 pt-12 pb-6">
-        {[1, 2, 3].map((i) => (
+        {[0, 1, 2, 3, 4].map((i) => (
           <div 
             key={i}
             className={`w-2 h-2 rounded-full transition-all duration-300 ${
@@ -79,6 +97,39 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
       <div className="flex-1 relative">
         <AnimatePresence mode="wait">
+          {step === 0 && (
+            <motion.div
+              key="step0"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="absolute inset-0 flex flex-col items-center justify-center px-8"
+            >
+              <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-8">
+                <Globe className="w-10 h-10 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2 text-center">Choose your language</h2>
+              <p className="text-slate-400 text-center mb-8">Select the language for Mima's interface</p>
+              
+              <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
+                {languages.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => changeLanguage(lang.code)}
+                    className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${
+                      i18n.language === lang.code 
+                        ? 'bg-primary/10 border-primary text-white' 
+                        : 'bg-white/5 border-white/5 text-slate-400'
+                    }`}
+                  >
+                    <span className="text-2xl">{lang.flag}</span>
+                    <span className="font-bold">{lang.name}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
           {step === 1 && (
             <motion.div
               key="step1"
@@ -90,9 +141,9 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
               <div className="w-32 h-32 rounded-3xl bg-primary/20 flex items-center justify-center mb-8 animate-pulse">
                 <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" className="w-24 h-24 rounded-2xl object-cover" />
               </div>
-              <h2 className="text-3xl font-bold text-white mb-4">Hola, soy Mima 👋</h2>
+              <h2 className="text-3xl font-bold text-white mb-4">{t('onboarding.welcome_title')}</h2>
               <p className="text-lg text-slate-400 max-w-xs">
-                Tu asistente personal inteligente. Antes de empezar, personalicemos tu experiencia.
+                {t('onboarding.welcome_subtitle')}
               </p>
             </motion.div>
           )}
@@ -103,12 +154,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="absolute inset-0 flex flex-col px-8 pt-12"
+              className="absolute inset-0 flex flex-col px-8 pt-4 overflow-y-auto no-scrollbar"
             >
-              <h2 className="text-2xl font-bold text-white mb-2 text-center">¿Cómo quieres que suene tu Mima?</h2>
-              <p className="text-slate-400 text-center mb-8">Podrás cambiarla cuando quieras desde tu Perfil ⚙️</p>
+              <h2 className="text-2xl font-bold text-white mb-2 text-center">{t('onboarding.voice_title')}</h2>
+              <p className="text-slate-400 text-center mb-6">{t('onboarding.voice_subtitle')}</p>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 pb-8">
                 {voices.map((v) => {
                   const isSelected = selectedVoice === v.id;
                   const isPlaying = previewPlayingId === v.id;
@@ -118,28 +169,28 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                     <div 
                       key={v.id}
                       onClick={() => setSelectedVoice(v.id)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                      className={`p-3 rounded-2xl border transition-all cursor-pointer ${
                         isSelected ? 'bg-primary/10 border-primary' : 'bg-white/5 border-white/5'
                       }`}
                     >
-                      <div className="flex justify-between items-start mb-4">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      <div className="flex justify-between items-start mb-3">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
                           isSelected ? 'bg-primary text-white' : 'bg-white/10 text-slate-400'
                         }`}>
-                          <Volume2 className="w-4 h-4" />
+                          <Volume2 className="w-3.5 h-3.5" />
                         </div>
-                        {isSelected && <Check className="w-5 h-5 text-primary" />}
+                        {isSelected && <Check className="w-4 h-4 text-primary" />}
                       </div>
-                      <p className="font-bold text-white mb-3">{v.name}</p>
+                      <p className="font-bold text-white text-sm mb-2">{v.name}</p>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           playPreview(v.id);
                         }}
-                        className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400"
+                        className="w-full py-1.5 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400"
                       >
-                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : isPlaying ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-                        Muestra
+                        {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : isPlaying ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
+                        {t('onboarding.voice_preview_btn')}
                       </button>
                     </div>
                   );
@@ -165,9 +216,27 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                   <Check className="w-12 h-12 text-emerald-500" />
                 </motion.div>
               </div>
-              <h2 className="text-3xl font-bold text-white mb-4">¡Todo listo!</h2>
+              <h2 className="text-3xl font-bold text-white mb-4">{t('onboarding.ready_title')}</h2>
               <p className="text-lg text-slate-400 max-w-xs mb-8">
-                Recuerda: puedes cambiar la voz y otros ajustes en tu Perfil.
+                {t('onboarding.ready_subtitle')}
+              </p>
+            </motion.div>
+          )}
+          
+          {step === 4 && (
+             <motion.div
+              key="step4"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center"
+            >
+              <div className="w-24 h-24 rounded-full bg-blue-500/20 flex items-center justify-center mb-8">
+                <Globe className="w-12 h-12 text-blue-500" />
+              </div>
+              <h2 className="text-3xl font-bold text-white mb-4">{t('onboarding.final_title')}</h2>
+              <p className="text-lg text-slate-400 max-w-xs">
+                {t('onboarding.final_subtitle')}
               </p>
             </motion.div>
           )}
@@ -176,20 +245,20 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
       {/* Footer Buttons */}
       <div className="p-8 flex gap-4">
-        {step > 1 && (
+        {step > 0 && (
           <button 
             onClick={handleBack}
             className="flex-1 py-4 rounded-2xl bg-white/5 text-white font-bold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
-            Atrás
+            {t('common.back')}
           </button>
         )}
         <button 
           onClick={handleNext}
           className="flex-[2] py-4 rounded-2xl bg-primary text-white font-bold flex items-center justify-center gap-2 hover:bg-primary-dark transition-all active:scale-95 shadow-lg shadow-primary/20"
         >
-          {step === 3 ? 'Ir al chat' : 'Continuar'}
+          {step === 4 ? t('onboarding.go_to_chat') : t('common.continue')}
           <ChevronRight className="w-5 h-5" />
         </button>
       </div>

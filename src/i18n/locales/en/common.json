@@ -1,123 +1,71 @@
 {
   "onboarding": {
-    "step0": {
-      "title": "Choose your language",
-      "subtitle": "Select the language you want to use with Mima"
-    },
-    "step1": {
-      "title": "Hi, I'm Mima 👋",
-      "subtitle": "Your intelligent personal assistant. Before we start, let's personalize your experience.",
-      "cta": "Continue"
-    },
-    "step2": {
-      "title": "How do you want your Mima to sound?",
-      "subtitle": "You can change this anytime from your Profile ⚙️",
-      "preview": "Sample",
-      "playing": "Playing",
-      "cta": "Continue",
-      "back": "Back"
-    },
-    "step3": {
-      "title": "All set!",
-      "subtitle": "You're ready to start using Mima.",
-      "note": "Remember: you can change the voice and other settings in your Profile.",
-      "cta": "Go to chat"
-    }
+    "step_language": "Choose your language",
+    "step_voice": "Choose Mima's voice",
+    "step_permissions": "Permissions",
+    "step_ready": "Ready to start",
+    "welcome_title": "Hi, I'm Mima 👋",
+    "welcome_subtitle": "Your intelligent personal assistant. I'm here to help you manage your day, emails, and much more.",
+    "voice_preview_btn": "Sample",
+    "voice_preview_text": "Hi, I'm Mima, your intelligent personal assistant.",
+    "permissions_title": "I need some permissions",
+    "permissions_subtitle": "To help you better, I need access to your calendar and emails.",
+    "permissions_btn": "Grant Access",
+    "ready_title": "Everything is ready!",
+    "ready_subtitle": "You can now start chatting with me.",
+    "start_btn": "Start Chatting",
+    "next_btn": "Next",
+    "back_btn": "Back"
   },
   "chat": {
-    "header": {
-      "title": "Mima"
-    },
-    "input": {
-      "placeholder": "Ask Mima..."
-    },
-    "actions": {
-      "attach": "Attach file",
-      "screenshot": "Take screenshot",
-      "selectMode": "Select mode",
-      "currentMode": "Current Mode"
-    },
-    "modes": {
-      "neutral": "Neutral Mode",
-      "professional": "Business Mode",
-      "creative": "Creative Mode",
-      "zen": "Zen Mode",
-      "family": "Family Mode"
-    }
+    "input_placeholder": "Message Mima...",
+    "initial_message": "Hi! I'm Mima. How can I help you today?",
+    "sender_mima": "Mima",
+    "sender_you": "You",
+    "audio_error": "Error playing audio",
+    "voice_not_found": "Voice not configured. Please go to profile."
   },
   "profile": {
-    "sections": {
-      "info": "User Information",
-      "voice": "Mima's Voice",
-      "language": "Interface Language"
-    },
-    "fields": {
-      "fullName": "Full Name",
-      "username": "Username",
-      "email": "Email (Read-only)",
-      "emailHelper": "Your email cannot be changed"
-    },
-    "voice": {
-      "title": "Mima's Voice",
-      "subtitle": "Choose how your assistant speaks to you",
-      "updated": "Voice updated ✓",
-      "names": {
-        "voice1": "Mima US-1",
-        "voice2": "Mima US-2",
-        "voice3": "Mima US-3",
-        "voice4": "Mima US-4",
-        "voice5": "Mima UK-1",
-        "voice6": "Mima UK-2",
-        "voice7": "Mima UK-3"
-      },
-      "descriptions": {
-        "voice1": "Clear and professional American female voice",
-        "voice2": "Warm and friendly American female voice",
-        "voice3": "Direct and efficient American male voice",
-        "voice4": "Soft and calm American female voice",
-        "voice5": "Sophisticated British female voice",
-        "voice6": "Professional British male voice",
-        "voice7": "Friendly British female voice"
-      }
-    },
-    "language": {
-      "title": "Interface Language",
-      "subtitle": "Select your preferred language"
-    },
-    "actions": {
-      "save": "Save changes",
-      "saving": "Saving...",
-      "saved": "Saved",
-      "uploadPhoto": "Upload Photo"
-    }
+    "title": "Profile",
+    "full_name": "Full Name",
+    "username": "Username",
+    "email_readonly": "Email (Read-only)",
+    "interface_language": "Interface Language",
+    "voice_title": "Mima's Voice",
+    "voice_subtitle": "Choose how your assistant speaks to you",
+    "voice_updated": "Voice updated ✓",
+    "save_btn": "Save changes",
+    "saving": "Saving...",
+    "saved": "Saved",
+    "save_success": "Changes saved successfully",
+    "logout": "Log Out"
+  },
+  "inbox": {
+    "title": "Mima Inbox",
+    "action_items": "Action Items",
+    "filter_all": "All",
+    "filter_urgent": "Urgent",
+    "filter_newsletters": "Newsletters",
+    "filter_updates": "Updates",
+    "connect_title": "Connect Gmail",
+    "connect_description": "Link your Google account to allow Mima to read, summarize, and draft replies to your emails.",
+    "empty": "Your inbox is empty.",
+    "draft_reply": "Draft Reply with Mima"
+  },
+  "calendar": {
+    "title": "Calendar",
+    "connect_title": "Connect Google Calendar",
+    "connect_description": "Link your Google account to allow Mima to manage your schedule, create events, and find free time.",
+    "empty": "No upcoming events found.",
+    "all_day": "All Day",
+    "today": "Today"
   },
   "common": {
-    "buttons": {
-      "continue": "Continue",
-      "back": "Back",
-      "cancel": "Cancel",
-      "confirm": "Confirm"
-    },
-    "errors": {
-      "generic": "An error occurred",
-      "network": "Network error, please try again",
-      "audioPreview": "Error playing audio sample",
-      "uploadFailed": "Upload failed",
-      "saveFailed": "Failed to save changes",
-      "fieldRequired": "This field is required",
-      "usernameTaken": "Username is already taken",
-      "fileTooLarge": "File is too large (max 5MB)"
-    },
-    "loading": {
-      "generic": "Loading...",
-      "saving": "Saving...",
-      "uploading": "Uploading..."
-    },
-    "languages": {
-      "fi": "Suomi",
-      "sv": "Svenska",
-      "en": "English",
-      "es": "Español"
-    }
+    "try_again": "Try Again",
+    "loading_failed": "Failed to load. Please try again.",
+    "network_error": "Network error. Please try again.",
+    "signin_google": "Sign in with Google",
+    "auth_failed": "Authentication failed. Please try again.",
+    "allow_popups": "Please allow popups for this site to connect your account."
   }
 }

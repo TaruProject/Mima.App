@@ -2,13 +2,15 @@ import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
+import { useTranslation } from "react-i18next";
 
 export default function Inbox() {
+  const { t } = useTranslation();
   const [isConnected, setIsConnected] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   useEffect(() => {
     if (user) {
@@ -22,16 +24,15 @@ export default function Inbox() {
     }
   }, [isConnected]);
 
-  const getAuthHeaders = async () => {
-    const { data } = await supabase.auth.getSession();
+  const getAuthHeaders = () => {
     return {
-      'Authorization': `Bearer ${data.session?.access_token}`
+      'Authorization': `Bearer ${session?.access_token}`
     };
   };
 
   const checkConnectionStatus = async () => {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch(`/api/auth/status`, { headers });
       if (response.ok) {
         const data = await response.json();
@@ -46,7 +47,7 @@ export default function Inbox() {
     setIsLoading(true);
     setError(null);
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch('/api/gmail/messages', { headers });
 
       if (response.ok) {
@@ -55,11 +56,11 @@ export default function Inbox() {
       } else if (response.status === 401) {
         setIsConnected(false);
       } else {
-        setError("Failed to load emails. Please try again.");
+        setError(t('common.loading_failed'));
       }
     } catch (error) {
       console.error("Failed to fetch emails", error);
-      setError("Network error. Please try again.");
+      setError(t('common.network_error'));
     } finally {
       setIsLoading(false);
     }
@@ -67,7 +68,7 @@ export default function Inbox() {
 
   const handleConnect = async () => {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getAuthHeaders();
       const response = await fetch(`/api/auth/url`, { headers });
       if (!response.ok) {
         throw new Error('Failed to get auth URL');
@@ -81,11 +82,11 @@ export default function Inbox() {
       );
 
       if (!authWindow) {
-        alert('Please allow popups for this site to connect your account.');
+        alert(t('common.allow_popups'));
       }
     } catch (error) {
       console.error('OAuth error:', error);
-      setError("Failed to initiate connection.");
+      setError(t('common.auth_failed'));
     }
   };
 
@@ -94,12 +95,12 @@ export default function Inbox() {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         setIsConnected(true);
       } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        alert('Authentication failed. Please try again.');
+        alert(t('common.auth_failed'));
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [t]);
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
@@ -108,7 +109,7 @@ export default function Inbox() {
           <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-6 h-6" />
           </button>
-          <h2 className="text-lg font-bold tracking-tight text-center flex-1">Mima Inbox</h2>
+          <h2 className="text-lg font-bold tracking-tight text-center flex-1">{t('inbox.title')}</h2>
           <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-white/10 transition-colors relative">
             <Settings className="w-6 h-6" />
             <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full"></span>
@@ -117,32 +118,32 @@ export default function Inbox() {
       </header>
       
       <div className="px-6 pt-2 pb-4">
-        <h1 className="text-3xl font-bold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Action Items</h1>
+        <h1 className="text-3xl font-bold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">{t('inbox.action_items')}</h1>
         <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
           <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-primary text-white text-sm font-semibold shadow-lg shadow-primary/25 transition-transform active:scale-95">
-            All
+            {t('inbox.filter_all')}
           </button>
           <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-            Urgent
+            {t('inbox.filter_urgent')}
           </button>
           <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-            Newsletters
+            {t('inbox.filter_newsletters')}
           </button>
           <button className="flex h-9 shrink-0 items-center justify-center px-5 rounded-full bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors active:scale-95">
-            Updates
+            {t('inbox.filter_updates')}
           </button>
         </div>
       </div>
 
-      <main className="flex-1 overflow-y-auto px-4 space-y-4 flex flex-col">
+      <main className="flex-1 overflow-y-auto px-4 space-y-4 flex flex-col no-scrollbar">
         {!isConnected ? (
           <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-white/5 max-w-sm w-full mt-8 mx-auto">
             <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
               <MailIcon className="w-8 h-8 text-primary" />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Connect Gmail</h3>
+            <h3 className="text-xl font-bold text-white mb-2">{t('inbox.connect_title')}</h3>
             <p className="text-sm text-slate-400 mb-6">
-              Link your Google account to allow Mima to read, summarize, and draft replies to your emails.
+              {t('inbox.connect_description')}
             </p>
             <button 
               onClick={() => handleConnect()}
@@ -154,7 +155,7 @@ export default function Inbox() {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
-              Sign in with Google
+              {t('common.signin_google')}
             </button>
           </div>
         ) : isLoading ? (
@@ -164,11 +165,11 @@ export default function Inbox() {
         ) : error ? (
           <div className="text-center mt-10 flex flex-col items-center gap-4">
             <p className="text-red-400">{error}</p>
-            <button onClick={fetchEmails} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">Try Again</button>
+            <button onClick={fetchEmails} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">{t('common.try_again')}</button>
           </div>
         ) : emails.length === 0 ? (
           <div className="text-center text-slate-400 mt-10">
-            <p>Your inbox is empty.</p>
+            <p>{t('inbox.empty')}</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -195,7 +196,7 @@ export default function Inbox() {
                   </div>
                   <button className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-sm font-semibold transition-colors w-full sm:w-auto justify-center sm:justify-start border border-white/5">
                     <Zap className="w-4 h-4 text-primary" />
-                    Draft Reply with Mima
+                    {t('inbox.draft_reply')}
                   </button>
                 </div>
               </div>

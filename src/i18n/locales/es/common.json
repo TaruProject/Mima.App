@@ -1,123 +1,71 @@
 {
   "onboarding": {
-    "step0": {
-      "title": "Elige tu idioma",
-      "subtitle": "Selecciona el idioma que deseas usar con Mima"
-    },
-    "step1": {
-      "title": "Hola, soy Mima 👋",
-      "subtitle": "Tu asistente personal inteligente. Antes de empezar, personalicemos tu experiencia.",
-      "cta": "Continuar"
-    },
-    "step2": {
-      "title": "¿Cómo quieres que suene tu Mima?",
-      "subtitle": "Puedes cambiar esto en cualquier momento desde tu Perfil ⚙️",
-      "preview": "Muestra",
-      "playing": "Reproduciendo",
-      "cta": "Continuar",
-      "back": "Atrás"
-    },
-    "step3": {
-      "title": "¡Todo listo!",
-      "subtitle": "Ya puedes empezar a usar Mima.",
-      "note": "Recuerda: puedes cambiar la voz y otros ajustes en tu Perfil.",
-      "cta": "Ir al chat"
-    }
+    "step_language": "Elige tu idioma",
+    "step_voice": "Elige la voz de Mima",
+    "step_permissions": "Permisos",
+    "step_ready": "Listo para empezar",
+    "welcome_title": "Hola, soy Mima 👋",
+    "welcome_subtitle": "Tu asistente personal inteligente. Estoy aquí para ayudarte a gestionar tu día, correos y mucho más.",
+    "voice_preview_btn": "Muestra",
+    "voice_preview_text": "Hola, soy Mima, tu asistente personal inteligente.",
+    "permissions_title": "Necesito algunos permisos",
+    "permissions_subtitle": "Para ayudarte mejor, necesito acceso a tu calendario y correos.",
+    "permissions_btn": "Conceder Acceso",
+    "ready_title": "¡Todo listo!",
+    "ready_subtitle": "Ya puedes empezar a chatear conmigo.",
+    "start_btn": "Empezar a chatear",
+    "next_btn": "Siguiente",
+    "back_btn": "Atrás"
   },
   "chat": {
-    "header": {
-      "title": "Mima"
-    },
-    "input": {
-      "placeholder": "Pregunta a Mima..."
-    },
-    "actions": {
-      "attach": "Adjuntar archivo",
-      "screenshot": "Tomar captura",
-      "selectMode": "Seleccionar modo",
-      "currentMode": "Modo Actual"
-    },
-    "modes": {
-      "neutral": "Modo Neutral",
-      "professional": "Modo Negocios",
-      "creative": "Modo Creativo",
-      "zen": "Modo Zen",
-      "family": "Modo Familiar"
-    }
+    "input_placeholder": "Mensaje para Mima...",
+    "initial_message": "¡Hola! Soy Mima. ¿En qué puedo ayudarte hoy?",
+    "sender_mima": "Mima",
+    "sender_you": "Tú",
+    "audio_error": "Error al reproducir audio",
+    "voice_not_found": "Voz no configurada. Por favor, ve al perfil."
   },
   "profile": {
-    "sections": {
-      "info": "Información de Usuario",
-      "voice": "Voz de Mima",
-      "language": "Idioma de la Interfaz"
-    },
-    "fields": {
-      "fullName": "Nombre Completo",
-      "username": "Nombre de Usuario",
-      "email": "Correo (Solo lectura)",
-      "emailHelper": "Tu correo no se puede cambiar"
-    },
-    "voice": {
-      "title": "Voz de Mima",
-      "subtitle": "Elige cómo te habla tu asistente",
-      "updated": "Voz actualizada ✓",
-      "names": {
-        "voice1": "Mima US-1",
-        "voice2": "Mima US-2",
-        "voice3": "Mima US-3",
-        "voice4": "Mima US-4",
-        "voice5": "Mima UK-1",
-        "voice6": "Mima UK-2",
-        "voice7": "Mima UK-3"
-      },
-      "descriptions": {
-        "voice1": "Voz femenina americana clara y profesional",
-        "voice2": "Voz femenina americana cálida y amable",
-        "voice3": "Voz masculina americana directa y eficiente",
-        "voice4": "Voz femenina americana suave y tranquila",
-        "voice5": "Voz femenina británica sofisticada",
-        "voice6": "Voz masculina británica profesional",
-        "voice7": "Voz femenina británica amable"
-      }
-    },
-    "language": {
-      "title": "Idioma de la Interfaz",
-      "subtitle": "Selecciona tu idioma preferido"
-    },
-    "actions": {
-      "save": "Guardar cambios",
-      "saving": "Guardando...",
-      "saved": "Guardado",
-      "uploadPhoto": "Subir Foto"
-    }
+    "title": "Perfil",
+    "full_name": "Nombre Completo",
+    "username": "Nombre de Usuario",
+    "email_readonly": "Email (Solo lectura)",
+    "interface_language": "Idioma de Interfaz",
+    "voice_title": "Voz de Mima",
+    "voice_subtitle": "Elige cómo te habla tu asistente",
+    "voice_updated": "Voz actualizada ✓",
+    "save_btn": "Guardar cambios",
+    "saving": "Guardando...",
+    "saved": "Guardado",
+    "save_success": "Cambios guardados correctamente",
+    "logout": "Cerrar Sesión"
+  },
+  "inbox": {
+    "title": "Mima Inbox",
+    "action_items": "Tareas Pendientes",
+    "filter_all": "Todo",
+    "filter_urgent": "Urgente",
+    "filter_newsletters": "Boletines",
+    "filter_updates": "Actualizaciones",
+    "connect_title": "Conectar Gmail",
+    "connect_description": "Vincula tu cuenta de Google para que Mima pueda leer, resumir y redactar respuestas a tus correos.",
+    "empty": "Tu bandeja de entrada está vacía.",
+    "draft_reply": "Redactar respuesta con Mima"
+  },
+  "calendar": {
+    "title": "Calendario",
+    "connect_title": "Conectar Google Calendar",
+    "connect_description": "Vincula tu cuenta de Google para que Mima pueda gestionar tu agenda, crear eventos y encontrar tiempo libre.",
+    "empty": "No se encontraron eventos próximos.",
+    "all_day": "Todo el día",
+    "today": "Hoy"
   },
   "common": {
-    "buttons": {
-      "continue": "Continuar",
-      "back": "Atrás",
-      "cancel": "Cancelar",
-      "confirm": "Confirmar"
-    },
-    "errors": {
-      "generic": "Ha ocurrido un error",
-      "network": "Error de red, inténtalo de nuevo",
-      "audioPreview": "Error al reproducir la muestra de audio",
-      "uploadFailed": "Error en la subida",
-      "saveFailed": "Error al guardar los cambios",
-      "fieldRequired": "Este campo es obligatorio",
-      "usernameTaken": "El nombre de usuario ya está en uso",
-      "fileTooLarge": "El archivo es demasiado grande (máx 5MB)"
-    },
-    "loading": {
-      "generic": "Cargando...",
-      "saving": "Guardando...",
-      "uploading": "Subiendo..."
-    },
-    "languages": {
-      "fi": "Suomi",
-      "sv": "Svenska",
-      "en": "English",
-      "es": "Español"
-    }
+    "try_again": "Intentar de nuevo",
+    "loading_failed": "Error al cargar. Por favor, inténtalo de nuevo.",
+    "network_error": "Error de red. Por favor, inténtalo de nuevo.",
+    "signin_google": "Iniciar sesión con Google",
+    "auth_failed": "Error de autenticación. Por favor, inténtalo de nuevo.",
+    "allow_popups": "Por favor, permite las ventanas emergentes para este sitio para conectar tu cuenta."
   }
 }
