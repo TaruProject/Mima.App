@@ -185,7 +185,8 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     code: code ? "present" : "absent", 
     error, 
     state,
-    hasSessionUserId: !!userId 
+    hasSessionUserId: !!userId,
+    sessionID: req.sessionID
   });
   
   // Fallback for lost session: extract userId from state
@@ -193,38 +194,134 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     userId = state.split(':')[1];
     console.log("Recovered userId from state fallback:", userId);
     req.session.userId = userId;
+    // IMPORTANT: Save session immediately to ensure persistence
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      console.log("Session saved successfully with userId");
+    } catch (sessionErr) {
+      console.error("Failed to save session:", sessionErr);
+    }
   }
   
-  let success = false;
-  let errorMessage = '';
+  // Helper function to send HTML response
+  const sendResponse = (success: boolean, message: string) => {
+    if (res.headersSent) {
+      console.log("Headers already sent, skipping response");
+      return;
+    }
+    
+    const isSuccess = success;
+    const icon = isSuccess ? '✅' : '❌';
+    const title = isSuccess ? 'Google Connected!' : 'Authentication Error';
+    const color = isSuccess ? '' : 'color: #ef4444;';
+    
+    res.status(isSuccess ? 200 : 500).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${isSuccess ? 'Mima - Connected' : 'Authentication Error'}</title>
+          <style>
+            body { 
+              background: #131117; 
+              color: white; 
+              font-family: -apple-system, sans-serif; 
+              display: flex; 
+              align-items: center; 
+              justify-content: center; 
+              height: 100vh; 
+              margin: 0; 
+            }
+            .card { 
+              background: #1a1820; 
+              padding: 2.5rem; 
+              border-radius: 1.5rem; 
+              text-align: center; 
+              border: 1px solid rgba(255,255,255,0.1); 
+              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+              max-width: 400px;
+            }
+            .icon { font-size: 48px; margin-bottom: 1rem; }
+            h2 { margin: 0 0 1rem; ${color} }
+            .btn { 
+              background: #6221dd; 
+              color: white; 
+              border: none; 
+              padding: 0.8rem 2rem; 
+              border-radius: 2rem; 
+              cursor: pointer; 
+              font-weight: bold; 
+            }
+            .error-details {
+              font-size: 14px;
+              color: #9ca3af;
+              margin-top: 1rem;
+              word-break: break-word;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">${icon}</div>
+            <h2>${title}</h2>
+            <p>${isSuccess ? 'Mima is now linked to your Google account. This window will close automatically.' : message}</p>
+            ${!isSuccess ? `<div class="error-details">Please close this window and try again.</div>` : ''}
+            <button class="btn" onclick="window.close()">${isSuccess ? 'Close Now' : 'Close'}</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ 
+                type: '${isSuccess ? 'OAUTH_AUTH_SUCCESS' : 'OAUTH_AUTH_FAILED'}',
+                ${!isSuccess ? `error: '${message.replace(/'/g, "\\'").replace(/"/g, "\\'")}'` : ''}
+              }, '*');
+              ${isSuccess ? 'setTimeout(() => { window.close(); }, 2000);' : ''}
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  };
+  
+  // Validate prerequisites
+  if (error) {
+    console.error("Google returned error:", error);
+    return sendResponse(false, `Google OAuth error: ${error}`);
+  }
+  
+  if (!code) {
+    console.error("No authorization code provided");
+    return sendResponse(false, "No authorization code provided");
+  }
+  
+  if (!userId) {
+    console.error("No userId in session or state");
+    return sendResponse(false, "Session expired or invalid. Please try again from the main app.");
+  }
 
   try {
-    if (error) {
-      throw new Error(`Google OAuth error: ${error}`);
-    }
+    console.log("Starting token exchange...");
     
-    if (!code) {
-      throw new Error("No authorization code provided");
-    }
-    
-    if (!userId) {
-      console.error("Session lost and no fallback userId in state");
-      throw new Error("Session expired or invalid. Please try again from the main app.");
-    }
-
-    // 1. Process tokens FIRST before sending response
+    // Process tokens
     const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
-    console.log("Tokens retrieved successfully");
+    console.log("Tokens retrieved successfully from Google");
     
     let finalTokens = tokens;
 
     // Save tokens to Supabase
     if (supabaseUrl && supabaseAnonKey) {
+      console.log("Saving tokens to Supabase...");
       const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
       
       // If we didn't get a refresh token, try to preserve the existing one
       if (!tokens.refresh_token) {
+        console.log("No refresh token in response, checking for existing token...");
         const { data } = await supabaseAdmin
           .from('user_google_tokens')
           .select('tokens')
@@ -244,11 +341,20 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         }
       }
 
+      // Save to session
       req.session.tokens = finalTokens;
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      console.log("Session saved with tokens");
       
+      // Encrypt and save to database
       const encryptedTokens = encrypt(JSON.stringify(finalTokens));
       
-      await supabaseAdmin
+      const { error: upsertError } = await supabaseAdmin
         .from('user_google_tokens')
         .upsert({ 
           user_id: userId, 
@@ -256,133 +362,29 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
         
+      if (upsertError) {
+        throw new Error(`Failed to save tokens to database: ${upsertError.message}`);
+      }
+      
       console.log("Tokens saved to Supabase successfully");
     } else {
+      // Save to session only
       req.session.tokens = finalTokens;
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
     }
     
-    success = true;
-  } catch (err) {
+    console.log("OAuth flow completed successfully");
+    return sendResponse(true, "");
+    
+  } catch (err: any) {
     console.error('OAuth Error:', err);
-    errorMessage = err instanceof Error ? err.message : 'Unknown error';
-  }
-
-  // 2. Send response AFTER processing (success or error)
-  if (!res.headersSent) {
-    if (success) {
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Mima - Connected</title>
-            <style>
-              body { 
-                background: #131117; 
-                color: white; 
-                font-family: -apple-system, sans-serif; 
-                display: flex; 
-                align-items: center; 
-                justify-content: center; 
-                height: 100vh; 
-                margin: 0; 
-              }
-              .card { 
-                background: #1a1820; 
-                padding: 2.5rem; 
-                border-radius: 1.5rem; 
-                text-align: center; 
-                border: 1px solid rgba(255,255,255,0.1); 
-                box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-                max-width: 400px;
-              }
-              .icon { font-size: 48px; margin-bottom: 1rem; }
-              h2 { margin: 0 0 1rem; }
-              .btn { 
-                background: #6221dd; 
-                color: white; 
-                border: none; 
-                padding: 0.8rem 2rem; 
-                border-radius: 2rem; 
-                cursor: pointer; 
-                font-weight: bold; 
-              }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">✅</div>
-              <h2>Google Connected!</h2>
-              <p>Mima is now linked to your Google account. This window will close automatically.</p>
-              <button class="btn" onclick="window.close()">Close Now</button>
-            </div>
-            <script>
-              if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-                setTimeout(() => { window.close(); }, 2000);
-              }
-            </script>
-          </body>
-        </html>
-      `);
-    } else {
-      res.status(500).send(`
-        <!DOCTYPE html>
-        <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Authentication Error</title>
-            <style>
-              body { 
-                background: #131117; 
-                color: white; 
-                font-family: -apple-system, sans-serif; 
-                display: flex; 
-                align-items: center; 
-                justify-content: center; 
-                height: 100vh; 
-                margin: 0; 
-              }
-              .card { 
-                background: #1a1820; 
-                padding: 2.5rem; 
-                border-radius: 1.5rem; 
-                text-align: center; 
-                border: 1px solid rgba(255,255,255,0.1); 
-                box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-                max-width: 400px;
-              }
-              .icon { font-size: 48px; margin-bottom: 1rem; }
-              h2 { margin: 0 0 1rem; color: #ef4444; }
-              .btn { 
-                background: #6221dd; 
-                color: white; 
-                border: none; 
-                padding: 0.8rem 2rem; 
-                border-radius: 2rem; 
-                cursor: pointer; 
-                font-weight: bold; 
-              }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">❌</div>
-              <h2>Authentication Error</h2>
-              <p>${errorMessage}</p>
-              <button class="btn" onclick="window.close()">Close</button>
-            </div>
-            <script>
-              if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED', error: '${errorMessage.replace(/'/g, "\\'")}' }, '*');
-              }
-            </script>
-          </body>
-        </html>
-      `);
-    }
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    return sendResponse(false, errorMessage);
   }
 });
 
