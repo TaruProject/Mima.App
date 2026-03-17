@@ -6,6 +6,8 @@
     "step_ready": "Klar att börja",
     "welcome_title": "Hej, jag är Mima 👋",
     "welcome_subtitle": "Din intelligenta personliga assistent. Jag är här för att hjälpa dig att hantera din dag, dina e-postmeddelanden och mycket mer.",
+    "voice_title": "Välj Mimas röst",
+    "voice_subtitle": "Välj den röst som passar dig bäst",
     "voice_preview_btn": "Prov",
     "voice_preview_text": "Hej, jag är Mima, din intelligenta personliga assistent.",
     "permissions_title": "Jag behöver några behörigheter",
@@ -13,15 +15,24 @@
     "permissions_btn": "Ge tillgång",
     "ready_title": "Allt är klart!",
     "ready_subtitle": "Du kan nu börja chatta med mig.",
+    "final_title": "Låt oss börja!",
+    "final_subtitle": "Mima är redo att hjälpa dig med allt du behöver.",
+    "go_to_chat": "Gå till chatten",
     "start_btn": "Börja chatta",
     "next_btn": "Nästa",
     "back_btn": "Bakåt"
   },
   "chat": {
     "input_placeholder": "Meddelande till Mima...",
+    "welcome_message": "Hej! Jag är Mima. Hur kan jag hjälpa dig idag?",
     "initial_message": "Hej! Jag är Mima. Hur kan jag hjälpa dig idag?",
     "sender_mima": "Mima",
     "sender_you": "Du",
+    "today": "Idag",
+    "stop_audio": "Stoppa ljud",
+    "play_audio": "Spela upp ljud",
+    "action_menu": "Åtgärdsmeny",
+    "error_message": "Tyvärr, något gick fel. Försök igen.",
     "audio_error": "Fel vid uppspelning av ljud",
     "voice_not_found": "Röst inte konfigurerad. Gå till profilen."
   },
@@ -41,7 +52,7 @@
     "logout": "Logga ut"
   },
   "inbox": {
-    "title": "Mima Inbox",
+    "title": "Mima-inkorg",
     "action_items": "Att göra",
     "filter_all": "Alla",
     "filter_urgent": "Brådskande",
@@ -60,7 +71,66 @@
     "all_day": "Hela dagen",
     "today": "Idag"
   },
+  "auth": {
+    "welcome_back": "Välkommen tillbaka",
+    "create_account": "Skapa ett konto",
+    "sign_in_subtitle": "Ange dina uppgifter för att komma åt Mima.",
+    "sign_up_subtitle": "Registrera dig för att komma igång med din AI-assistent.",
+    "email": "E-post",
+    "password": "Lösenord",
+    "sign_in": "Logga in",
+    "sign_up": "Registrera dig",
+    "no_account": "Har du inget konto?",
+    "have_account": "Har du redan ett konto?",
+    "google_error": "Google-autentisering misslyckades. Försök igen."
+  },
+  "layout": {
+    "chat": "Chatt",
+    "calendar": "Kalender",
+    "inbox": "Inkorg",
+    "profile": "Profil",
+    "new_action": "Ny åtgärd"
+  },
+  "action_menu": {
+    "attach": "Lägg till filer eller foton",
+    "screenshot": "Ta skärmbild",
+    "select_mode": "Välj läge"
+  },
+  "modes": {
+    "title": "Välj läge",
+    "neutral": "Neutral",
+    "neutral_desc": "Balanserad och effektiv",
+    "business": "Professionell",
+    "business_desc": "Formell och verkställande",
+    "creative": "Kreativ",
+    "creative_desc": "Inspirerande och uttrycksfull",
+    "zen": "Zen",
+    "zen_desc": "Koncis och lugn",
+    "family": "Familj",
+    "family_desc": "Nära och vänlig"
+  },
+  "install_pwa": {
+    "title": "Installera Mima",
+    "ios_subtitle": "Installera den här appen på din iPhone för en bättre upplevelse.",
+    "ios_step1": "Tryck på delningsknappen nedan.",
+    "ios_step2": "Lägg till på hemskärmen",
+    "install_title": "Installera Mima",
+    "install_subtitle": "Lägg till appen på din hemskärm",
+    "install_button": "Installera"
+  },
+  "update": {
+    "title": "Obligatorisk uppdatering\ntillgänglig",
+    "description": "En kritisk säkerhetsuppdatering och nya funktioner är klara. Uppdatera för att fortsätta använda Mima.",
+    "button": "Uppdatera"
+  },
+  "accessibility": {
+    "close_notification": "Stäng avisering"
+  },
   "common": {
+    "you": "Du",
+    "settings": "Inställningar",
+    "back": "Tillbaka",
+    "continue": "Fortsätt",
     "try_again": "Försök igen",
     "loading_failed": "Misslyckades att ladda. Försök igen.",
     "network_error": "Nätverksfel. Försök igen.",

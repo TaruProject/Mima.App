@@ -39,6 +39,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
+        // Clear local storage preferences
+        localStorage.removeItem('mima_language');
+        localStorage.removeItem('mima_voice_id');
+        localStorage.removeItem('mima_chat_history');
       } else {
         setSession(session);
         setUser(session?.user ?? null);

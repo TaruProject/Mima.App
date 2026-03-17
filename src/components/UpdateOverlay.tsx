@@ -1,6 +1,9 @@
 import { RefreshCw, Download } from "lucide-react";
+import { useTranslation } from 'react-i18next';
 
 export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
+  const { t } = useTranslation();
+
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-in fade-in duration-300">
       <div className="w-full max-w-sm bg-surface-dark border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col relative">
@@ -15,11 +18,11 @@ export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
           </div>
           
           <div className="flex flex-col items-center gap-2 text-center">
-            <h2 className="text-white text-2xl font-bold leading-tight tracking-tight">
-              Mandatory Update<br/>Available
+            <h2 className="text-white text-2xl font-bold leading-tight tracking-tight whitespace-pre-line">
+              {t('update.title')}
             </h2>
             <p className="text-slate-400 text-sm font-normal leading-relaxed max-w-[260px]">
-              A critical security patch and new features are ready. Please refresh to continue using Mima.
+              {t('update.description')}
             </p>
           </div>
         </div>
@@ -30,7 +33,7 @@ export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
             className="w-full flex items-center justify-center gap-2 h-14 rounded-full bg-primary hover:bg-primary/90 active:scale-[0.98] transition-all duration-200 shadow-lg shadow-primary/25 group cursor-pointer"
           >
             <RefreshCw className="text-white w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
-            <span className="text-white text-base font-bold tracking-wide">Refresh & Update</span>
+            <span className="text-white text-base font-bold tracking-wide">{t('update.button')}</span>
           </button>
           
           <p className="text-center text-xs text-slate-600 font-medium">

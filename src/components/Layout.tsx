@@ -1,15 +1,17 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { Plus, MessageSquare, Calendar as CalendarIcon, Mail, User } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from 'react-i18next';
 
 export default function Layout() {
   const location = useLocation();
+  const { t } = useTranslation();
 
   const navItems = [
-    { path: "/", icon: MessageSquare, label: "Chat" },
-    { path: "/calendar", icon: CalendarIcon, label: "Calendar" },
-    { path: "/inbox", icon: Mail, label: "Inbox" },
-    { path: "/profile", icon: User, label: "Profile" },
+    { path: "/", icon: MessageSquare, label: t('layout.chat') },
+    { path: "/calendar", icon: CalendarIcon, label: t('layout.calendar') },
+    { path: "/inbox", icon: Mail, label: t('layout.inbox') },
+    { path: "/profile", icon: User, label: t('layout.profile') },
   ];
 
   return (
@@ -43,7 +45,10 @@ export default function Layout() {
 
           {/* FAB / Center Action */}
           <div className="relative -top-6">
-            <button className="flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-primary/40 text-white transition-transform active:scale-95 border-4 border-background-dark">
+            <button
+              aria-label={t('layout.new_action')}
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-primary/40 text-white transition-transform active:scale-95 border-4 border-background-dark"
+            >
               <Plus className="w-8 h-8" />
             </button>
           </div>

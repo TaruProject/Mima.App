@@ -16,7 +16,11 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET || 'mima-super-secret-key-2026', 'salt', 32);
+if (!process.env.SESSION_SECRET) {
+  throw new Error("CRITICAL: SESSION_SECRET environment variable is missing.");
+}
+
+const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET, 'salt', 32);
 const IV_LENGTH = 16;
 
 function encrypt(text: string) {
@@ -44,7 +48,7 @@ app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'mima-super-secret-key-2026',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -444,6 +448,67 @@ app.post("/api/tts", async (req, res) => {
   } catch (error) {
     console.error('TTS Error:', error);
     res.status(500).json({ error: "Failed to generate speech", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// ---- Gemini AI Chat Proxy ----
+import { GoogleGenAI } from "@google/genai";
+
+let genAI: GoogleGenAI | null = null;
+
+function getGenAI(): GoogleGenAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
+
+const languageInstructions: Record<string, string> = {
+  fi: 'Vastaa AINA suomeksi. Käytä luontevaa, ystävällistä suomea.',
+  sv: 'Svara ALLTID på svenska. Använd naturlig, vänlig svenska.',
+  es: 'Responde SIEMPRE en español. Usa un español natural y amigable.',
+  en: 'Always respond in English.',
+};
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message, mode, language, history } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
+    const ai = getGenAI();
+
+    let modeInstruction = "Act as a professional, direct, and objective personal assistant. Perform standard assistant tasks without emotional bias.";
+    if (mode === "Business Mode") {
+      modeInstruction = "Act as a Lean Management Expert. Identify time waste. Predict logical workflows. Advise on efficiency. Avoid unnecessary chatter.";
+    } else if (mode === "Family Mode") {
+      modeInstruction = "Act as a Family Organizer. Suggest routines for evenings. Remind about family needs. Generate a sense of achievement. Reduce rush and conflict.";
+    } else if (mode === "Zen Mode") {
+      modeInstruction = "Act as a Wellness Coach. Prioritize human well-being. Remind about breaks, hydration, and rest. Encourage balance.";
+    }
+
+    const langCode = language || 'en';
+    const langInstruction = languageInstructions[langCode] || languageInstructions.en;
+    const systemInstruction = `${modeInstruction} ${langInstruction}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: message,
+      config: {
+        systemInstruction,
+      },
+    });
+
+    res.json({ text: response.text || "I'm sorry, I couldn't process that." });
+  } catch (error) {
+    console.error("Chat API Error:", error);
+    res.status(500).json({ error: "Failed to generate response" });
   }
 });
 

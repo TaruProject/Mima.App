@@ -3,22 +3,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../hooks/useToast';
 import { generateSpeech } from '../services/geminiService';
 import { LogOut, User, Settings, Shield, Bell, Camera, Check, Loader2, Globe, Volume2, Play, Square } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
+import { voices } from '../constants/voices';
 
 export default function Profile() {
   const { t, i18n } = useTranslation();
   const { user, signOut } = useAuth();
   const { showToast } = useToast();
-  
-  const voices = [
-    { id: "DODLEQrClDo8wCz460ld", name: "Mima US-1" },
-    { id: "L0yTtpRXzdyzQlzALhgD", name: "Mima US-2" },
-    { id: "d3MFdIuCfbAIwiu7jC4a", name: "Mima US-3" },
-    { id: "l4Coq6695JDX9xtLqXDE", name: "Mima US-4" },
-    { id: "EXAVITQu4vr4xnSDxMaL", name: "Mima ES-1" },
-    { id: "FGY2WhTYpP6BYn95boSj", name: "Mima ES-2" },
-    { id: "IKne3meq5a9ay67vC7pY", name: "Mima ES-3" },
-  ];
 
   const [fullName, setFullName] = useState("Mima User");
   const [username, setUsername] = useState("mima_user");
@@ -45,6 +37,57 @@ export default function Profile() {
     language: i18n.language
   });
 
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+
+  // Load profile from Supabase
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) return;
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error loading profile:', error);
+          return;
+        }
+
+        if (data) {
+          const loadedName = data.name || "Mima User";
+          const loadedUsername = data.username || "mima_user";
+          const loadedLang = data.language || i18n.language;
+          const loadedVoice = data.voice_id || voices[0].id;
+
+          setFullName(loadedName);
+          setUsername(loadedUsername);
+          setLanguage(loadedLang);
+          setVoiceId(loadedVoice);
+          
+          setInitialValues({
+            fullName: loadedName,
+            username: loadedUsername,
+            language: loadedLang
+          });
+
+          // Sync localStorage
+          localStorage.setItem('mima_language', loadedLang);
+          localStorage.setItem('mima_voice_id', loadedVoice);
+          if (loadedLang !== i18n.language) {
+            i18n.changeLanguage(loadedLang);
+          }
+        }
+      } catch (err) {
+        console.error('Error in loadProfile:', err);
+      } finally {
+        setIsLoadingProfile(false);
+      }
+    };
+    loadProfile();
+  }, [user, i18n]);
+
   useEffect(() => {
     const changed = 
       fullName !== initialValues.fullName || 
@@ -53,14 +96,36 @@ export default function Profile() {
     setHasChanges(changed);
   }, [fullName, username, language, initialValues]);
 
-  const handleVoiceSelect = (id: string) => {
+  const handleVoiceSelect = async (id: string) => {
     if (id === voiceId) return;
     setVoiceId(id);
+    
+    // Optimistic local update
     try {
       localStorage.setItem('mima_voice_id', id);
-      showToast(t('profile.voice_updated'), "success");
     } catch (e) {
-      console.error("Error saving voice preference", e);
+      console.error("Error saving voice to localStorage", e);
+    }
+
+    // Save to Supabase if user is logged in
+    if (user) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            voice_id: id,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+          
+        if (error) throw error;
+        showToast(t('profile.voice_updated'), "success");
+      } catch (err) {
+        console.error("Error saving voice to Supabase:", err);
+        showToast(t('chat.error_message'), "error");
+      }
+    } else {
+      showToast(t('profile.voice_updated'), "success");
     }
   };
 
@@ -80,7 +145,7 @@ export default function Profile() {
         previewAudioRef.current.pause();
       }
 
-      const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`);
+      const audio = new Audio(audioBase64);
       previewAudioRef.current = audio;
       
       audio.onplay = () => {
@@ -107,23 +172,40 @@ export default function Profile() {
   };
 
   const handleSave = async () => {
-    if (!hasChanges || isSaving) return;
+    if (!hasChanges || isSaving || !user) return;
     
     setIsSaving(true);
     setSaveStatus('saving');
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setIsSaving(false);
-    setSaveStatus('saved');
-    setHasChanges(false);
-    setInitialValues({ fullName, username, language });
-    showToast(t('profile.save_success'), "success");
-    
-    setTimeout(() => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          name: fullName,
+          username: username,
+          language: language,
+          voice_id: voiceId,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+
+      if (error) throw error;
+
+      setSaveStatus('saved');
+      setHasChanges(false);
+      setInitialValues({ fullName, username, language });
+      showToast(t('profile.save_success'), "success");
+    } catch (err: any) {
+      console.error("Error saving profile:", err);
       setSaveStatus('idle');
-    }, 2000);
+      showToast(err.message || t('chat.error_message'), "error");
+    } finally {
+      setIsSaving(false);
+      
+      setTimeout(() => {
+        setSaveStatus((prev) => prev === 'saved' ? 'idle' : prev);
+      }, 2000);
+    }
   };
 
   return (

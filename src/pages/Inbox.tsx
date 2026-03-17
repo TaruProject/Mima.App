@@ -3,45 +3,21 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { useTranslation } from "react-i18next";
+import { useGoogleAuth } from "../hooks/useGoogleAuth";
 
 export default function Inbox() {
   const { t } = useTranslation();
-  const [isConnected, setIsConnected] = useState(false);
+  const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
+  
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user, session } = useAuth();
-
-  useEffect(() => {
-    if (user) {
-      checkConnectionStatus();
-    }
-  }, [user]);
 
   useEffect(() => {
     if (isConnected) {
       fetchEmails();
     }
   }, [isConnected]);
-
-  const getAuthHeaders = () => {
-    return {
-      'Authorization': `Bearer ${session?.access_token}`
-    };
-  };
-
-  const checkConnectionStatus = async () => {
-    try {
-      const headers = getAuthHeaders();
-      const response = await fetch(`/api/auth/status`, { headers });
-      if (response.ok) {
-        const data = await response.json();
-        setIsConnected(data.isConnected);
-      }
-    } catch (error) {
-      console.error("Failed to check status", error);
-    }
-  };
 
   const fetchEmails = async () => {
     setIsLoading(true);
@@ -65,42 +41,6 @@ export default function Inbox() {
       setIsLoading(false);
     }
   };
-
-  const handleConnect = async () => {
-    try {
-      const headers = getAuthHeaders();
-      const response = await fetch(`/api/auth/url`, { headers });
-      if (!response.ok) {
-        throw new Error('Failed to get auth URL');
-      }
-      const { url } = await response.json();
-
-      const authWindow = window.open(
-        url,
-        'oauth_popup',
-        'width=600,height=700'
-      );
-
-      if (!authWindow) {
-        alert(t('common.allow_popups'));
-      }
-    } catch (error) {
-      console.error('OAuth error:', error);
-      setError(t('common.auth_failed'));
-    }
-  };
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        setIsConnected(true);
-      } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        alert(t('common.auth_failed'));
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [t]);
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
@@ -162,9 +102,9 @@ export default function Inbox() {
           <div className="flex justify-center mt-10">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           </div>
-        ) : error ? (
+        ) : (error || authError) ? (
           <div className="text-center mt-10 flex flex-col items-center gap-4">
-            <p className="text-red-400">{error}</p>
+            <p className="text-red-400">{error || authError}</p>
             <button onClick={fetchEmails} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">{t('common.try_again')}</button>
           </div>
         ) : emails.length === 0 ? (

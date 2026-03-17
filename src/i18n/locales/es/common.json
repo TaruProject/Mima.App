@@ -6,6 +6,8 @@
     "step_ready": "Listo para empezar",
     "welcome_title": "Hola, soy Mima 👋",
     "welcome_subtitle": "Tu asistente personal inteligente. Estoy aquí para ayudarte a gestionar tu día, correos y mucho más.",
+    "voice_title": "Elige la voz de Mima",
+    "voice_subtitle": "Selecciona la voz que más te guste",
     "voice_preview_btn": "Muestra",
     "voice_preview_text": "Hola, soy Mima, tu asistente personal inteligente.",
     "permissions_title": "Necesito algunos permisos",
@@ -13,15 +15,24 @@
     "permissions_btn": "Conceder Acceso",
     "ready_title": "¡Todo listo!",
     "ready_subtitle": "Ya puedes empezar a chatear conmigo.",
+    "final_title": "¡Comencemos!",
+    "final_subtitle": "Mima está lista para ayudarte con lo que necesites.",
+    "go_to_chat": "Ir al Chat",
     "start_btn": "Empezar a chatear",
     "next_btn": "Siguiente",
     "back_btn": "Atrás"
   },
   "chat": {
     "input_placeholder": "Mensaje para Mima...",
+    "welcome_message": "¡Hola! Soy Mima. ¿En qué puedo ayudarte hoy?",
     "initial_message": "¡Hola! Soy Mima. ¿En qué puedo ayudarte hoy?",
     "sender_mima": "Mima",
     "sender_you": "Tú",
+    "today": "Hoy",
+    "stop_audio": "Detener audio",
+    "play_audio": "Reproducir audio",
+    "action_menu": "Menú de acciones",
+    "error_message": "Lo siento, algo salió mal. Inténtalo de nuevo.",
     "audio_error": "Error al reproducir audio",
     "voice_not_found": "Voz no configurada. Por favor, ve al perfil."
   },
@@ -60,7 +71,66 @@
     "all_day": "Todo el día",
     "today": "Hoy"
   },
+  "auth": {
+    "welcome_back": "Bienvenido de nuevo",
+    "create_account": "Crear una cuenta",
+    "sign_in_subtitle": "Ingresa tus datos para acceder a Mima.",
+    "sign_up_subtitle": "Regístrate para empezar con tu asistente de IA.",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "sign_in": "Iniciar Sesión",
+    "sign_up": "Registrarse",
+    "no_account": "¿No tienes cuenta?",
+    "have_account": "¿Ya tienes cuenta?",
+    "google_error": "Error de autenticación con Google. Inténtalo de nuevo."
+  },
+  "layout": {
+    "chat": "Chat",
+    "calendar": "Calendario",
+    "inbox": "Bandeja",
+    "profile": "Perfil",
+    "new_action": "Nueva acción"
+  },
+  "action_menu": {
+    "attach": "Agregar archivos o fotos",
+    "screenshot": "Tomar captura de pantalla",
+    "select_mode": "Seleccionar modo"
+  },
+  "modes": {
+    "title": "Seleccionar modo",
+    "neutral": "Neutral",
+    "neutral_desc": "Equilibrado y eficiente",
+    "business": "Profesional",
+    "business_desc": "Formal y ejecutivo",
+    "creative": "Creativo",
+    "creative_desc": "Inspirador y expresivo",
+    "zen": "Zen",
+    "zen_desc": "Conciso y tranquilo",
+    "family": "Familiar",
+    "family_desc": "Cercano y amable"
+  },
+  "install_pwa": {
+    "title": "Instalar Mima",
+    "ios_subtitle": "Instala esta app en tu iPhone para una mejor experiencia.",
+    "ios_step1": "Toca el botón de compartir de abajo.",
+    "ios_step2": "Añadir a la pantalla de inicio",
+    "install_title": "Instalar Mima",
+    "install_subtitle": "Añade la app a tu pantalla de inicio",
+    "install_button": "Instalar"
+  },
+  "update": {
+    "title": "Actualización obligatoria\ndisponible",
+    "description": "Un parche de seguridad crítico y nuevas funciones están listos. Actualiza para seguir usando Mima.",
+    "button": "Actualizar"
+  },
+  "accessibility": {
+    "close_notification": "Cerrar notificación"
+  },
   "common": {
+    "you": "Tú",
+    "settings": "Ajustes",
+    "back": "Atrás",
+    "continue": "Continuar",
     "try_again": "Intentar de nuevo",
     "loading_failed": "Error al cargar. Por favor, inténtalo de nuevo.",
     "network_error": "Error de red. Por favor, inténtalo de nuevo.",

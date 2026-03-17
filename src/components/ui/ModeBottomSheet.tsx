@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface ModeBottomSheetProps {
   isOpen: boolean;
@@ -9,20 +10,22 @@ interface ModeBottomSheetProps {
   onSelectMode: (mode: string) => void;
 }
 
-const modes = [
-  { id: 'Neutral Mode', name: 'Neutral', description: 'Equilibrado y eficiente' },
-  { id: 'Business Mode', name: 'Profesional', description: 'Formal y ejecutivo' },
-  { id: 'Creative Mode', name: 'Creativo', description: 'Inspirador y expresivo' },
-  { id: 'Zen Mode', name: 'Zen', description: 'Conciso y tranquilo' },
-  { id: 'Family Mode', name: 'Familiar', description: 'Cercano y amable' },
-];
-
 export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
   isOpen,
   onClose,
   currentMode,
   onSelectMode,
 }) => {
+  const { t } = useTranslation();
+
+  const modes = [
+    { id: 'Neutral Mode', nameKey: 'modes.neutral', descKey: 'modes.neutral_desc' },
+    { id: 'Business Mode', nameKey: 'modes.business', descKey: 'modes.business_desc' },
+    { id: 'Creative Mode', nameKey: 'modes.creative', descKey: 'modes.creative_desc' },
+    { id: 'Zen Mode', nameKey: 'modes.zen', descKey: 'modes.zen_desc' },
+    { id: 'Family Mode', nameKey: 'modes.family', descKey: 'modes.family_desc' },
+  ];
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -48,7 +51,7 @@ export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
             <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-6" />
 
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white">Seleccionar modo</h3>
+              <h3 className="text-xl font-bold text-white">{t('modes.title')}</h3>
               <button 
                 onClick={onClose}
                 className="p-2 rounded-full bg-white/5 text-white/60 hover:text-white transition-colors"
@@ -75,9 +78,9 @@ export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
                   >
                     <div className="text-left">
                       <p className={`font-bold ${isActive ? 'text-primary' : 'text-white'}`}>
-                        {mode.name}
+                        {t(mode.nameKey)}
                       </p>
-                      <p className="text-sm text-white/40">{mode.description}</p>
+                      <p className="text-sm text-white/40">{t(mode.descKey)}</p>
                     </div>
                     {isActive && (
                       <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">

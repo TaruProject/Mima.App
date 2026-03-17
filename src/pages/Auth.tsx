@@ -1,147 +1,125 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import { Zap, Mail, Lock, Loader2 } from 'lucide-react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useState } from "react";
+import { motion } from "motion/react";
+import { supabase } from "../lib/supabase";
+import { useTranslation } from 'react-i18next';
 
 export default function Auth() {
-  const [isLoading, setIsLoading] = useState(false);
+  const { t } = useTranslation();
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const urlError = searchParams.get('error');
-    if (urlError === 'auth_failed') {
-      setError('Google authentication failed. Please try again.');
-      // Remove the error from URL so it doesn't persist on refresh
-      searchParams.delete('error');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
+  // Check for Google OAuth error in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const googleError = urlParams.get('error');
+  if (googleError && !error) {
+    setError(t('auth.google_error'));
+  }
 
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-
+  const handleAuth = async () => {
+    setLoading(true);
+    setError("");
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        // If sign up is successful, show a message (Supabase requires email confirmation by default)
-        setError('Check your email for the confirmation link.');
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication.');
+      setError(err.message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-background-dark text-slate-100 px-6">
-      <div className="w-full max-w-md bg-surface-dark border border-white/5 rounded-3xl p-8 shadow-2xl shadow-primary/10 relative overflow-hidden">
-        {/* Decorative background elements */}
-        <div className="absolute -top-20 -right-20 w-64 h-64 bg-primary/20 blur-3xl rounded-full pointer-events-none"></div>
-        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-purple-500/10 blur-3xl rounded-full pointer-events-none"></div>
-
-        <div className="relative z-10">
-          <div className="flex justify-center mb-8">
-            <div className="w-20 h-20 rounded-2xl bg-[#6221dd] flex items-center justify-center shadow-lg shadow-primary/50 overflow-hidden">
-              <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+    <div className="flex flex-col h-screen bg-background-dark">
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-sm"
+        >
+          {/* Logo */}
+          <div className="flex flex-col items-center mb-10">
+            <div className="w-20 h-20 rounded-2xl overflow-hidden mb-6 shadow-lg shadow-primary/20 border border-white/10">
+              <img
+                src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg"
+                alt="Mima"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
             </div>
+            <h1 className="text-3xl font-bold text-white">
+              {isLogin ? t('auth.welcome_back') : t('auth.create_account')}
+            </h1>
+            <p className="text-slate-400 mt-2 text-center">
+              {isLogin ? t('auth.sign_in_subtitle') : t('auth.sign_up_subtitle')}
+            </p>
           </div>
 
-          <h1 className="text-3xl font-bold text-center mb-2">
-            {isLogin ? 'Welcome back' : 'Create an account'}
-          </h1>
-          <p className="text-slate-400 text-center mb-8">
-            {isLogin
-              ? 'Enter your details to access Mima.'
-              : 'Sign up to get started with your AI assistant.'}
-          </p>
-
+          {/* Error display */}
           {error && (
-            <div className={`p-4 rounded-xl mb-6 text-sm font-medium ${error.includes('Check your email') ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-              {error}
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-6">
+              <p className="text-red-400 text-sm">{error}</p>
             </div>
           )}
 
-          <form onSubmit={handleAuth} className="space-y-4">
+          {/* Form */}
+          <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-slate-500" />
-                </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl leading-5 bg-background-dark text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all sm:text-sm"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
+              <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('auth.email')}</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
+                placeholder="you@example.com"
+              />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-slate-500" />
-                </div>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl leading-5 bg-background-dark text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all sm:text-sm"
-                  placeholder="••••••••"
-                  required
-                  minLength={6}
-                />
-              </div>
+              <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('auth.password')}</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
+                placeholder="••••••••"
+              />
             </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary focus:ring-offset-background-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-            >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                isLogin ? 'Sign In' : 'Sign Up'
-              )}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError(null);
-              }}
-              className="text-sm text-slate-400 hover:text-white transition-colors"
-            >
-              {isLogin
-                ? "Don't have an account? Sign up"
-                : 'Already have an account? Sign in'}
-            </button>
           </div>
-        </div>
+
+          {/* Divider */}
+          <div className="my-6">
+            <div className="h-[1px] bg-white/10"></div>
+          </div>
+
+          {/* Submit Button */}
+          <button
+            onClick={handleAuth}
+            disabled={loading || !email || !password}
+            className="w-full py-3.5 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20 hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? "..." : isLogin ? t('auth.sign_in') : t('auth.sign_up')}
+          </button>
+
+          {/* Toggle */}
+          <div className="mt-8 text-center">
+            <p className="text-slate-500 text-sm">
+              {isLogin ? t('auth.no_account') : t('auth.have_account')}{" "}
+              <button
+                onClick={() => setIsLogin(!isLogin)}
+                className="text-primary font-medium hover:underline"
+              >
+                {isLogin ? t('auth.sign_up') : t('auth.sign_in')}
+              </button>
+            </p>
+          </div>
+        </motion.div>
       </div>
     </div>
   );

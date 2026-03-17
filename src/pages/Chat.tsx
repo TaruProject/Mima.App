@@ -8,16 +8,26 @@ import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
 import { useTranslation } from "react-i18next";
 
 export default function Chat() {
-  const { t } = useTranslation();
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      sender: "Mima",
-      text: t('chat.welcome_message'),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      audio: null as string | null,
-    },
-  ]);
+  const { t, i18n } = useTranslation();
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mima_chat_history');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error("Failed to load chat history", e);
+    }
+    return [
+      {
+        id: 1,
+        sender: "Mima",
+        text: t('chat.welcome_message'),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        audio: null as string | null,
+      },
+    ];
+  });
   const [input, setInput] = useState("");
   const [mode, setMode] = useState("Neutral Mode");
   const [voiceId, setVoiceId] = useState(() => {
@@ -54,7 +64,16 @@ export default function Chat() {
         text: t('chat.welcome_message')
       }]);
     }
-  }, [t]);
+  }, [t, messages.length]);
+
+  // Save chat history
+  useEffect(() => {
+    try {
+      localStorage.setItem('mima_chat_history', JSON.stringify(messages));
+    } catch (e) {
+      console.error("Failed to save chat history", e);
+    }
+  }, [messages]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -76,7 +95,14 @@ export default function Chat() {
     setIsLoading(true);
     
     try {
-      const responseText = await generateChatResponse(userMsg, mode);
+      const history = messages
+        .filter(m => m.id !== 1) // exclude welcome message
+        .map(m => ({
+          role: m.sender === t('common.you') ? 'user' : 'model',
+          content: m.text
+        }));
+
+      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history);
       
       setMessages((prev) => [
         ...prev,

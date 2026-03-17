@@ -6,6 +6,8 @@
     "step_ready": "Valmis aloittamaan",
     "welcome_title": "Hei, olen Mima 👋",
     "welcome_subtitle": "Älykäs henkilökohtainen avustajasi. Olen täällä auttaakseni sinua hallitsemaan päivääsi, sähköpostejasi ja paljon muuta.",
+    "voice_title": "Valitse Miman ääni",
+    "voice_subtitle": "Valitse sinulle sopivin ääni",
     "voice_preview_btn": "Näyte",
     "voice_preview_text": "Hei, olen Mima, älykäs henkilökohtainen avustajasi.",
     "permissions_title": "Tarvitsen joitakin lupia",
@@ -13,15 +15,24 @@
     "permissions_btn": "Anna pääsy",
     "ready_title": "Kaikki on valmista!",
     "ready_subtitle": "Voit nyt aloittaa keskustelun kanssani.",
+    "final_title": "Aloitetaan!",
+    "final_subtitle": "Mima on valmis auttamaan sinua kaikessa tarvitsemassasi.",
+    "go_to_chat": "Siirry chattiin",
     "start_btn": "Aloita keskustelu",
     "next_btn": "Seuraava",
     "back_btn": "Takaisin"
   },
   "chat": {
-    "input_placeholder": "Viesti Mimallle...",
+    "input_placeholder": "Viesti Mimalle...",
+    "welcome_message": "Hei! Olen Mima. Kuinka voin auttaa sinua tänään?",
     "initial_message": "Hei! Olen Mima. Kuinka voin auttaa sinua tänään?",
     "sender_mima": "Mima",
     "sender_you": "Sinä",
+    "today": "Tänään",
+    "stop_audio": "Pysäytä ääni",
+    "play_audio": "Toista ääni",
+    "action_menu": "Toimintovalikko",
+    "error_message": "Anteeksi, jokin meni pieleen. Yritä uudelleen.",
     "audio_error": "Virhe äänen toistossa",
     "voice_not_found": "Ääntä ei ole määritetty. Mene profiiliin."
   },
@@ -41,7 +52,7 @@
     "logout": "Kirjaudu ulos"
   },
   "inbox": {
-    "title": "Mima Inbox",
+    "title": "Mima-postilaatikko",
     "action_items": "Tehtävät",
     "filter_all": "Kaikki",
     "filter_urgent": "Kiireelliset",
@@ -49,7 +60,7 @@
     "filter_updates": "Päivitykset",
     "connect_title": "Yhdistä Gmail",
     "connect_description": "Yhdistä Google-tilisi, jotta Mima voi lukea, tiivistää ja luonnostella vastauksia sähköposteihisi.",
-    "empty": "Sähköpostisi on tyhjä.",
+    "empty": "Postilaatikkosi on tyhjä.",
     "draft_reply": "Luonnostele vastaus Mimalla"
   },
   "calendar": {
@@ -60,7 +71,66 @@
     "all_day": "Koko päivä",
     "today": "Tänään"
   },
+  "auth": {
+    "welcome_back": "Tervetuloa takaisin",
+    "create_account": "Luo tili",
+    "sign_in_subtitle": "Kirjaudu sisään käyttääksesi Mimaa.",
+    "sign_up_subtitle": "Rekisteröidy aloittaaksesi tekoälyavustajasi kanssa.",
+    "email": "Sähköposti",
+    "password": "Salasana",
+    "sign_in": "Kirjaudu sisään",
+    "sign_up": "Rekisteröidy",
+    "no_account": "Eikö sinulla ole tiliä?",
+    "have_account": "Onko sinulla jo tili?",
+    "google_error": "Google-kirjautuminen epäonnistui. Yritä uudelleen."
+  },
+  "layout": {
+    "chat": "Chatti",
+    "calendar": "Kalenteri",
+    "inbox": "Postilaatikko",
+    "profile": "Profiili",
+    "new_action": "Uusi toiminto"
+  },
+  "action_menu": {
+    "attach": "Lisää tiedostoja tai kuvia",
+    "screenshot": "Ota kuvakaappaus",
+    "select_mode": "Valitse tila"
+  },
+  "modes": {
+    "title": "Valitse tila",
+    "neutral": "Neutraali",
+    "neutral_desc": "Tasapainoinen ja tehokas",
+    "business": "Ammattimainen",
+    "business_desc": "Muodollinen ja asiallinen",
+    "creative": "Luova",
+    "creative_desc": "Inspiroiva ja ilmaisuvoimainen",
+    "zen": "Zen",
+    "zen_desc": "Tiivis ja rauhallinen",
+    "family": "Perhe",
+    "family_desc": "Läheinen ja ystävällinen"
+  },
+  "install_pwa": {
+    "title": "Asenna Mima",
+    "ios_subtitle": "Asenna tämä sovellus iPhonellesi parempaa kokemusta varten.",
+    "ios_step1": "Napauta alla olevaa jakamispainiketta.",
+    "ios_step2": "Lisää kotinäytölle",
+    "install_title": "Asenna Mima",
+    "install_subtitle": "Lisää sovellus kotinäytöllesi",
+    "install_button": "Asenna"
+  },
+  "update": {
+    "title": "Pakollinen päivitys\nsaatavilla",
+    "description": "Kriittinen tietoturvapäivitys ja uusia ominaisuuksia on valmiina. Päivitä jatkaaksesi Miman käyttöä.",
+    "button": "Päivitä"
+  },
+  "accessibility": {
+    "close_notification": "Sulje ilmoitus"
+  },
   "common": {
+    "you": "Sinä",
+    "settings": "Asetukset",
+    "back": "Takaisin",
+    "continue": "Jatka",
     "try_again": "Yritä uudelleen",
     "loading_failed": "Lataus epäonnistui. Yritä uudelleen.",
     "network_error": "Verkkovirhe. Yritä uudelleen.",

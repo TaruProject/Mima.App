@@ -58,15 +58,19 @@ function AppRoutes() {
         });
       }
     };
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', () => {
+    
+    const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         handleFocus();
       }
-    });
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    
     return () => {
       window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

@@ -1,49 +1,50 @@
 import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Clock } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO } from "date-fns";
+import { fi } from 'date-fns/locale/fi';
+import { sv } from 'date-fns/locale/sv';
+import { es } from 'date-fns/locale/es';
+import { enUS } from 'date-fns/locale/en-US';
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { useTranslation } from "react-i18next";
+import { useGoogleAuth } from "../hooks/useGoogleAuth";
+
+const localeMap: Record<string, Locale> = { fi, sv, es, en: enUS };
+
+function getDateLocale(lang: string): Locale {
+  return localeMap[lang] || enUS;
+}
+
+function getLocalizedWeekDays(lang: string): string[] {
+  const locale = lang === 'fi' ? 'fi-FI' : lang === 'sv' ? 'sv-SE' : lang === 'es' ? 'es-ES' : 'en-US';
+  const formatter = new Intl.DateTimeFormat(locale, { weekday: 'narrow' });
+  // Generate days starting from Sunday (0)
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(2024, 0, i); // Jan 2024: 0=Mon... but we need Sun start
+    // Jan 7 2024 is Sunday
+    const d = new Date(2024, 0, 7 + i);
+    return formatter.format(d);
+  });
+}
 
 export default function Calendar() {
-  const { t } = useTranslation();
-  const [isConnected, setIsConnected] = useState(false);
+  const { t, i18n } = useTranslation();
+  const dateLocale = getDateLocale(i18n.language);
+  const weekDays = useMemo(() => getLocalizedWeekDays(i18n.language), [i18n.language]);
+  
+  const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
+  
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user, session } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
-
-  useEffect(() => {
-    if (user) {
-      checkConnectionStatus();
-    }
-  }, [user]);
 
   useEffect(() => {
     if (isConnected) {
       fetchEvents();
     }
   }, [isConnected]);
-
-  const getAuthHeaders = () => {
-    return {
-      'Authorization': `Bearer ${session?.access_token}`
-    };
-  };
-
-  const checkConnectionStatus = async () => {
-    try {
-      const headers = getAuthHeaders();
-      const response = await fetch(`/api/auth/status`, { headers });
-      if (response.ok) {
-        const data = await response.json();
-        setIsConnected(data.isConnected);
-      }
-    } catch (error) {
-      console.error("Failed to check status", error);
-    }
-  };
 
   const fetchEvents = async () => {
     setIsLoading(true);
@@ -67,42 +68,6 @@ export default function Calendar() {
       setIsLoading(false);
     }
   };
-
-  const handleConnect = async () => {
-    try {
-      const headers = getAuthHeaders();
-      const response = await fetch(`/api/auth/url`, { headers });
-      if (!response.ok) {
-        throw new Error('Failed to get auth URL');
-      }
-      const { url } = await response.json();
-
-      const authWindow = window.open(
-        url,
-        'oauth_popup',
-        'width=600,height=700'
-      );
-
-      if (!authWindow) {
-        alert(t('common.allow_popups'));
-      }
-    } catch (error) {
-      console.error('OAuth error:', error);
-      setError(t('common.auth_failed'));
-    }
-  };
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        setIsConnected(true);
-      } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        alert(t('common.auth_failed'));
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [t]);
 
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100">
@@ -132,7 +97,7 @@ export default function Calendar() {
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <h2 className="text-lg font-bold">{format(currentDate, 'MMMM yyyy')}</h2>
+            <h2 className="text-lg font-bold">{format(currentDate, 'MMMM yyyy', { locale: dateLocale })}</h2>
             <button 
               onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
               className="text-text-secondary hover:text-white transition-colors"
@@ -141,7 +106,7 @@ export default function Calendar() {
             </button>
           </div>
           <div className="grid grid-cols-7 gap-y-2 mb-2">
-            {['S','M','T','W','T','F','S'].map((d, i) => (
+            {weekDays.map((d, i) => (
               <div key={i} className="text-center text-xs font-semibold text-text-secondary uppercase tracking-wider">{d}</div>
             ))}
           </div>
@@ -223,9 +188,11 @@ export default function Calendar() {
               const end = event.end.dateTime || event.end.date;
               const isAllDay = !event.start.dateTime;
               
-              const startTime = isAllDay ? t('calendar.all_day') : format(parseISO(start), "hh:mm a");
-              const endTime = isAllDay ? "" : format(parseISO(end), "hh:mm a");
-              const dateLabel = isToday(parseISO(start)) ? t('calendar.today') : format(parseISO(start), "MMM d");
+              const use24h = i18n.language === 'fi' || i18n.language === 'sv';
+              const timeFormat = use24h ? 'HH:mm' : 'hh:mm a';
+              const startTime = isAllDay ? t('calendar.all_day') : format(parseISO(start), timeFormat, { locale: dateLocale });
+              const endTime = isAllDay ? "" : format(parseISO(end), timeFormat, { locale: dateLocale });
+              const dateLabel = isToday(parseISO(start)) ? t('calendar.today') : format(parseISO(start), "MMM d", { locale: dateLocale });
 
               return (
                 <div key={event.id} className="flex gap-4 group">

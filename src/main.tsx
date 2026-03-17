@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import './i18n';
 import { registerSW } from 'virtual:pwa-register';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Register service worker with auto-update
 if ('serviceWorker' in navigator) {
@@ -21,6 +22,8 @@ if ('serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

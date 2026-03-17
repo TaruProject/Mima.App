@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Download, X, Share } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export default function InstallPWA() {
+  const { t } = useTranslation();
   const [supportsPWA, setSupportsPWA] = useState(false);
   const [promptInstall, setPromptInstall] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -77,9 +79,9 @@ export default function InstallPWA() {
               <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div>
-              <h3 className="text-white font-bold text-base">Install Mima</h3>
+              <h3 className="text-white font-bold text-base">{t('install_pwa.title')}</h3>
               <p className="text-white/70 text-sm leading-tight mt-1">
-                Install this app on your iPhone for a better experience.
+                {t('install_pwa.ios_subtitle')}
               </p>
             </div>
           </div>
@@ -92,10 +94,10 @@ export default function InstallPWA() {
         </div>
         <div className="bg-white/5 rounded-xl p-3 mt-1 border border-white/5">
           <p className="text-sm text-white/90 flex items-center gap-2">
-            1. Tap the <Share size={16} className="text-primary" /> button below.
+            1. {t('install_pwa.ios_step1')} <Share size={16} className="text-primary" />
           </p>
           <p className="text-sm text-white/90 flex items-center gap-2 mt-2">
-            2. Select <strong className="text-white">"Add to Home Screen"</strong>.
+            2. <strong className="text-white">{t('install_pwa.ios_step2')}</strong>
           </p>
         </div>
       </div>
@@ -113,8 +115,8 @@ export default function InstallPWA() {
           <img src="https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
         </div>
         <div>
-          <h3 className="text-white font-medium text-sm">Install Mima</h3>
-          <p className="text-white/60 text-xs">Add the app to your home screen</p>
+          <h3 className="text-white font-medium text-sm">{t('install_pwa.install_title')}</h3>
+          <p className="text-white/60 text-xs">{t('install_pwa.install_subtitle')}</p>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -129,7 +131,7 @@ export default function InstallPWA() {
           className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-primary/90 transition-colors"
         >
           <Download size={16} />
-          Install
+          {t('install_pwa.install_button')}
         </button>
       </div>
     </div>
