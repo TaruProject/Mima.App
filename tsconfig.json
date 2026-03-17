@@ -22,7 +22,7 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["vite/client", "vite-plugin-pwa/client"]
+    "types": ["node", "vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src"]
+  "include": ["src", "server.ts", "vite.config.ts"]
 }

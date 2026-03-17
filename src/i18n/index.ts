@@ -33,7 +33,7 @@ i18n
     react: {
       useSuspense: false,
     },
-    saveMissing: process.env.NODE_ENV !== 'production',
+    saveMissing: import.meta.env.MODE !== 'production',
     missingKeyHandler: (lng, ns, key, fallbackValue) => {
       console.warn(`🚨 MISSING i18n KEY: ${lng} → ${ns}:${key}`);
     },

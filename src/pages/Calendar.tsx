@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Clock } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO } from "date-fns";
+import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO, type Locale } from "date-fns";
 import { fi } from 'date-fns/locale/fi';
 import { sv } from 'date-fns/locale/sv';
 import { es } from 'date-fns/locale/es';
@@ -30,6 +30,7 @@ function getLocalizedWeekDays(lang: string): string[] {
 
 export default function Calendar() {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const dateLocale = getDateLocale(i18n.language);
   const weekDays = useMemo(() => getLocalizedWeekDays(i18n.language), [i18n.language]);
   

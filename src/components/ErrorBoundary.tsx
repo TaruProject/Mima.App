@@ -58,7 +58,7 @@ class ErrorBoundary extends Component<Props, State> {
             {t('common.reload_page') || "Reload page"}
           </button>
           
-          {process.env.NODE_ENV !== 'production' && this.state.error && (
+          {import.meta.env.MODE !== 'production' && this.state.error && (
             <div className="mt-12 p-4 bg-black/50 border border-red-500/20 rounded-xl max-w-2xl w-full overflow-auto">
               <p className="text-red-400 font-mono text-sm mb-2">{this.state.error.message}</p>
               <pre className="text-slate-500 font-mono text-xs whitespace-pre-wrap">
