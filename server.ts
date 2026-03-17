@@ -22,7 +22,8 @@ const requiredEnvVars = [
   'ELEVENLABS_API_KEY',
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY'
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'APP_URL'
 ];
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -177,16 +178,31 @@ app.get("/api/debug", (req, res) => {
   });
 });
 
+// Helper to get app URL
+function getAppUrl(req?: express.Request): string {
+  const customDomain = "https://me.mima-app.com";
+  if (req) {
+    const host = req.get('host');
+    if (host && host.includes('mima-app.com')) {
+      return customDomain;
+    }
+    return process.env.APP_URL || `https://${host}` || customDomain;
+  }
+  return process.env.APP_URL || customDomain;
+}
+
 app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res) => {
-  const { code, error, state } = req.query;
+  const { code, error: googleError, state } = req.query;
   let userId = req.session.userId;
+  const appUrl = getAppUrl(req);
   
   console.log("OAuth callback received", { 
     code: code ? "present" : "absent", 
-    error, 
+    error: googleError, 
     state,
     hasSessionUserId: !!userId,
-    sessionID: req.sessionID
+    sessionID: req.sessionID,
+    appUrl
   });
   
   // Fallback for lost session: extract userId from state
@@ -194,114 +210,33 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     userId = state.split(':')[1];
     console.log("Recovered userId from state fallback:", userId);
     req.session.userId = userId;
-    // IMPORTANT: Save session immediately to ensure persistence
-    try {
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-      console.log("Session saved successfully with userId");
-    } catch (sessionErr) {
-      console.error("Failed to save session:", sessionErr);
-    }
   }
   
-  // Helper function to send HTML response
-  const sendResponse = (success: boolean, message: string) => {
-    if (res.headersSent) {
-      console.log("Headers already sent, skipping response");
-      return;
-    }
-    
-    const isSuccess = success;
-    const icon = isSuccess ? '✅' : '❌';
-    const title = isSuccess ? 'Google Connected!' : 'Authentication Error';
-    const color = isSuccess ? '' : 'color: #ef4444;';
-    
-    res.status(isSuccess ? 200 : 500).send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>${isSuccess ? 'Mima - Connected' : 'Authentication Error'}</title>
-          <style>
-            body { 
-              background: #131117; 
-              color: white; 
-              font-family: -apple-system, sans-serif; 
-              display: flex; 
-              align-items: center; 
-              justify-content: center; 
-              height: 100vh; 
-              margin: 0; 
-            }
-            .card { 
-              background: #1a1820; 
-              padding: 2.5rem; 
-              border-radius: 1.5rem; 
-              text-align: center; 
-              border: 1px solid rgba(255,255,255,0.1); 
-              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-              max-width: 400px;
-            }
-            .icon { font-size: 48px; margin-bottom: 1rem; }
-            h2 { margin: 0 0 1rem; ${color} }
-            .btn { 
-              background: #6221dd; 
-              color: white; 
-              border: none; 
-              padding: 0.8rem 2rem; 
-              border-radius: 2rem; 
-              cursor: pointer; 
-              font-weight: bold; 
-            }
-            .error-details {
-              font-size: 14px;
-              color: #9ca3af;
-              margin-top: 1rem;
-              word-break: break-word;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <div class="icon">${icon}</div>
-            <h2>${title}</h2>
-            <p>${isSuccess ? 'Mima is now linked to your Google account. This window will close automatically.' : message}</p>
-            ${!isSuccess ? `<div class="error-details">Please close this window and try again.</div>` : ''}
-            <button class="btn" onclick="window.close()">${isSuccess ? 'Close Now' : 'Close'}</button>
-          </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ 
-                type: '${isSuccess ? 'OAUTH_AUTH_SUCCESS' : 'OAUTH_AUTH_FAILED'}',
-                ${!isSuccess ? `error: '${message.replace(/'/g, "\\'").replace(/"/g, "\\'")}'` : ''}
-              }, '*');
-              ${isSuccess ? 'setTimeout(() => { window.close(); }, 2000);' : ''}
-            }
-          </script>
-        </body>
-      </html>
-    `);
+  // Helper function to redirect with error
+  const redirectWithError = (message: string) => {
+    console.error("OAuth Error, redirecting:", message);
+    const errorParam = encodeURIComponent(message);
+    // Redirect to the main app with error parameter
+    res.redirect(`${appUrl}/?error=google_auth_failed&error_description=${errorParam}`);
+  };
+  
+  // Helper function to redirect with success
+  const redirectWithSuccess = () => {
+    console.log("OAuth Success, redirecting to app");
+    res.redirect(`${appUrl}/?google_connected=true`);
   };
   
   // Validate prerequisites
-  if (error) {
-    console.error("Google returned error:", error);
-    return sendResponse(false, `Google OAuth error: ${error}`);
+  if (googleError) {
+    return redirectWithError(`Google OAuth error: ${googleError}`);
   }
   
   if (!code) {
-    console.error("No authorization code provided");
-    return sendResponse(false, "No authorization code provided");
+    return redirectWithError("No authorization code provided");
   }
   
   if (!userId) {
-    console.error("No userId in session or state");
-    return sendResponse(false, "Session expired or invalid. Please try again from the main app.");
+    return redirectWithError("Session expired or invalid");
   }
 
   try {
@@ -343,13 +278,19 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
       // Save to session
       req.session.tokens = finalTokens;
+      
+      // IMPORTANT: Save session before redirect to ensure cookie is written
       await new Promise<void>((resolve, reject) => {
         req.session.save((err) => {
-          if (err) reject(err);
-          else resolve();
+          if (err) {
+            console.error("Session save error:", err);
+            reject(err);
+          } else {
+            console.log("Session saved successfully");
+            resolve();
+          }
         });
       });
-      console.log("Session saved with tokens");
       
       // Encrypt and save to database
       const encryptedTokens = encrypt(JSON.stringify(finalTokens));
@@ -363,7 +304,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         }, { onConflict: 'user_id' });
         
       if (upsertError) {
-        throw new Error(`Failed to save tokens to database: ${upsertError.message}`);
+        throw new Error(`Database error: ${upsertError.message}`);
       }
       
       console.log("Tokens saved to Supabase successfully");
@@ -378,13 +319,13 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       });
     }
     
-    console.log("OAuth flow completed successfully");
-    return sendResponse(true, "");
+    console.log("OAuth flow completed successfully, redirecting...");
+    return redirectWithSuccess();
     
   } catch (err: any) {
     console.error('OAuth Error:', err);
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    return sendResponse(false, errorMessage);
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error during authentication';
+    return redirectWithError(errorMessage);
   }
 });
 

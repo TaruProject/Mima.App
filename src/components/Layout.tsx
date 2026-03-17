@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { Plus, MessageSquare, Calendar as CalendarIcon, Mail, User } from "lucide-react";
+import { MessageSquare, Calendar as CalendarIcon, Mail, User } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from 'react-i18next';
 
@@ -42,16 +42,6 @@ export default function Layout() {
               <span className="text-[10px] font-medium tracking-wide">{item.label}</span>
             </Link>
           ))}
-
-          {/* FAB / Center Action */}
-          <div className="relative -top-6">
-            <button
-              aria-label={t('layout.new_action')}
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-primary/40 text-white transition-transform active:scale-95 border-4 border-background-dark"
-            >
-              <Plus className="w-8 h-8" />
-            </button>
-          </div>
 
           {navItems.slice(2).map((item) => (
             <Link

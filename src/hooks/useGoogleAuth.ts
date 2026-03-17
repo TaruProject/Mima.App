@@ -39,54 +39,44 @@ export function useGoogleAuth() {
       }
       const { url } = await response.json();
 
-      const authWindow = window.open(
-        url,
-        'oauth_popup',
-        'width=600,height=700'
-      );
-
-      if (!authWindow) {
-        setAuthError(t('common.allow_popups'));
-        alert(t('common.allow_popups'));
-      }
+      // Redirect to Google OAuth (full page redirect, not popup)
+      window.location.href = url;
     } catch (error) {
       console.error('OAuth error:', error);
       setAuthError(t('common.auth_failed'));
     }
   };
 
+  // Check for OAuth callback params on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const googleConnected = urlParams.get('google_connected');
+    const error = urlParams.get('error');
+    const errorDescription = urlParams.get('error_description');
+
+    if (googleConnected === 'true') {
+      console.log('Google OAuth successful');
+      setIsConnected(true);
+      setAuthError(null);
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // Refresh status to confirm
+      checkConnectionStatus();
+    } else if (error === 'google_auth_failed') {
+      const errorMsg = errorDescription || t('common.auth_failed');
+      console.error('Google OAuth failed:', errorMsg);
+      setAuthError(errorMsg);
+      setIsConnected(false);
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [t, checkConnectionStatus]);
+
   useEffect(() => {
     if (user) {
       checkConnectionStatus();
     }
   }, [user, checkConnectionStatus]);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // Only accept messages from the same origin or trusted origins
-      if (event.origin !== window.location.origin && 
-          !event.origin.includes('mima-app.com') &&
-          !event.origin.includes('localhost')) {
-        return;
-      }
-
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        console.log('OAuth success message received');
-        setIsConnected(true);
-        setAuthError(null);
-        // Refresh connection status to ensure tokens are properly stored
-        checkConnectionStatus();
-      } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        const errorMsg = event.data?.error || t('common.auth_failed');
-        console.error('OAuth failed:', errorMsg);
-        setAuthError(errorMsg);
-        setIsConnected(false);
-      }
-    };
-    
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [t, checkConnectionStatus]);
 
   return {
     isConnected,

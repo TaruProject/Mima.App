@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, ChevronLeft, Check, Volume2, Play, Square, Loader2, Globe } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Check, Volume2, Play, Square, Loader2 } from 'lucide-react';
 import { generateSpeech } from '../../services/geminiService';
 import { useTranslation } from 'react-i18next';
 import { voices } from '../../constants/voices';
@@ -116,8 +116,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
               exit={{ opacity: 0, x: -20 }}
               className="absolute inset-0 flex flex-col items-center justify-center px-8"
             >
-              <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-8">
-                <Globe className="w-10 h-10 text-primary" />
+              <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-8 overflow-hidden shadow-lg shadow-primary/20">
+                <img 
+                  src="/assets/logo.jpg" 
+                  alt="Mima" 
+                  className="w-16 h-16 object-cover rounded-xl"
+                />
               </div>
               <h2 className="text-2xl font-bold text-white mb-2 text-center">{STEP0_TITLES[i18n.language] || STEP0_TITLES.en}</h2>
               <p className="text-slate-400 text-center mb-8">{STEP0_SUBTITLES[i18n.language] || STEP0_SUBTITLES.en}</p>
@@ -218,8 +222,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
               exit={{ opacity: 0, x: -20 }}
               className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center"
             >
-              <div className="w-24 h-24 rounded-full bg-blue-500/20 flex items-center justify-center mb-8">
-                <Globe className="w-12 h-12 text-blue-500" />
+              <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center mb-8 overflow-hidden shadow-lg shadow-primary/30">
+                <img 
+                  src="/assets/logo.jpg" 
+                  alt="Mima" 
+                  className="w-20 h-20 object-cover rounded-full"
+                />
               </div>
               <h2 className="text-3xl font-bold text-white mb-4">{t('onboarding.final_title')}</h2>
               <p className="text-lg text-slate-400 max-w-xs">
