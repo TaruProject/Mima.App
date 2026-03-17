@@ -136,25 +136,49 @@ export default function Profile() {
       return;
     }
 
+    // Prevent multiple simultaneous requests
+    if (previewLoadingId) return;
+
     try {
       setPreviewLoadingId(id);
-      const previewText = t('onboarding.voice_preview_text');
-      const audioBase64 = await generateSpeech(previewText, id);
+      
+      // Use cached preview endpoint for better performance
+      const response = await fetch(`/api/tts/preview?voiceId=${id}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch preview: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.audio) {
+        throw new Error("No audio data received");
+      }
       
       if (previewAudioRef.current) {
         previewAudioRef.current.pause();
       }
 
-      const audio = new Audio(audioBase64);
+      const audio = new Audio(data.audio);
+      audio.preload = "metadata";
       previewAudioRef.current = audio;
       
-      audio.onplay = () => {
+      audio.oncanplaythrough = () => {
         setPreviewLoadingId(null);
+      };
+      
+      audio.onplay = () => {
         setPreviewPlayingId(id);
       };
       
       audio.onended = () => {
         setPreviewPlayingId(null);
+      };
+      
+      audio.onerror = () => {
+        setPreviewPlayingId(null);
+        setPreviewLoadingId(null);
+        showToast(t('chat.audio_error'), "error");
       };
 
       await audio.play();

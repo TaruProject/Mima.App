@@ -136,6 +136,9 @@
     "network_error": "Error de red. Por favor, inténtalo de nuevo.",
     "signin_google": "Iniciar sesión con Google",
     "auth_failed": "Error de autenticación. Por favor, inténtalo de nuevo.",
-    "allow_popups": "Por favor, permite las ventanas emergentes para este sitio para conectar tu cuenta."
+    "allow_popups": "Por favor, permite las ventanas emergentes para este sitio para conectar tu cuenta.",
+    "error_boundary_title": "¡Ups! Algo salió mal",
+    "error_boundary_description": "Lo sentimos, pero ocurrió un error inesperado. Por favor, intenta recargar la página.",
+    "reload_page": "Recargar página"
   }
 }

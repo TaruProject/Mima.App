@@ -136,6 +136,9 @@
     "network_error": "Network error. Please try again.",
     "signin_google": "Sign in with Google",
     "auth_failed": "Authentication failed. Please try again.",
-    "allow_popups": "Please allow popups for this site to connect your account."
+    "allow_popups": "Please allow popups for this site to connect your account.",
+    "error_boundary_title": "Oops! Something went wrong",
+    "error_boundary_description": "We're sorry, but an unexpected error occurred. Please try reloading the page.",
+    "reload_page": "Reload page"
   }
 }

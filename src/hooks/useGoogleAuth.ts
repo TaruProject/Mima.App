@@ -63,17 +63,30 @@ export function useGoogleAuth() {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      // Only accept messages from the same origin or trusted origins
+      if (event.origin !== window.location.origin && 
+          !event.origin.includes('mima-app.com') &&
+          !event.origin.includes('localhost')) {
+        return;
+      }
+
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        console.log('OAuth success message received');
         setIsConnected(true);
+        setAuthError(null);
+        // Refresh connection status to ensure tokens are properly stored
+        checkConnectionStatus();
       } else if (event.data?.type === 'OAUTH_AUTH_FAILED') {
-        setAuthError(t('common.auth_failed'));
-        alert(t('common.auth_failed'));
+        const errorMsg = event.data?.error || t('common.auth_failed');
+        console.error('OAuth failed:', errorMsg);
+        setAuthError(errorMsg);
+        setIsConnected(false);
       }
     };
     
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [t]);
+  }, [t, checkConnectionStatus]);
 
   return {
     isConnected,

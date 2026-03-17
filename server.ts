@@ -13,12 +13,31 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+// Validate critical environment variables before starting
+const requiredEnvVars = [
+  'SESSION_SECRET',
+  'GEMINI_API_KEY',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'ELEVENLABS_API_KEY',
+  'VITE_SUPABASE_URL',
+  'VITE_SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY'
+];
+
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error('❌ CRITICAL: Missing required environment variables:');
+  missingVars.forEach(varName => console.error(`   - ${varName}`));
+  console.error('\nServer cannot start. Please check your .env file.');
+  process.exit(1);
+}
+
+console.log('✅ All critical environment variables loaded successfully');
+
 const app = express();
 const PORT = 3000;
-
-if (!process.env.SESSION_SECRET) {
-  throw new Error("CRITICAL: SESSION_SECRET environment variable is missing.");
-}
 
 const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET, 'salt', 32);
 const IV_LENGTH = 16;
@@ -176,6 +195,9 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     req.session.userId = userId;
   }
   
+  let success = false;
+  let errorMessage = '';
+
   try {
     if (error) {
       throw new Error(`Google OAuth error: ${error}`);
@@ -190,65 +212,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       throw new Error("Session expired or invalid. Please try again from the main app.");
     }
 
-    // 1. Send immediate success response to avoid "black screen" while processing
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Mima - Connected</title>
-          <style>
-            body { 
-              background: #131117; 
-              color: white; 
-              font-family: -apple-system, sans-serif; 
-              display: flex; 
-              align-items: center; 
-              justify-content: center; 
-              height: 100vh; 
-              margin: 0; 
-            }
-            .card { 
-              background: #1a1820; 
-              padding: 2.5rem; 
-              border-radius: 1.5rem; 
-              text-align: center; 
-              border: 1px solid rgba(255,255,255,0.1); 
-              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-              max-width: 400px;
-            }
-            .icon { font-size: 48px; margin-bottom: 1rem; }
-            h2 { margin: 0 0 1rem; }
-            .btn { 
-              background: #6221dd; 
-              color: white; 
-              border: none; 
-              padding: 0.8rem 2rem; 
-              border-radius: 2rem; 
-              cursor: pointer; 
-              font-weight: bold; 
-            }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <div class="icon">✅</div>
-            <h2>Google Connected!</h2>
-            <p>Mima is now linked to your Google account. This window will close automatically.</p>
-            <button class="btn" onclick="window.close()">Close Now</button>
-          </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-              setTimeout(() => { window.close(); }, 2000);
-            }
-          </script>
-        </body>
-      </html>
-    `);
-
-    // 2. Process tokens in background
+    // 1. Process tokens FIRST before sending response
     const oauth2Client = getOAuth2Client(req);
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("Tokens retrieved successfully");
@@ -296,17 +260,127 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     } else {
       req.session.tokens = finalTokens;
     }
-  } catch (error) {
-    console.error('OAuth Error:', error);
-    if (!res.headersSent) {
+    
+    success = true;
+  } catch (err) {
+    console.error('OAuth Error:', err);
+    errorMessage = err instanceof Error ? err.message : 'Unknown error';
+  }
+
+  // 2. Send response AFTER processing (success or error)
+  if (!res.headersSent) {
+    if (success) {
+      res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Mima - Connected</title>
+            <style>
+              body { 
+                background: #131117; 
+                color: white; 
+                font-family: -apple-system, sans-serif; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; 
+                height: 100vh; 
+                margin: 0; 
+              }
+              .card { 
+                background: #1a1820; 
+                padding: 2.5rem; 
+                border-radius: 1.5rem; 
+                text-align: center; 
+                border: 1px solid rgba(255,255,255,0.1); 
+                box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+                max-width: 400px;
+              }
+              .icon { font-size: 48px; margin-bottom: 1rem; }
+              h2 { margin: 0 0 1rem; }
+              .btn { 
+                background: #6221dd; 
+                color: white; 
+                border: none; 
+                padding: 0.8rem 2rem; 
+                border-radius: 2rem; 
+                cursor: pointer; 
+                font-weight: bold; 
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">✅</div>
+              <h2>Google Connected!</h2>
+              <p>Mima is now linked to your Google account. This window will close automatically.</p>
+              <button class="btn" onclick="window.close()">Close Now</button>
+            </div>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+                setTimeout(() => { window.close(); }, 2000);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    } else {
       res.status(500).send(`
-        <body style="background: #450a0a; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif;">
-          <div style="text-align: center; padding: 2rem; background: #7f1d1d; border-radius: 1rem; max-width: 400px;">
-            <h2 style="margin-top: 0;">Authentication Error</h2>
-            <p>${error instanceof Error ? error.message : 'Unknown error'}</p>
-            <button onclick="window.close()" style="background: white; color: black; border: none; padding: 0.5rem 1.5rem; border-radius: 0.5rem; cursor: pointer; font-weight: bold;">Close</button>
-          </div>
-        </body>
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Authentication Error</title>
+            <style>
+              body { 
+                background: #131117; 
+                color: white; 
+                font-family: -apple-system, sans-serif; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; 
+                height: 100vh; 
+                margin: 0; 
+              }
+              .card { 
+                background: #1a1820; 
+                padding: 2.5rem; 
+                border-radius: 1.5rem; 
+                text-align: center; 
+                border: 1px solid rgba(255,255,255,0.1); 
+                box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+                max-width: 400px;
+              }
+              .icon { font-size: 48px; margin-bottom: 1rem; }
+              h2 { margin: 0 0 1rem; color: #ef4444; }
+              .btn { 
+                background: #6221dd; 
+                color: white; 
+                border: none; 
+                padding: 0.8rem 2rem; 
+                border-radius: 2rem; 
+                cursor: pointer; 
+                font-weight: bold; 
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">❌</div>
+              <h2>Authentication Error</h2>
+              <p>${errorMessage}</p>
+              <button class="btn" onclick="window.close()">Close</button>
+            </div>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_FAILED', error: '${errorMessage.replace(/'/g, "\\'")}' }, '*');
+              }
+            </script>
+          </body>
+        </html>
       `);
     }
   }

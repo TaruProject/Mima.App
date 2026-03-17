@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import Layout from "./components/Layout";
@@ -9,6 +9,7 @@ import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
 import UpdateOverlay from "./components/UpdateOverlay";
 import InstallPWA from "./components/InstallPWA";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./contexts/ToastContext";
 
@@ -31,13 +32,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegistered(r) {
       if (r) {
-        setInterval(() => {
+        intervalRef.current = setInterval(() => {
           r.update();
         }, 15 * 60 * 1000); // Check every 15 minutes
       }
@@ -46,6 +49,14 @@ function AppRoutes() {
       console.log('SW registration error', error);
     },
   });
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   const { user } = useAuth();
 
@@ -107,7 +118,9 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
-          <AppRoutes />
+          <ErrorBoundary>
+            <AppRoutes />
+          </ErrorBoundary>
         </BrowserRouter>
       </ToastProvider>
     </AuthProvider>

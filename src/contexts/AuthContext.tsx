@@ -55,6 +55,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    // Clear all user preferences from localStorage
+    localStorage.removeItem('mima_onboarding_done');
+    localStorage.removeItem('mima_language');
+    localStorage.removeItem('mima_voice_id');
+    localStorage.removeItem('mima_chat_history');
   };
 
   return (
