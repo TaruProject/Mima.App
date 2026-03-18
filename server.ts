@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
+import * as chrono from "chrono-node";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -697,6 +698,155 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
+// ---- Calendar Service Functions ----
+
+interface CalendarEventData {
+  summary: string;
+  description?: string;
+  startDate: Date;
+  endDate: Date;
+  isAllDay?: boolean;
+}
+
+// Parse natural language date using chrono-node
+function parseNaturalDate(dateText: string, referenceDate?: Date): { start: Date; end?: Date; isAllDay: boolean } | null {
+  const refDate = referenceDate || new Date();
+  const results = chrono.parse(dateText, refDate, { forwardDate: true });
+  
+  if (results.length === 0) return null;
+  
+  const result = results[0];
+  const start = result.start.date();
+  const end = result.end ? result.end.date() : undefined;
+  
+  // Check if it's an all-day event (no specific time mentioned)
+  const isAllDay = !result.start.isCertain('hour');
+  
+  return { start, end, isAllDay };
+}
+
+// Create a calendar event
+async function createCalendarEvent(userTokens: any, eventData: CalendarEventData): Promise<any> {
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(userTokens);
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  
+  let event: any = {
+    summary: eventData.summary,
+    description: eventData.description,
+  };
+  
+  if (eventData.isAllDay) {
+    // All-day event format
+    const startDateStr = eventData.startDate.toISOString().split('T')[0];
+    const endDateStr = eventData.endDate.toISOString().split('T')[0];
+    event.start = { date: startDateStr };
+    event.end = { date: endDateStr };
+  } else {
+    // Timed event format
+    event.start = { dateTime: eventData.startDate.toISOString() };
+    event.end = { dateTime: eventData.endDate.toISOString() };
+  }
+  
+  const response = await calendar.events.insert({
+    calendarId: 'primary',
+    requestBody: event,
+  });
+  
+  return response.data;
+}
+
+// List calendar events
+async function listCalendarEvents(userTokens: any, startDate: string, endDate: string, maxResults: number = 10): Promise<any[]> {
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(userTokens);
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  
+  const response = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: startDate + 'T00:00:00Z',
+    timeMax: endDate + 'T23:59:59Z',
+    maxResults: maxResults,
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+  
+  return response.data.items || [];
+}
+
+// Search calendar events by keyword
+async function searchCalendarEvents(userTokens: any, query: string, maxResults: number = 10): Promise<any[]> {
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(userTokens);
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  
+  // Search in the next 30 days by default
+  const now = new Date();
+  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  
+  const response = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: now.toISOString(),
+    timeMax: thirtyDaysLater.toISOString(),
+    q: query, // Google Calendar API search query
+    maxResults: maxResults,
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+  
+  return response.data.items || [];
+}
+
+// Delete a calendar event
+async function deleteCalendarEvent(userTokens: any, eventId: string): Promise<void> {
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(userTokens);
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  
+  await calendar.events.delete({
+    calendarId: 'primary',
+    eventId: eventId,
+  });
+}
+
+// Update a calendar event
+async function updateCalendarEvent(userTokens: any, eventId: string, updates: Partial<CalendarEventData>): Promise<any> {
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(userTokens);
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  
+  // Get existing event
+  const { data: existingEvent } = await calendar.events.get({
+    calendarId: 'primary',
+    eventId: eventId,
+  });
+  
+  // Apply updates
+  const updatedEvent: any = { ...existingEvent };
+  if (updates.summary) updatedEvent.summary = updates.summary;
+  if (updates.description) updatedEvent.description = updates.description;
+  
+  if (updates.startDate && updates.endDate) {
+    if (updates.isAllDay) {
+      const startDateStr = updates.startDate.toISOString().split('T')[0];
+      const endDateStr = updates.endDate.toISOString().split('T')[0];
+      updatedEvent.start = { date: startDateStr };
+      updatedEvent.end = { date: endDateStr };
+    } else {
+      updatedEvent.start = { dateTime: updates.startDate.toISOString() };
+      updatedEvent.end = { dateTime: updates.endDate.toISOString() };
+    }
+  }
+  
+  const response = await calendar.events.update({
+    calendarId: 'primary',
+    eventId: eventId,
+    requestBody: updatedEvent,
+  });
+  
+  return response.data;
+}
+
 // ---- Gemini AI Chat Proxy ----
 let genAI: GoogleGenAI | null = null;
 
@@ -718,8 +868,56 @@ const languageInstructions: Record<string, string> = {
   en: 'Always respond in English.',
 };
 
+// Model selection router - determines which Gemini model to use
+function selectModelForTask(message: string, mode?: string): { model: string; reason: string; maxTokens: number } {
+  const lowerMsg = message.toLowerCase();
+  
+  // Complex task indicators that need Pro model
+  const complexIndicators = [
+    'analiza', 'análisis', 'analyze', 'analysis',
+    'compara', 'compare', 'comparación', 'comparison',
+    'investiga', 'investigate', 'research',
+    'explica detalladamente', 'explain in detail',
+    'paso a paso', 'step by step',
+    'estrategia', 'strategy', 'plan detallado',
+    'optimiza', 'optimize', 'mejora procesos',
+    'lean', 'six sigma', 'flujo de trabajo',
+    'reporte', 'report', 'informe',
+    'sintetiza', 'synthesize', 'resume largo'
+  ];
+  
+  // Check for complex task patterns
+  const isComplexTask = complexIndicators.some(indicator => lowerMsg.includes(indicator));
+  const isLongContext = message.length > 500;
+  const isBusinessMode = mode === 'Business Mode';
+  
+  // Decision logic
+  if (isBusinessMode && isComplexTask) {
+    return { 
+      model: 'gemini-1.5-pro-latest', 
+      reason: 'Business mode + complex analysis task',
+      maxTokens: 2000 
+    };
+  }
+  
+  if (isComplexTask && isLongContext) {
+    return { 
+      model: 'gemini-1.5-pro-latest', 
+      reason: 'Complex analysis with long context',
+      maxTokens: 2000 
+    };
+  }
+  
+  // Default: Use Flash for speed and cost efficiency (95% of tasks)
+  return { 
+    model: 'gemini-1.5-flash-latest', 
+    reason: 'Standard task - Flash sufficient',
+    maxTokens: 1000 
+  };
+}
+
 app.post("/api/chat", async (req, res) => {
-  const { message, mode, language, history } = req.body;
+  const { message, mode, language, history, userId } = req.body;
   
   console.log("═══════════════════════════════════════════");
   console.log("🤖 CHAT API REQUEST");
@@ -727,6 +925,7 @@ app.post("/api/chat", async (req, res) => {
   console.log("   Message:", message?.substring(0, 100));
   console.log("   Mode:", mode || 'Neutral');
   console.log("   Language:", language || 'en');
+  console.log("   UserId:", userId || 'Not provided');
 
   try {
     if (!message || typeof message !== 'string') {
@@ -736,6 +935,11 @@ app.post("/api/chat", async (req, res) => {
 
     const ai = getGenAI();
     console.log("✅ Gemini AI client initialized");
+
+    // INTELLIGENT MODEL ROUTING
+    const modelSelection = selectModelForTask(message, mode);
+    console.log("🧠 Model selected:", modelSelection.model);
+    console.log("   Reason:", modelSelection.reason);
 
     // System prompt with explicit language instruction
     let modeInstruction = "Eres Mima, un asistente personal inteligente, directo y objetivo. Ayudas con tareas de calendario, correos y organización personal.";
@@ -750,28 +954,50 @@ app.post("/api/chat", async (req, res) => {
     const langCode = language || 'en';
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
     
+    // CALENDAR TOOLS INSTRUCTIONS for function calling
+    const calendarToolsInstruction = userId ? `
+
+CALENDAR TOOLS:
+Tienes acceso al calendario del usuario. Para crear eventos, responde EXACTAMENTE con este formato JSON:
+{"tool": "createCalendarEvent", "summary": "Título del evento", "dateText": "mañana a las 3pm", "description": "Descripción opcional"}
+
+Para ver eventos:
+{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
+
+Para buscar eventos por nombre:
+{"tool": "searchCalendarEvents", "query": "reunión", "maxResults": 10}
+
+Para eliminar eventos (primero busca si no tienes el ID):
+{"tool": "deleteCalendarEvent", "eventId": "id_del_evento"}
+
+Para actualizar eventos:
+{"tool": "updateCalendarEvent", "eventId": "id_del_evento", "summary": "Nuevo título", "dateText": "pasado mañana a las 5pm"}
+
+IMPORTANTE: Si el usuario dice "elimina mi reunión de mañana", PRIMERO busca con searchCalendarEvents, luego elimina.
+Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO con el JSON de la herramienta, sin texto adicional.
+Si NO es una petición de calendario, responde normalmente.` : '';
+    
     // CRITICAL: Explicit system prompt with language enforcement
-    const systemInstruction = `${modeInstruction} ${langInstruction}
+    const systemInstruction = modeInstruction + ' ' + langInstruction + calendarToolsInstruction + `
 
 INSTRUCCIONES IMPORTANTES:
 1. SIEMPRE responde en el idioma del usuario (${langCode}).
 2. Si el usuario escribe en español, tú respondes en español.
 3. Si el usuario escribe en inglés, tú respondes en inglés.
-4. Mantén un tono amigable y profesional.
-5. Si necesitas crear eventos o enviar emails, indica claramente qué acción tomar.`;
+4. Mantén un tono amigable y profesional.`;
 
     console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
     console.log("📝 Language instruction:", langInstruction);
 
-    // FIXED: Use correct model name and proper request format
+    // Call Gemini API with selected model
     console.log("🔄 Calling Gemini API...");
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", // CORRECTED: Was gemini-2.0-flash (invalid)
+      model: modelSelection.model,
       contents: message,
       config: {
         systemInstruction,
         temperature: 0.7,
-        maxOutputTokens: 1000,
+        maxOutputTokens: modelSelection.maxTokens,
       },
     });
 
@@ -783,8 +1009,125 @@ INSTRUCCIONES IMPORTANTES:
       throw new Error("Empty response from Gemini API");
     }
 
+    // CHECK FOR FUNCTION CALL (Calendar Tools)
+    let responseText = response.text;
+    
+    if (userId) {
+      try {
+        // Try to parse as JSON function call
+        const trimmedText = responseText.trim();
+        if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
+          console.log("🔧 Detected function call, parsing...");
+          const functionCall = JSON.parse(trimmedText);
+          
+          if (functionCall.tool) {
+            console.log("   Tool:", functionCall.tool);
+            
+            // Get user tokens from Supabase
+            const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+            const { data: tokenData } = await supabaseAdmin
+              .from('user_google_tokens')
+              .select('tokens')
+              .eq('user_id', userId)
+              .single();
+            
+            if (!tokenData) {
+              responseText = "Necesitas conectar tu cuenta de Google primero para usar el calendario. Ve a la sección de Calendario para conectarla.";
+            } else {
+              const userTokens = JSON.parse(decrypt(tokenData.tokens));
+              
+              // Execute the appropriate function
+              if (functionCall.tool === 'createCalendarEvent') {
+                const dateInfo = parseNaturalDate(functionCall.dateText);
+                if (!dateInfo) {
+                  responseText = "No pude entender la fecha. Por favor, sé más específico (ej: 'mañana a las 3pm' o 'el lunes que viene').";
+                } else {
+                  // Default duration: 1 hour for timed events
+                  const endDate = dateInfo.end || new Date(dateInfo.start.getTime() + 60 * 60 * 1000);
+                  
+                  const eventData: CalendarEventData = {
+                    summary: functionCall.summary,
+                    description: functionCall.description,
+                    startDate: dateInfo.start,
+                    endDate: endDate,
+                    isAllDay: dateInfo.isAllDay,
+                  };
+                  
+                  const createdEvent = await createCalendarEvent(userTokens, eventData);
+                  responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
+                  console.log("   Created event:", createdEvent.id);
+                }
+              } else if (functionCall.tool === 'listCalendarEvents') {
+                const dateInfo = parseNaturalDate(functionCall.dateText);
+                if (!dateInfo) {
+                  // Default to today if date not understood
+                  const today = new Date();
+                  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                  const events = await listCalendarEvents(userTokens, today.toISOString().split('T')[0], tomorrow.toISOString().split('T')[0], functionCall.maxResults || 10);
+                  
+                  if (events.length === 0) {
+                    responseText = "No tienes eventos programados para hoy.";
+                  } else {
+                    responseText = "📅 Tus eventos de hoy:\n\n" + events.map((e: any) => {
+                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                      return `- ${start}: ${e.summary}`;
+                    }).join('\n');
+                  }
+                } else {
+                  const startStr = dateInfo.start.toISOString().split('T')[0];
+                  const endStr = (dateInfo.end || dateInfo.start).toISOString().split('T')[0];
+                  const events = await listCalendarEvents(userTokens, startStr, endStr, functionCall.maxResults || 10);
+                  
+                  if (events.length === 0) {
+                    responseText = `No tienes eventos programados para ${functionCall.dateText}.`;
+                  } else {
+                    responseText = `📅 Eventos para ${functionCall.dateText}:\n\n` + events.map((e: any) => {
+                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                      return `- ${start}: ${e.summary}`;
+                    }).join('\n');
+                  }
+                }
+              } else if (functionCall.tool === 'searchCalendarEvents') {
+                const events = await searchCalendarEvents(userTokens, functionCall.query, functionCall.maxResults || 10);
+                
+                if (events.length === 0) {
+                  responseText = `No encontré eventos que coincidan con "${functionCall.query}".`;
+                } else {
+                  responseText = `🔍 Eventos encontrados para "${functionCall.query}":\n\n` + events.map((e: any, i: number) => {
+                    const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleString(langCode, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                    return `${i + 1}. ${start}: ${e.summary} (ID: ${e.id})`;
+                  }).join('\n');
+                }
+              } else if (functionCall.tool === 'deleteCalendarEvent') {
+                await deleteCalendarEvent(userTokens, functionCall.eventId);
+                responseText = "✅ Evento eliminado correctamente.";
+              } else if (functionCall.tool === 'updateCalendarEvent') {
+                const updates: Partial<CalendarEventData> = {};
+                if (functionCall.summary) updates.summary = functionCall.summary;
+                if (functionCall.description) updates.description = functionCall.description;
+                if (functionCall.dateText) {
+                  const dateInfo = parseNaturalDate(functionCall.dateText);
+                  if (dateInfo) {
+                    updates.startDate = dateInfo.start;
+                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + 60 * 60 * 1000);
+                    updates.isAllDay = dateInfo.isAllDay;
+                  }
+                }
+                
+                const updatedEvent = await updateCalendarEvent(userTokens, functionCall.eventId, updates);
+                responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
+              }
+            }
+          }
+        }
+      } catch (functionError: any) {
+        console.error("❌ Function call error:", functionError.message);
+        responseText = "Hubo un problema al procesar tu solicitud de calendario. Por favor, intenta de nuevo.";
+      }
+    }
+
     console.log("✅ Sending response to client");
-    res.json({ text: response.text });
+    res.json({ text: responseText });
     
   } catch (error: any) {
     console.error("═══════════════════════════════════════════");

@@ -2,7 +2,8 @@ export async function generateChatResponse(
   message: string,
   mode: string,
   language?: string,
-  history?: Array<{ role: string; content: string }>
+  history?: Array<{ role: string; content: string }>,
+  userId?: string
 ): Promise<string> {
   try {
     const response = await fetch('/api/chat', {
@@ -15,6 +16,7 @@ export async function generateChatResponse(
         mode,
         language: language || 'en',
         history: history || [],
+        userId,
       }),
     });
 

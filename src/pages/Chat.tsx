@@ -6,9 +6,11 @@ import { ActionMenu } from "../components/ui/ActionMenu";
 import { ModeBottomSheet } from "../components/ui/ModeBottomSheet";
 import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Chat() {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem('mima_chat_history');
@@ -102,7 +104,7 @@ export default function Chat() {
           content: m.text
         }));
 
-      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history);
+      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history, user?.id);
       
       setMessages((prev) => [
         ...prev,
