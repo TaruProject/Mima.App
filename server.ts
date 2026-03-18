@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
+import { GoogleGenAI } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -151,10 +152,102 @@ app.get("/api/health", (req, res) => {
       hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
       hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
       hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+      hasGeminiKey: !!process.env.GEMINI_API_KEY,
       appUrl: process.env.APP_URL,
       nodeEnv: process.env.NODE_ENV
     }
   });
+});
+
+// Simple health check for Gemini configuration
+app.get("/api/test/gemini-config", (req, res) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  res.json({
+    hasApiKey: !!apiKey,
+    apiKeyFirstChars: apiKey ? apiKey.substring(0, 10) + '...' : 'NOT SET',
+    nodeEnv: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Test endpoint for Gemini API - use this to verify the chat is working
+app.get("/api/test/gemini", async (req, res) => {
+  console.log("🧪 Gemini test endpoint called");
+  
+  try {
+    // Step 1: Check API key
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("❌ GEMINI_API_KEY not set");
+      return res.status(500).json({
+        status: "error",
+        step: "config",
+        message: "GEMINI_API_KEY environment variable is not set",
+        solution: "Add GEMINI_API_KEY to your environment variables in Hostinger"
+      });
+    }
+    console.log("✅ API key found:", apiKey.substring(0, 10) + "...");
+
+    // Step 2: Initialize client
+    console.log("🔄 Initializing GoogleGenAI client...");
+    let ai;
+    try {
+      ai = getGenAI();
+      console.log("✅ GoogleGenAI client initialized");
+    } catch (initError: any) {
+      console.error("❌ Failed to initialize GoogleGenAI:", initError);
+      return res.status(500).json({
+        status: "error",
+        step: "initialization",
+        message: "Failed to initialize Gemini client",
+        error: initError.message
+      });
+    }
+
+    // Step 3: Make API call
+    console.log("🔄 Calling Gemini API with model gemini-1.5-flash...");
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: "Hola, ¿cómo estás?",
+        config: {
+          systemInstruction: "Eres Mima, un asistente personal. SIEMPRE responde en español.",
+        },
+      });
+      console.log("✅ Gemini API responded");
+    } catch (apiError: any) {
+      console.error("❌ Gemini API call failed:", apiError);
+      return res.status(500).json({
+        status: "error",
+        step: "api_call",
+        message: "Gemini API call failed",
+        error: apiError.message,
+        details: apiError.stack,
+        model: "gemini-1.5-flash"
+      });
+    }
+
+    // Step 4: Return success
+    console.log("✅ Gemini test completed successfully");
+    res.json({
+      status: "ok",
+      step: "complete",
+      message: "Gemini API is working correctly",
+      response: response.text,
+      model: "gemini-1.5-flash"
+    });
+    
+  } catch (error: any) {
+    console.error("❌ Unexpected error in Gemini test:", error);
+    res.status(500).json({
+      status: "error",
+      step: "unknown",
+      message: "Unexpected error during Gemini test",
+      error: error.message,
+      stack: error.stack
+    });
+  }
 });
 
 app.get("/api/auth/url", async (req, res) => {
@@ -605,8 +698,6 @@ app.post("/api/tts", async (req, res) => {
 });
 
 // ---- Gemini AI Chat Proxy ----
-import { GoogleGenAI } from "@google/genai";
-
 let genAI: GoogleGenAI | null = null;
 
 function getGenAI(): GoogleGenAI {
@@ -628,40 +719,105 @@ const languageInstructions: Record<string, string> = {
 };
 
 app.post("/api/chat", async (req, res) => {
-  try {
-    const { message, mode, language, history } = req.body;
+  const { message, mode, language, history } = req.body;
+  
+  console.log("═══════════════════════════════════════════");
+  console.log("🤖 CHAT API REQUEST");
+  console.log("═══════════════════════════════════════════");
+  console.log("   Message:", message?.substring(0, 100));
+  console.log("   Mode:", mode || 'Neutral');
+  console.log("   Language:", language || 'en');
 
+  try {
     if (!message || typeof message !== 'string') {
+      console.error("❌ Invalid message provided");
       return res.status(400).json({ error: "Message is required" });
     }
 
     const ai = getGenAI();
+    console.log("✅ Gemini AI client initialized");
 
-    let modeInstruction = "Act as a professional, direct, and objective personal assistant. Perform standard assistant tasks without emotional bias.";
+    // System prompt with explicit language instruction
+    let modeInstruction = "Eres Mima, un asistente personal inteligente, directo y objetivo. Ayudas con tareas de calendario, correos y organización personal.";
     if (mode === "Business Mode") {
-      modeInstruction = "Act as a Lean Management Expert. Identify time waste. Predict logical workflows. Advise on efficiency. Avoid unnecessary chatter.";
+      modeInstruction = "Eres Mima, un Experto en Lean Management. Identificas desperdicio de tiempo. Predices flujos de trabajo lógicos. Asesoras sobre eficiencia. Evitas charlas innecesarias.";
     } else if (mode === "Family Mode") {
-      modeInstruction = "Act as a Family Organizer. Suggest routines for evenings. Remind about family needs. Generate a sense of achievement. Reduce rush and conflict.";
+      modeInstruction = "Eres Mima, un Organizador Familiar. Sugieres rutinas para las tardes. Recuerdas necesidades familiares. Generas sensación de logro. Reduces prisa y conflicto.";
     } else if (mode === "Zen Mode") {
-      modeInstruction = "Act as a Wellness Coach. Prioritize human well-being. Remind about breaks, hydration, and rest. Encourage balance.";
+      modeInstruction = "Eres Mima, un Coach de Bienestar. Priorizas el bienestar humano. Recuerdas pausas, hidratación y descanso. Fomentas el equilibrio.";
     }
 
     const langCode = language || 'en';
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
-    const systemInstruction = `${modeInstruction} ${langInstruction}`;
+    
+    // CRITICAL: Explicit system prompt with language enforcement
+    const systemInstruction = `${modeInstruction} ${langInstruction}
 
+INSTRUCCIONES IMPORTANTES:
+1. SIEMPRE responde en el idioma del usuario (${langCode}).
+2. Si el usuario escribe en español, tú respondes en español.
+3. Si el usuario escribe en inglés, tú respondes en inglés.
+4. Mantén un tono amigable y profesional.
+5. Si necesitas crear eventos o enviar emails, indica claramente qué acción tomar.`;
+
+    console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
+    console.log("📝 Language instruction:", langInstruction);
+
+    // FIXED: Use correct model name and proper request format
+    console.log("🔄 Calling Gemini API...");
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash", // CORRECTED: Was gemini-2.0-flash (invalid)
       contents: message,
       config: {
         systemInstruction,
+        temperature: 0.7,
+        maxOutputTokens: 1000,
       },
     });
 
-    res.json({ text: response.text || "I'm sorry, I couldn't process that." });
-  } catch (error) {
-    console.error("Chat API Error:", error);
-    res.status(500).json({ error: "Failed to generate response" });
+    console.log("✅ Gemini API response received");
+    console.log("   Response text length:", response.text?.length || 0);
+    
+    if (!response.text) {
+      console.error("❌ Gemini returned empty response");
+      throw new Error("Empty response from Gemini API");
+    }
+
+    console.log("✅ Sending response to client");
+    res.json({ text: response.text });
+    
+  } catch (error: any) {
+    console.error("═══════════════════════════════════════════");
+    console.error("❌ CHAT API ERROR:");
+    console.error("   Message:", error.message);
+    console.error("   Stack:", error.stack);
+    
+    // Log specific error types for debugging
+    if (error.message?.includes('API key')) {
+      console.error("   ⚠️  API Key issue detected");
+    }
+    if (error.message?.includes('model')) {
+      console.error("   ⚠️  Model name issue detected");
+    }
+    if (error.message?.includes('quota')) {
+      console.error("   ⚠️  Quota exceeded");
+    }
+    
+    console.error("═══════════════════════════════════════════");
+    
+    // Return error in the user's language
+    const langCode = language || 'en';
+    const errorMessages: Record<string, string> = {
+      en: "I'm sorry, I'm having trouble processing your request. Please try again in a moment.",
+      es: "Lo siento, estoy teniendo problemas para procesar tu solicitud. Por favor, intenta de nuevo en un momento.",
+      fi: "Anteeksi, minulla on vaikeuksia käsitellä pyyntöäsi. Yritä uudelleen hetken kuluttua.",
+      sv: "Förlåt, jag har problem med att bearbeta din begäran. Vänligen försök igen om en stund."
+    };
+    
+    res.status(500).json({ 
+      error: errorMessages[langCode] || errorMessages.en,
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 

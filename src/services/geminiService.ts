@@ -18,17 +18,30 @@ export async function generateChatResponse(
       }),
     });
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Chat API error:', errorData);
-      return "I'm sorry, I couldn't process that. Please try again.";
+      console.error('Chat API error:', data);
+      // Return the localized error message from backend, or a fallback
+      return data.error || "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo.";
     }
 
-    const data = await response.json();
-    return data.text || "I'm sorry, I couldn't process that.";
+    if (!data.text) {
+      console.error('Chat API returned empty text');
+      return "Lo siento, no pude generar una respuesta. Por favor intenta de nuevo.";
+    }
+
+    return data.text;
   } catch (error) {
     console.error('Chat API Error:', error);
-    return "I'm sorry, I couldn't process that. Please try again.";
+    // Return localized error based on language parameter
+    const errorMessages: Record<string, string> = {
+      en: "I'm sorry, I'm having trouble. Please try again.",
+      es: "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo.",
+      fi: "Anteeksi, minulla on ongelmia. Yritä uudelleen.",
+      sv: "Förlåt, jag har problem. Vänligen försök igen."
+    };
+    return errorMessages[language || 'es'] || errorMessages.es;
   }
 }
 
