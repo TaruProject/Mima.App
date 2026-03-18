@@ -1,3 +1,16 @@
+export interface ChatError {
+  message: string;
+  errorCode?: string;
+  details?: string;
+}
+
+export interface ChatResponse {
+  text?: string;
+  error?: string;
+  errorCode?: string;
+  details?: string;
+}
+
 export async function generateChatResponse(
   message: string,
   mode: string,
@@ -5,6 +18,9 @@ export async function generateChatResponse(
   history?: Array<{ role: string; content: string }>,
   userId?: string
 ): Promise<string> {
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), 30000); // 30s timeout
+
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -18,32 +34,65 @@ export async function generateChatResponse(
         history: history || [],
         userId,
       }),
+      signal: abortController.signal,
     });
 
-    const data = await response.json();
+    clearTimeout(timeoutId);
+
+    const data: ChatResponse = await response.json();
 
     if (!response.ok) {
-      console.error('Chat API error:', data);
-      // Return the localized error message from backend, or a fallback
-      return data.error || "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo.";
+      console.error('Chat API error:', {
+        status: response.status,
+        error: data.error,
+        errorCode: data.errorCode,
+        details: data.details
+      });
+
+      // Return specific error message based on error code
+      if (data.errorCode === 'GEMINI_NOT_CONFIGURED') {
+        return language === 'es'
+          ? "⚠️ El servicio de IA no está configurado. Por favor contacta al administrador."
+          : "⚠️ AI service is not configured. Please contact the administrator.";
+      }
+      if (data.errorCode === 'INVALID_API_KEY') {
+        return language === 'es'
+          ? "⚠️ Error en la clave de API. Por favor intenta más tarde."
+          : "⚠️ API Key error. Please try again later.";
+      }
+      if (data.errorCode === 'QUOTA_EXCEEDED') {
+        return language === 'es'
+          ? "⚠️ Se excedió el límite de uso. Por favor intenta en unos minutos."
+          : "⚠️ Usage quota exceeded. Please try again in a few minutes.";
+      }
+
+      return data.error || (language === 'es'
+        ? "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo."
+        : "I'm sorry, I'm having trouble. Please try again.");
     }
 
     if (!data.text) {
       console.error('Chat API returned empty text');
-      return "Lo siento, no pude generar una respuesta. Por favor intenta de nuevo.";
+      return language === 'es'
+        ? "Lo siento, no pude generar una respuesta. Por favor intenta de nuevo."
+        : "I'm sorry, I couldn't generate a response. Please try again.";
     }
 
     return data.text;
-  } catch (error) {
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+
+    if (error.name === 'AbortError') {
+      console.error('Chat API timeout');
+      return language === 'es'
+        ? "⏱️ La respuesta está tardando más de lo esperado. Por favor intenta de nuevo."
+        : "⏱️ Response is taking longer than expected. Please try again.";
+    }
+
     console.error('Chat API Error:', error);
-    // Return localized error based on language parameter
-    const errorMessages: Record<string, string> = {
-      en: "I'm sorry, I'm having trouble. Please try again.",
-      es: "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo.",
-      fi: "Anteeksi, minulla on ongelmia. Yritä uudelleen.",
-      sv: "Förlåt, jag har problem. Vänligen försök igen."
-    };
-    return errorMessages[language || 'es'] || errorMessages.es;
+    return language === 'es'
+      ? "Lo siento, estoy teniendo problemas. Por favor intenta de nuevo."
+      : "I'm sorry, I'm having trouble. Please try again.";
   }
 }
 

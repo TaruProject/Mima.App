@@ -34,8 +34,12 @@ export default function Inbox() {
         setEmails(data || []);
       } else if (response.status === 401) {
         setIsConnected(false);
+        setError(t('inbox.token_expired'));
+      } else if (response.status === 403) {
+        setError(t('inbox.permission_denied'));
       } else {
-        setError(t('common.loading_failed'));
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.message || t('common.loading_failed'));
       }
     } catch (error) {
       console.error("Failed to fetch emails", error);
@@ -106,9 +110,25 @@ export default function Inbox() {
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           </div>
         ) : (error || authError) ? (
-          <div className="text-center mt-10 flex flex-col items-center gap-4">
-            <p className="text-red-400">{error || authError}</p>
-            <button onClick={fetchEmails} className="px-4 py-2 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">{t('common.try_again')}</button>
+          <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-red-500/30 max-w-sm w-full mt-8 mx-auto">
+            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
+              <MailIcon className="w-8 h-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">{t('inbox.error_loading')}</h3>
+            <p className="text-sm text-red-400 mb-4">{error || authError}</p>
+            <div className="flex gap-2 w-full">
+              {!isConnected && (
+                <button
+                  onClick={() => handleConnect()}
+                  className="flex-1 py-2 px-4 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors text-sm"
+                >
+                  {t('common.reconnect')}
+                </button>
+              )}
+              <button onClick={fetchEmails} className="flex-1 py-2 px-4 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">
+                {t('common.try_again')}
+              </button>
+            </div>
           </div>
         ) : emails.length === 0 ? (
           <div className="text-center text-slate-400 mt-10">

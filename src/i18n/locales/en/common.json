@@ -61,7 +61,10 @@
     "connect_title": "Connect Gmail",
     "connect_description": "Link your Google account to allow Mima to read, summarize, and draft replies to your emails.",
     "empty": "Your inbox is empty.",
-    "draft_reply": "Draft Reply with Mima"
+    "draft_reply": "Draft Reply with Mima",
+    "error_loading": "Error loading emails",
+    "token_expired": "Google connection expired. Please reconnect your account.",
+    "permission_denied": "Insufficient permissions. Please verify Gmail API is enabled."
   },
   "calendar": {
     "title": "Calendar",
@@ -69,7 +72,10 @@
     "connect_description": "Link your Google account to allow Mima to manage your schedule, create events, and find free time.",
     "empty": "No upcoming events found.",
     "all_day": "All Day",
-    "today": "Today"
+    "today": "Today",
+    "error_loading": "Error loading events",
+    "token_expired": "Google connection expired. Please reconnect your account.",
+    "permission_denied": "Insufficient permissions. Please verify Calendar API is enabled."
   },
   "auth": {
     "welcome_back": "Welcome back",
@@ -132,6 +138,7 @@
     "back": "Back",
     "continue": "Continue",
     "try_again": "Try Again",
+    "reconnect": "Reconnect Google",
     "loading_failed": "Failed to load. Please try again.",
     "network_error": "Network error. Please try again.",
     "signin_google": "Sign in with Google",

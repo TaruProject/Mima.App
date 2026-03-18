@@ -255,9 +255,18 @@ The following components currently have hardcoded strings (see audit for full li
 | L0yTtpRXzdyzQlzALhgD | Mima US-2 | English US |
 | d3MFdIuCfbAIwiu7jC4a | Mima US-3 | English US |
 | l4Coq6695JDX9xtLqXDE | Mima US-4 | English US |
-| EXAVITQu4vr4xnSDxMaL | Mima ES-1 | Spanish |
-| FGY2WhTYpP6BYn95boSj | Mima ES-2 | Spanish |
-| IKne3meq5a9ay67vC7pY | Mima ES-3 | Spanish |
+| EXAVITQu4vr4xnSDxMaL | Mima UK-1 | English UK |
+| FGY2WhTYpP6BYn95boSj | Mima UK-2 | English UK |
+| IKne3meq5a9ay67vC7pY | Mima UK-3 | English UK |
+| YSabzCJMvEHDduIDMdwV | Mima FI-1 | Finland |
+| c4ZwDxrFaobUF5e1KlEM | Mima FI-2 | Finland |
+| RiWFFlzYFZuu4lPMig3i | Mima FI-3 | Finland |
+| cLAH1kXlkAivJHxCW601 | Mima SE-1 | Sweden |
+| HqmZnnvy6tCQd8EGWKRT | Mima SE-2 | Sweden |
+| 1Iztu4UHnTb9SUjJcpS1 | Mima SE-3 | Sweden |
+| CaJslL1xziwefCeTNzHv | Mima ES-1 | Spanish |
+| m7yTemJqdIqrcNleANfX | Mima ES-2 | Spanish |
+| qBvury71WUJfVeT1STkG | Mima ES-3 | Spanish |
 
 ### TODO: Create `src/constants/voices.ts` as single source of truth
 
@@ -347,21 +356,88 @@ Unknown. No migration files or RLS policies found in the codebase.
 
 > ⚠️ Read these before making any changes. These are active bugs from the March 2026 audit.
 
+### ✅ Fixed Issues (March 2026)
+
+1. **✅ Voice region labels corrected** — Finland/Swedish voices now show correct region names in `src/constants/voices.ts`
+2. **✅ Enhanced error handling in Gemini API** — Added timeout (30s), error codes, and localized error messages in `src/services/geminiService.ts`
+3. **✅ Improved Google OAuth token handling** — Better error detection for expired tokens in `server.ts` with automatic cleanup
+4. **✅ Enhanced Calendar/Gmail error UI** — Clear error states with reconnect buttons in `src/pages/Calendar.tsx` and `src/pages/Inbox.tsx`
+5. **✅ Added debug endpoints** — `/api/debug/chat` and improved `/api/test/gemini` for diagnostics
+6. **✅ Added i18n keys** — New keys for error states: `calendar.error_loading`, `inbox.token_expired`, `common.reconnect`
+7. **✅ Improved logging** — Detailed console logs in `server.ts` for chat, calendar, and gmail endpoints
+
+---
+
+### 🔴 Critical Issues (Remaining)
+
 1. **🔴 GEMINI_API_KEY is exposed in frontend** — `vite.config.ts` injects it via `define`. Must route all Gemini calls through `/api/chat` backend endpoint.
 2. **🔴 AI always responds in English** — System prompt in `geminiService.ts` has no language parameter.
 3. **🔴 15+ i18n keys are missing** from JSON files. User sees raw key strings like "chat.welcome_message".
 4. **🔴 Massive hardcoded string violations** — Auth.tsx (English), ActionMenu/ModeBottomSheet (Spanish), Layout (English), InstallPWA/UpdateOverlay (English).
 5. **🔴 Profile save is fake** — `setTimeout(1500)` then success toast. No Supabase call.
 6. **🔴 Chat history is not persisted** — Lost on every reload.
+
+---
+
+### 🟡 Medium Priority Issues
+
 7. **🟡 Voice data duplicated** in OnboardingFlow.tsx and Profile.tsx — needs central `constants/voices.ts`.
 8. **🟡 Sign out doesn't clear localStorage** — Previous user's preferences persist.
 9. **🟡 Profile voice preview is broken** — Double data URI prefix.
 10. **🟡 Calendar dates/days always in English** — Not locale-aware.
 11. **🟡 No Error Boundary** — Render errors crash entire app.
 12. **🟡 OAuth logic duplicated** between Calendar.tsx and Inbox.tsx.
+
+---
+
+### 🔵 Low Priority / Nice to Have
+
 13. **🔵 No testing** — Zero test files or test framework.
 14. **🔵 No linting** — No ESLint/Prettier.
 15. **🔵 `better-sqlite3`** listed in dependencies but never used.
+
+---
+
+## Debug Endpoints
+
+### Chat & Gemini API
+- `GET /api/health` - General health check with env status
+- `GET /api/test/gemini-config` - Check Gemini API key configuration
+- `GET /api/test/gemini` - Test Gemini API call with sample message
+- `GET /api/debug/chat?message=test&language=es` - Debug chat with custom parameters
+
+### OAuth & Google Integration
+- `GET /api/auth/status` - Check Google connection status
+- `GET /api/oauth/debug` - Debug session and token status
+- `GET /api/oauth/logs` - View OAuth callback logs
+
+### API Endpoints
+- `GET /api/calendar/events` - List calendar events (requires auth)
+- `GET /api/gmail/messages` - List unread Gmail messages (requires auth)
+- `POST /api/chat` - Chat with Gemini AI
+- `POST /api/tts` - Generate speech with ElevenLabs
+- `GET /api/tts/preview?voiceId=xxx` - Preview voice audio
+
+---
+
+## Error Codes Reference
+
+### Chat API Errors
+| Code | Description | User Message |
+|------|-------------|--------------|
+| `GEMINI_NOT_CONFIGURED` | API key not set | Contact administrator |
+| `INVALID_API_KEY` | API key invalid | Try again later |
+| `QUOTA_EXCEEDED` | Rate limit hit | Try in a few minutes |
+| `TIMEOUT` | Request > 30s | Try again |
+| `NETWORK_ERROR` | Connection failed | Check connection |
+
+### Google API Errors
+| Code | Description | Action |
+|------|-------------|--------|
+| `TOKEN_EXPIRED` | OAuth tokens expired | Reconnect Google |
+| `PERMISSION_DENIED` | API not enabled | Enable in Google Cloud |
+| `NOT_FOUND` | Resource not found | Check resource ID |
+| `NO_TOKENS` | No tokens in session/DB | Connect Google first |
 
 ---
 

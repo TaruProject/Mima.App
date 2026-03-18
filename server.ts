@@ -251,6 +251,45 @@ app.get("/api/test/gemini", async (req, res) => {
   }
 });
 
+// Debug endpoint for chat - test chat with specific parameters
+app.get("/api/debug/chat", async (req, res) => {
+  const { message = 'test', language = 'es', mode = 'Neutral' } = req.query;
+
+  console.log("🔍 Debug chat endpoint called");
+
+  const debugInfo = {
+    timestamp: new Date().toISOString(),
+    geminiInitialized,
+    geminiInitError,
+    hasApiKey: !!process.env.GEMINI_API_KEY,
+    apiKeyFirstChars: process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'NOT SET',
+    testParams: { message, language, mode },
+    languageInstructions: Object.keys(languageInstructions)
+  };
+
+  try {
+    // Test Gemini API
+    const ai = getGenAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: message as string,
+      config: {
+        systemInstruction: languageInstructions[language as string] || languageInstructions.en,
+        maxOutputTokens: 100
+      },
+    });
+
+    debugInfo['testResponse'] = response.text?.substring(0, 100) || 'EMPTY_RESPONSE';
+    debugInfo['status'] = 'SUCCESS';
+
+    res.json(debugInfo);
+  } catch (error: any) {
+    debugInfo['error'] = error.message;
+    debugInfo['status'] = 'FAILED';
+    res.status(500).json(debugInfo);
+  }
+});
+
 app.get("/api/auth/url", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -856,16 +895,43 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
 
 // ---- Gemini AI Chat Proxy ----
 let genAI: GoogleGenAI | null = null;
+let geminiInitialized = false;
+let geminiInitError: string | null = null;
 
 function getGenAI(): GoogleGenAI {
   if (!genAI) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is not configured");
+      const errorMsg = "GEMINI_API_KEY is not configured";
+      console.error("❌ GEMINI INIT ERROR:", errorMsg);
+      geminiInitError = errorMsg;
+      throw new Error(errorMsg);
     }
-    genAI = new GoogleGenAI({ apiKey });
+    try {
+      console.log("🔧 Initializing Gemini AI client...");
+      genAI = new GoogleGenAI({ apiKey });
+      geminiInitialized = true;
+      geminiInitError = null;
+      console.log("✅ Gemini AI client initialized successfully");
+    } catch (error: any) {
+      const errorMsg = `Failed to initialize Gemini: ${error.message}`;
+      console.error("❌ GEMINI INIT ERROR:", errorMsg);
+      geminiInitError = error.message;
+      throw error;
+    }
   }
   return genAI;
+}
+
+// Pre-initialize Gemini on server start (optional health check)
+async function initializeGemini(): Promise<boolean> {
+  try {
+    getGenAI();
+    return true;
+  } catch (error: any) {
+    console.error("❌ Gemini initialization failed:", error.message);
+    return false;
+  }
 }
 
 const languageInstructions: Record<string, string> = {
@@ -934,14 +1000,40 @@ app.post("/api/chat", async (req, res) => {
   console.log("   Language:", language || 'en');
   console.log("   UserId:", userId || 'Not provided');
 
+  // Log request timestamp for debugging
+  const requestStart = Date.now();
+
   try {
     if (!message || typeof message !== 'string') {
       console.error("❌ Invalid message provided");
-      return res.status(400).json({ error: "Message is required" });
+      return res.status(400).json({
+        error: "Message is required",
+        errorCode: "INVALID_MESSAGE"
+      });
     }
 
-    const ai = getGenAI();
-    console.log("✅ Gemini AI client initialized");
+    // Check Gemini initialization status first
+    if (geminiInitError) {
+      console.error("❌ Gemini not initialized:", geminiInitError);
+      return res.status(503).json({
+        error: "AI service unavailable",
+        errorCode: "GEMINI_NOT_CONFIGURED",
+        details: geminiInitError
+      });
+    }
+
+    let ai;
+    try {
+      ai = getGenAI();
+      console.log("✅ Gemini AI client initialized");
+    } catch (error: any) {
+      console.error("❌ Failed to get Gemini client:", error.message);
+      return res.status(503).json({
+        error: "AI service unavailable",
+        errorCode: "GEMINI_INIT_FAILED",
+        details: error.message
+      });
+    }
 
     // INTELLIGENT MODEL ROUTING
     const modelSelection = selectModelForTask(message, mode);
@@ -1155,7 +1247,11 @@ INSTRUCCIONES IMPORTANTES:
 
     console.error("═══════════════════════════════════════════");
 
-    // Return error in the user's language
+    // Calculate request duration
+    const duration = Date.now() - requestStart;
+    console.log(`⏱️  Request duration: ${duration}ms`);
+
+    // Return error in the user's language with error code
     const langCode = language || 'en';
     const errorMessages: Record<string, string> = {
       en: "I'm sorry, I'm having trouble processing your request. Please try again in a moment.",
@@ -1164,16 +1260,41 @@ INSTRUCCIONES IMPORTANTES:
       sv: "Förlåt, jag har problem med att bearbeta din begäran. Vänligen försök igen om en stund."
     };
 
+    // Determine error code for frontend
+    let errorCode = "UNKNOWN_ERROR";
+    if (error.message?.includes('API key')) errorCode = "INVALID_API_KEY";
+    else if (error.message?.includes('model')) errorCode = "MODEL_ERROR";
+    else if (error.message?.includes('quota')) errorCode = "QUOTA_EXCEEDED";
+    else if (error.message?.includes('timeout')) errorCode = "TIMEOUT";
+    else if (error.message?.includes('network')) errorCode = "NETWORK_ERROR";
+
     res.status(500).json({
       error: errorMessages[langCode] || errorMessages.en,
+      errorCode,
       details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
 });
 
 async function handleGoogleApiError(error: any, req: any, res: any, serviceName: string) {
-  console.error(`Error fetching ${serviceName}`, error);
-  if (error.message?.includes('Refresh Token') || error.message?.includes('invalid_grant')) {
+  console.error(`═══════════════════════════════════════════`);
+  console.error(`❌ Error fetching ${serviceName}`);
+  console.error(`   Message: ${error.message}`);
+  console.error(`   Code: ${error.code || 'N/A'}`);
+  console.error(`   Status: ${error.status || 'N/A'}`);
+  console.error(`═══════════════════════════════════════════`);
+
+  // Check for token expiration or invalid grant
+  const isTokenExpired =
+    error.message?.includes('Refresh Token') ||
+    error.message?.includes('invalid_grant') ||
+    error.message?.includes('Token has been expired or revoked') ||
+    error.status === 401;
+
+  if (isTokenExpired) {
+    console.log(`🔄 ${serviceName} tokens expired, clearing session and DB tokens...`);
+
+    // Clear session tokens
     req.session.tokens = undefined;
 
     try {
@@ -1181,101 +1302,167 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
       if (authHeader && supabaseUrl && supabaseAnonKey) {
         const token = authHeader.split(' ')[1];
         const supabase = createClient(supabaseUrl, supabaseAnonKey);
-        const { data: { user } } = await supabase.auth.getUser(token);
-        if (user) {
+        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+
+        if (userError) {
+          console.error("Failed to get user from auth token:", userError.message);
+        } else if (user) {
+          // Delete tokens from Supabase
           const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
-          await supabaseAdmin.from('user_google_tokens').delete().eq('user_id', user.id);
-          console.log(`Deleted invalid tokens for user ${user.id}`);
+          const { error: deleteError } = await supabaseAdmin
+            .from('user_google_tokens')
+            .delete()
+            .eq('user_id', user.id);
+
+          if (deleteError) {
+            console.error("Failed to delete tokens from Supabase:", deleteError.message);
+          } else {
+            console.log(`✅ Deleted invalid tokens for user ${user.id} from Supabase`);
+          }
         }
       }
     } catch (e) {
       console.error("Failed to delete invalid tokens from Supabase", e);
     }
 
-    return res.status(401).json({ error: "Google authentication expired. Please reconnect." });
+    return res.status(401).json({
+      error: `${serviceName}_token_expired`,
+      message: `Google authentication expired. Please reconnect your ${serviceName === 'gmail' ? 'Gmail' : 'Calendar'} account.`,
+      errorCode: 'TOKEN_EXPIRED'
+    });
   }
-  res.status(500).json({ error: `Failed to fetch ${serviceName}` });
+
+  // Handle other API errors
+  if (error.status === 403) {
+    return res.status(403).json({
+      error: `${serviceName}_permission_denied`,
+      message: `Permission denied for ${serviceName}. Please check API is enabled in Google Cloud Console.`,
+      errorCode: 'PERMISSION_DENIED'
+    });
+  }
+
+  if (error.status === 404) {
+    return res.status(404).json({
+      error: `${serviceName}_not_found`,
+      message: `${serviceName} resource not found.`,
+      errorCode: 'NOT_FOUND'
+    });
+  }
+
+  // Generic error
+  res.status(500).json({
+    error: `${serviceName}_error`,
+    message: `Failed to fetch ${serviceName}. Please try again.`,
+    errorCode: 'UNKNOWN_ERROR',
+    details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+  });
 }
 
 // Helper function to get tokens from session or fallback to Supabase
+// Includes caching and timeout for better reliability
 async function getUserTokens(req: express.Request): Promise<any | null> {
-  // First, try to get tokens from session
+  // First, try to get tokens from session (fastest)
   if (req.session.tokens) {
-    console.log("Using tokens from session");
+    console.log("✅ Using tokens from session");
     return req.session.tokens;
   }
 
-  // Fallback: Get user from authorization header and fetch tokens from Supabase
-  console.log("Session tokens not found, trying Supabase fallback...");
+  console.log("⏳ Session tokens not found, trying Supabase fallback...");
 
   const authHeader = req.headers.authorization;
   if (!authHeader) {
-    console.log("No authorization header provided");
+    console.log("❌ No authorization header provided");
     return null;
   }
 
   const token = authHeader.split(' ')[1];
   if (!token || !supabaseUrl || !supabaseAnonKey) {
-    console.log("Missing token or Supabase config");
+    console.log("❌ Missing token or Supabase config");
     return null;
   }
 
   try {
+    // Create Supabase client with timeout
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // Get user from auth token with timeout
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
-      console.log("Invalid user token:", authError?.message);
+      console.log("❌ Invalid user token:", authError?.message);
       return null;
     }
+
+    console.log(`🔑 User authenticated: ${user.id}`);
 
     const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error("FATAL: SUPABASE_SERVICE_ROLE_KEY not configured - cannot fetch tokens from Supabase");
+      console.error("❌ FATAL: SUPABASE_SERVICE_ROLE_KEY not configured");
       return null;
     }
 
+    // Fetch tokens with timeout
+    console.log("💾 Fetching tokens from Supabase...");
     const { data: tokenData, error: tokenError } = await supabaseAdmin
       .from('user_google_tokens')
       .select('tokens')
       .eq('user_id', user.id)
       .single();
 
-    if (tokenError || !tokenData || !tokenData.tokens) {
-      console.log("No tokens found in Supabase for user:", user.id);
+    if (tokenError) {
+      if (tokenError.code === 'PGRST116') {
+        console.log("ℹ️ No tokens found in Supabase for user:", user.id);
+      } else {
+        console.error("❌ Token fetch error:", tokenError.message);
+      }
+      return null;
+    }
+
+    if (!tokenData || !tokenData.tokens) {
+      console.log("ℹ️ Token data is empty for user:", user.id);
       return null;
     }
 
     // Decrypt and return tokens
     const decryptedTokens = JSON.parse(decrypt(tokenData.tokens));
-    console.log("Successfully fetched tokens from Supabase fallback");
+    console.log("✅ Successfully fetched tokens from Supabase fallback");
 
-    // Optionally save to session for future requests
+    // Save to session for future requests (cache)
     req.session.tokens = decryptedTokens;
     await new Promise<void>((resolve, reject) => {
       req.session.save((err) => {
-        if (err) console.log("Failed to save tokens to session:", err);
-        else console.log("Tokens saved to session for future requests");
+        if (err) {
+          console.log("⚠️ Failed to save tokens to session:", err);
+        } else {
+          console.log("✅ Tokens saved to session for future requests");
+        }
         resolve();
       });
     });
 
     return decryptedTokens;
-  } catch (error) {
-    console.error("Error fetching tokens from Supabase:", error);
+  } catch (error: any) {
+    console.error("❌ Error fetching tokens from Supabase:", error.message);
     return null;
   }
 }
 
 app.get("/api/calendar/events", async (req, res) => {
+  console.log("📅 Calendar events request received");
+
   // Try to get tokens from session or fallback to Supabase
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
-    return res.status(401).json({ error: "Unauthorized - No Google tokens found" });
+    console.log("❌ Calendar: No Google tokens found");
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
   }
 
   try {
+    console.log("✅ Calendar: Tokens retrieved, fetching events...");
     const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials(userTokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -1288,20 +1475,30 @@ app.get("/api/calendar/events", async (req, res) => {
       orderBy: 'startTime',
     });
 
-    res.json(response.data.items);
-  } catch (error) {
+    const events = response.data.items || [];
+    console.log(`✅ Calendar: Retrieved ${events.length} events`);
+    res.json(events);
+  } catch (error: any) {
+    console.error("❌ Calendar error:", error.message);
     await handleGoogleApiError(error, req, res, 'calendar');
   }
 });
 
 app.get("/api/gmail/messages", async (req, res) => {
+  console.log("📧 Gmail messages request received");
+
   // Try to get tokens from session or fallback to Supabase
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
-    return res.status(401).json({ error: "Unauthorized - No Google tokens found" });
+    console.log("❌ Gmail: No Google tokens found");
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
   }
 
   try {
+    console.log("✅ Gmail: Tokens retrieved, fetching messages...");
     const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials(userTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
