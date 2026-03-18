@@ -23,13 +23,13 @@ const MAX_LOGS = 100;
 function logToFile(message: string, data?: any) {
   const timestamp = new Date().toISOString();
   const logEntry = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data, null, 2) : ''}`;
-  
+
   // Store in memory
   oauthLogs.push(logEntry);
   if (oauthLogs.length > MAX_LOGS) {
     oauthLogs.shift(); // Remove oldest
   }
-  
+
   // Also log to console
   console.log(logEntry);
 }
@@ -96,7 +96,7 @@ app.use(session({
   name: 'mima.session', // Specific cookie name to avoid conflicts
   cookie: {
     secure: true, // Required for HTTPS (Hostinger)
-    sameSite: 'lax', // Changed from 'none' to 'lax' for better compatibility
+    sameSite: 'none', // Required for cross-origin requests
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true // Security: prevent XSS access to cookie
   }
@@ -119,10 +119,10 @@ declare module 'express-session' {
 const getOAuth2Client = (req?: express.Request) => {
   // Use the custom domain as the primary one
   const customDomain = "https://me.mima-app.com";
-  
+
   // Use the custom domain if we are on it, otherwise fallback to APP_URL (preview)
   let baseUrl = customDomain;
-  
+
   if (req) {
     const host = req.get('host');
     if (host && !host.includes('mima-app.com')) {
@@ -134,9 +134,9 @@ const getOAuth2Client = (req?: express.Request) => {
   }
 
   const redirectUri = `${baseUrl.replace(/\/$/, "")}/api/auth/callback/google`;
-  
+
   console.log(`Using redirectUri: ${redirectUri}`);
-  
+
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -147,8 +147,8 @@ const getOAuth2Client = (req?: express.Request) => {
 // API routes FIRST
 app.get("/api/health", (req, res) => {
   console.log("Health check requested");
-  res.json({ 
-    status: "ok", 
+  res.json({
+    status: "ok",
     env: {
       hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
       hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
@@ -174,7 +174,7 @@ app.get("/api/test/gemini-config", (req, res) => {
 // Test endpoint for Gemini API - use this to verify the chat is working
 app.get("/api/test/gemini", async (req, res) => {
   console.log("🧪 Gemini test endpoint called");
-  
+
   try {
     // Step 1: Check API key
     const apiKey = process.env.GEMINI_API_KEY;
@@ -238,7 +238,7 @@ app.get("/api/test/gemini", async (req, res) => {
       response: response.text,
       model: "gemini-1.5-flash"
     });
-    
+
   } catch (error: any) {
     console.error("❌ Unexpected error in Gemini test:", error);
     res.status(500).json({
@@ -256,13 +256,13 @@ app.get("/api/auth/url", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
     const token = authHeader.split(' ')[1];
-    
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user) return res.status(401).json({ error: 'Invalid token' });
 
     req.session.userId = user.id;
-    
+
     // CRÍTICO: Guardar sesión ANTES de redirigir a Google
     // Si no se guarda, la sesión se pierde cuando el usuario vuelve del callback
     await new Promise<void>((resolve, reject) => {
@@ -363,7 +363,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
   const { code, error: googleError, state } = req.query;
   let userId = req.session.userId;
   const appUrl = getAppUrl(req);
-  
+
   // Log to both console and file
   const logData = {
     code: code ? "present" : "absent",
@@ -375,9 +375,9 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     cookies: req.headers.cookie ? "present" : "absent",
     userAgent: req.headers['user-agent']
   };
-  
+
   logToFile("OAUTH CALLBACK RECEIVED", logData);
-  
+
   console.log("═══════════════════════════════════════════");
   console.log("🔑 OAUTH CALLBACK RECEIVED");
   console.log("═══════════════════════════════════════════");
@@ -389,13 +389,13 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
   console.log("   Session userId:", userId || "❌ NOT SET");
   console.log("   App URL:", appUrl);
   console.log("   Cookies received:", req.headers.cookie ? "✅ yes" : "❌ none");
-  
+
   // Fallback for lost session: extract userId from state
   if (!userId && state && typeof state === 'string' && state.startsWith('google_auth:')) {
     userId = state.split(':')[1];
     console.log("🔄 Recovered userId from state fallback:", userId);
     req.session.userId = userId;
-    
+
     // Save session immediately after recovery
     try {
       await new Promise<void>((resolve, reject) => {
@@ -409,7 +409,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       console.error("❌ Failed to save session after recovery:", e);
     }
   }
-  
+
   // Helper function to redirect with error
   const redirectWithError = (message: string) => {
     console.error("❌ OAUTH ERROR:", message);
@@ -418,23 +418,23 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     console.log("   Redirecting to:", `${appUrl}/?error=google_auth_failed`);
     res.redirect(`${appUrl}/?error=google_auth_failed&error_description=${errorParam}`);
   };
-  
+
   // Helper function to redirect with success
   const redirectWithSuccess = () => {
     console.log("✅ OAUTH SUCCESS - Redirecting to app...");
     logToFile("OAUTH SUCCESS", { sessionID: req.sessionID, userId });
     res.redirect(`${appUrl}/?google_connected=true`);
   };
-  
+
   // Validate prerequisites
   if (googleError) {
     return redirectWithError(`Google returned error: ${googleError}`);
   }
-  
+
   if (!code) {
     return redirectWithError("No authorization code provided by Google");
   }
-  
+
   if (!userId) {
     console.error("❌ CRITICAL: No userId in session or state");
     console.error("   This usually means the session cookie was not sent by the browser");
@@ -447,24 +447,24 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
   try {
     console.log("🔄 Starting token exchange with Google...");
-    
+
     // Process tokens
     const oauth2Client = getOAuth2Client(req);
     console.log("   OAuth2Client created with redirectUri");
-    
+
     const { tokens } = await oauth2Client.getToken(code as string);
     console.log("✅ Tokens retrieved from Google:");
     console.log("   - Access token:", tokens.access_token ? "✅ present" : "❌ missing");
     console.log("   - Refresh token:", tokens.refresh_token ? "✅ present" : "⚠️  missing (will use existing if available)");
     console.log("   - Expiry date:", tokens.expiry_date);
-    
+
     let finalTokens = tokens;
 
     // Save tokens to Supabase
     if (supabaseUrl && supabaseAnonKey) {
       console.log("💾 Saving tokens to Supabase...");
       const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
-      
+
       // If we didn't get a refresh token, try to preserve the existing one
       if (!tokens.refresh_token) {
         console.log("   No refresh token, checking for existing token in DB...");
@@ -473,7 +473,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
           .select('tokens')
           .eq('user_id', userId)
           .single();
-          
+
         if (data && data.tokens) {
           try {
             const existingTokens = JSON.parse(decrypt(data.tokens));
@@ -492,7 +492,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       // Save to session
       req.session.tokens = finalTokens;
       console.log("   Tokens assigned to session");
-      
+
       // IMPORTANT: Save session before redirect to ensure cookie is written
       await new Promise<void>((resolve, reject) => {
         req.session.save((err) => {
@@ -505,24 +505,24 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
           }
         });
       });
-      
+
       // Encrypt and save to database
       console.log("   Encrypting tokens for database...");
       const encryptedTokens = encrypt(JSON.stringify(finalTokens));
-      
+
       console.log("   Upserting to user_google_tokens table...");
       const { error: upsertError } = await supabaseAdmin
         .from('user_google_tokens')
-        .upsert({ 
-          user_id: userId, 
+        .upsert({
+          user_id: userId,
           tokens: encryptedTokens,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
-        
+
       if (upsertError) {
         throw new Error(`Database upsert failed: ${upsertError.message}`);
       }
-      
+
       console.log("✅ Tokens saved to Supabase successfully");
     } else {
       // Save to session only
@@ -535,12 +535,12 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         });
       });
     }
-    
+
     console.log("═══════════════════════════════════════════");
     console.log("✅ OAUTH FLOW COMPLETED SUCCESSFULLY");
     console.log("═══════════════════════════════════════════");
     return redirectWithSuccess();
-    
+
   } catch (err: any) {
     const errorDetails = {
       message: err.message,
@@ -564,15 +564,15 @@ app.get("/api/auth/status", async (req, res) => {
   if (req.session.tokens) {
     return res.json({ isConnected: true });
   }
-  
+
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.json({ isConnected: false });
     const token = authHeader.split(' ')[1];
-    
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
+
     if (authError || !user) return res.json({ isConnected: false });
 
     const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
@@ -581,15 +581,15 @@ app.get("/api/auth/status", async (req, res) => {
       .select('tokens')
       .eq('user_id', user.id)
       .single();
-      
+
     if (error || !data || !data.tokens) {
       return res.json({ isConnected: false });
     }
-    
+
     // Decrypt tokens and save to session
     const decryptedTokens = JSON.parse(decrypt(data.tokens));
     req.session.tokens = decryptedTokens;
-    
+
     return res.json({ isConnected: true });
   } catch (error) {
     console.error("Error checking token status in Supabase:", error);
@@ -653,16 +653,16 @@ app.get("/api/tts/preview", async (req, res) => {
 app.post("/api/tts", async (req, res) => {
   const { text, voiceId } = req.body;
   console.log("TTS request received", { textLength: text?.length, voiceId });
-  
+
   if (!process.env.ELEVENLABS_API_KEY) {
     console.error("ELEVENLABS_API_KEY is missing");
     return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
   }
 
   try {
-    const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld"; 
+    const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld";
     console.log(`Calling ElevenLabs with voiceId: ${selectedVoiceId}`);
-    
+
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
       method: 'POST',
       headers: {
@@ -689,7 +689,7 @@ app.post("/api/tts", async (req, res) => {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const base64Audio = buffer.toString('base64');
-    
+
     console.log("TTS generated successfully, sending base64 audio");
     res.json({ audio: `data:audio/mpeg;base64,${base64Audio}` });
   } catch (error) {
@@ -712,16 +712,16 @@ interface CalendarEventData {
 function parseNaturalDate(dateText: string, referenceDate?: Date): { start: Date; end?: Date; isAllDay: boolean } | null {
   const refDate = referenceDate || new Date();
   const results = chrono.parse(dateText, refDate, { forwardDate: true });
-  
+
   if (results.length === 0) return null;
-  
+
   const result = results[0];
   const start = result.start.date();
   const end = result.end ? result.end.date() : undefined;
-  
+
   // Check if it's an all-day event (no specific time mentioned)
   const isAllDay = !result.start.isCertain('hour');
-  
+
   return { start, end, isAllDay };
 }
 
@@ -730,16 +730,16 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  
+
   let event: any = {
     summary: eventData.summary,
   };
-  
+
   // Only add description if provided
   if (eventData.description) {
     event.description = eventData.description;
   }
-  
+
   if (eventData.isAllDay) {
     // All-day event format - Google Calendar uses exclusive end date
     const startDateStr = eventData.startDate.toISOString().split('T')[0];
@@ -754,12 +754,12 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
     event.start = { dateTime: eventData.startDate.toISOString() };
     event.end = { dateTime: eventData.endDate.toISOString() };
   }
-  
+
   const response = await calendar.events.insert({
     calendarId: 'primary',
     requestBody: event,
   });
-  
+
   return response.data;
 }
 
@@ -768,7 +768,7 @@ async function listCalendarEvents(userTokens: any, startDate: string, endDate: s
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  
+
   const response = await calendar.events.list({
     calendarId: 'primary',
     timeMin: startDate + 'T00:00:00Z',
@@ -777,7 +777,7 @@ async function listCalendarEvents(userTokens: any, startDate: string, endDate: s
     singleEvents: true,
     orderBy: 'startTime',
   });
-  
+
   return response.data.items || [];
 }
 
@@ -786,11 +786,11 @@ async function searchCalendarEvents(userTokens: any, query: string, maxResults: 
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  
+
   // Search in the next 30 days by default
   const now = new Date();
   const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  
+
   const response = await calendar.events.list({
     calendarId: 'primary',
     timeMin: now.toISOString(),
@@ -800,7 +800,7 @@ async function searchCalendarEvents(userTokens: any, query: string, maxResults: 
     singleEvents: true,
     orderBy: 'startTime',
   });
-  
+
   return response.data.items || [];
 }
 
@@ -809,7 +809,7 @@ async function deleteCalendarEvent(userTokens: any, eventId: string): Promise<vo
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  
+
   await calendar.events.delete({
     calendarId: 'primary',
     eventId: eventId,
@@ -821,18 +821,18 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-  
+
   // Get existing event
   const { data: existingEvent } = await calendar.events.get({
     calendarId: 'primary',
     eventId: eventId,
   });
-  
+
   // Apply updates
   const updatedEvent: any = { ...existingEvent };
   if (updates.summary) updatedEvent.summary = updates.summary;
   if (updates.description) updatedEvent.description = updates.description;
-  
+
   if (updates.startDate && updates.endDate) {
     if (updates.isAllDay) {
       const startDateStr = updates.startDate.toISOString().split('T')[0];
@@ -844,13 +844,13 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
       updatedEvent.end = { dateTime: updates.endDate.toISOString() };
     }
   }
-  
+
   const response = await calendar.events.update({
     calendarId: 'primary',
     eventId: eventId,
     requestBody: updatedEvent,
   });
-  
+
   return response.data;
 }
 
@@ -878,7 +878,7 @@ const languageInstructions: Record<string, string> = {
 // Model selection router - determines which Gemini model to use
 function selectModelForTask(message: string, mode?: string): { model: string; reason: string; maxTokens: number } {
   const lowerMsg = message.toLowerCase();
-  
+
   // Complex task indicators that need Pro model
   const complexIndicators = [
     'analiza', 'análisis', 'analyze', 'analysis',
@@ -892,40 +892,40 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
     'reporte', 'report', 'informe',
     'sintetiza', 'synthesize', 'resume largo'
   ];
-  
+
   // Check for complex task patterns
   const isComplexTask = complexIndicators.some(indicator => lowerMsg.includes(indicator));
   const isLongContext = message.length > 500;
   const isBusinessMode = mode === 'Business Mode';
-  
+
   // Decision logic
   if (isBusinessMode && isComplexTask) {
-    return { 
-      model: 'gemini-1.5-pro', 
+    return {
+      model: 'gemini-1.5-pro',
       reason: 'Business mode + complex analysis task',
-      maxTokens: 2000 
+      maxTokens: 2000
     };
   }
-  
+
   if (isComplexTask && isLongContext) {
-    return { 
-      model: 'gemini-1.5-pro', 
+    return {
+      model: 'gemini-1.5-pro',
       reason: 'Complex analysis with long context',
-      maxTokens: 2000 
+      maxTokens: 2000
     };
   }
-  
+
   // Default: Use Flash for speed and cost efficiency (95% of tasks)
-  return { 
-    model: 'gemini-1.5-flash', 
+  return {
+    model: 'gemini-1.5-flash',
     reason: 'Standard task - Flash sufficient',
-    maxTokens: 1000 
+    maxTokens: 1000
   };
 }
 
 app.post("/api/chat", async (req, res) => {
   const { message, mode, language, history, userId } = req.body;
-  
+
   console.log("═══════════════════════════════════════════");
   console.log("🤖 CHAT API REQUEST");
   console.log("═══════════════════════════════════════════");
@@ -960,7 +960,7 @@ app.post("/api/chat", async (req, res) => {
 
     const langCode = language || 'en';
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
-    
+
     // CALENDAR TOOLS INSTRUCTIONS for function calling
     const calendarToolsInstruction = userId ? `
 
@@ -983,7 +983,7 @@ Para actualizar eventos:
 IMPORTANTE: Si el usuario dice "elimina mi reunión de mañana", PRIMERO busca con searchCalendarEvents, luego elimina.
 Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO con el JSON de la herramienta, sin texto adicional.
 Si NO es una petición de calendario, responde normalmente.` : '';
-    
+
     // CRITICAL: Explicit system prompt with language enforcement
     const systemInstruction = modeInstruction + ' ' + langInstruction + calendarToolsInstruction + `
 
@@ -1010,7 +1010,7 @@ INSTRUCCIONES IMPORTANTES:
 
     console.log("✅ Gemini API response received");
     console.log("   Response text length:", response.text?.length || 0);
-    
+
     if (!response.text) {
       console.error("❌ Gemini returned empty response");
       throw new Error("Empty response from Gemini API");
@@ -1018,7 +1018,7 @@ INSTRUCCIONES IMPORTANTES:
 
     // CHECK FOR FUNCTION CALL (Calendar Tools)
     let responseText = response.text;
-    
+
     if (userId) {
       try {
         // Try to parse as JSON function call
@@ -1026,10 +1026,10 @@ INSTRUCCIONES IMPORTANTES:
         if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
           console.log("🔧 Detected function call, parsing...");
           const functionCall = JSON.parse(trimmedText);
-          
+
           if (functionCall.tool) {
             console.log("   Tool:", functionCall.tool);
-            
+
             // Get user tokens from Supabase
             const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
             const { data: tokenData } = await supabaseAdmin
@@ -1037,12 +1037,12 @@ INSTRUCCIONES IMPORTANTES:
               .select('tokens')
               .eq('user_id', userId)
               .single();
-            
+
             if (!tokenData) {
               responseText = "Necesitas conectar tu cuenta de Google primero para usar el calendario. Ve a la sección de Calendario para conectarla.";
             } else {
               const userTokens = JSON.parse(decrypt(tokenData.tokens));
-              
+
               // Execute the appropriate function
               if (functionCall.tool === 'createCalendarEvent') {
                 const dateInfo = parseNaturalDate(functionCall.dateText);
@@ -1051,7 +1051,7 @@ INSTRUCCIONES IMPORTANTES:
                 } else {
                   // Default duration: 1 hour for timed events
                   const endDate = dateInfo.end || new Date(dateInfo.start.getTime() + 60 * 60 * 1000);
-                  
+
                   const eventData: CalendarEventData = {
                     summary: functionCall.summary,
                     description: functionCall.description,
@@ -1059,7 +1059,7 @@ INSTRUCCIONES IMPORTANTES:
                     endDate: endDate,
                     isAllDay: dateInfo.isAllDay,
                   };
-                  
+
                   const createdEvent = await createCalendarEvent(userTokens, eventData);
                   responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
                   console.log("   Created event:", createdEvent.id);
@@ -1071,12 +1071,12 @@ INSTRUCCIONES IMPORTANTES:
                   const today = new Date();
                   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
                   const events = await listCalendarEvents(userTokens, today.toISOString().split('T')[0], tomorrow.toISOString().split('T')[0], functionCall.maxResults || 10);
-                  
+
                   if (events.length === 0) {
                     responseText = "No tienes eventos programados para hoy.";
                   } else {
                     responseText = "📅 Tus eventos de hoy:\n\n" + events.map((e: any) => {
-                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
                       return `- ${start}: ${e.summary}`;
                     }).join('\n');
                   }
@@ -1084,24 +1084,24 @@ INSTRUCCIONES IMPORTANTES:
                   const startStr = dateInfo.start.toISOString().split('T')[0];
                   const endStr = (dateInfo.end || dateInfo.start).toISOString().split('T')[0];
                   const events = await listCalendarEvents(userTokens, startStr, endStr, functionCall.maxResults || 10);
-                  
+
                   if (events.length === 0) {
                     responseText = `No tienes eventos programados para ${functionCall.dateText}.`;
                   } else {
                     responseText = `📅 Eventos para ${functionCall.dateText}:\n\n` + events.map((e: any) => {
-                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
                       return `- ${start}: ${e.summary}`;
                     }).join('\n');
                   }
                 }
               } else if (functionCall.tool === 'searchCalendarEvents') {
                 const events = await searchCalendarEvents(userTokens, functionCall.query, functionCall.maxResults || 10);
-                
+
                 if (events.length === 0) {
                   responseText = `No encontré eventos que coincidan con "${functionCall.query}".`;
                 } else {
                   responseText = `🔍 Eventos encontrados para "${functionCall.query}":\n\n` + events.map((e: any, i: number) => {
-                    const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleString(langCode, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) : 'Todo el día';
+                    const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
                     return `${i + 1}. ${start}: ${e.summary} (ID: ${e.id})`;
                   }).join('\n');
                 }
@@ -1120,7 +1120,7 @@ INSTRUCCIONES IMPORTANTES:
                     updates.isAllDay = dateInfo.isAllDay;
                   }
                 }
-                
+
                 const updatedEvent = await updateCalendarEvent(userTokens, functionCall.eventId, updates);
                 responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
               }
@@ -1135,13 +1135,13 @@ INSTRUCCIONES IMPORTANTES:
 
     console.log("✅ Sending response to client");
     res.json({ text: responseText });
-    
+
   } catch (error: any) {
     console.error("═══════════════════════════════════════════");
     console.error("❌ CHAT API ERROR:");
     console.error("   Message:", error.message);
     console.error("   Stack:", error.stack);
-    
+
     // Log specific error types for debugging
     if (error.message?.includes('API key')) {
       console.error("   ⚠️  API Key issue detected");
@@ -1152,9 +1152,9 @@ INSTRUCCIONES IMPORTANTES:
     if (error.message?.includes('quota')) {
       console.error("   ⚠️  Quota exceeded");
     }
-    
+
     console.error("═══════════════════════════════════════════");
-    
+
     // Return error in the user's language
     const langCode = language || 'en';
     const errorMessages: Record<string, string> = {
@@ -1163,8 +1163,8 @@ INSTRUCCIONES IMPORTANTES:
       fi: "Anteeksi, minulla on vaikeuksia käsitellä pyyntöäsi. Yritä uudelleen hetken kuluttua.",
       sv: "Förlåt, jag har problem med att bearbeta din begäran. Vänligen försök igen om en stund."
     };
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       error: errorMessages[langCode] || errorMessages.en,
       details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
@@ -1175,7 +1175,7 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
   console.error(`Error fetching ${serviceName}`, error);
   if (error.message?.includes('Refresh Token') || error.message?.includes('invalid_grant')) {
     req.session.tokens = undefined;
-    
+
     try {
       const authHeader = req.headers.authorization;
       if (authHeader && supabaseUrl && supabaseAnonKey) {
@@ -1191,20 +1191,95 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
     } catch (e) {
       console.error("Failed to delete invalid tokens from Supabase", e);
     }
-    
+
     return res.status(401).json({ error: "Google authentication expired. Please reconnect." });
   }
   res.status(500).json({ error: `Failed to fetch ${serviceName}` });
 }
 
+// Helper function to get tokens from session or fallback to Supabase
+async function getUserTokens(req: express.Request): Promise<any | null> {
+  // First, try to get tokens from session
+  if (req.session.tokens) {
+    console.log("Using tokens from session");
+    return req.session.tokens;
+  }
+
+  // Fallback: Get user from authorization header and fetch tokens from Supabase
+  console.log("Session tokens not found, trying Supabase fallback...");
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    console.log("No authorization header provided");
+    return null;
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token || !supabaseUrl || !supabaseAnonKey) {
+    console.log("Missing token or Supabase config");
+    return null;
+  }
+
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      console.log("Invalid user token:", authError?.message);
+      return null;
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("FATAL: SUPABASE_SERVICE_ROLE_KEY not configured - cannot fetch tokens from Supabase");
+      return null;
+    }
+
+    const { data: tokenData, error: tokenError } = await supabaseAdmin
+      .from('user_google_tokens')
+      .select('tokens')
+      .eq('user_id', user.id)
+      .single();
+
+    if (tokenError || !tokenData || !tokenData.tokens) {
+      console.log("No tokens found in Supabase for user:", user.id);
+      return null;
+    }
+
+    // Decrypt and return tokens
+    const decryptedTokens = JSON.parse(decrypt(tokenData.tokens));
+    console.log("Successfully fetched tokens from Supabase fallback");
+
+    // Optionally save to session for future requests
+    req.session.tokens = decryptedTokens;
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) console.log("Failed to save tokens to session:", err);
+        else console.log("Tokens saved to session for future requests");
+        resolve();
+      });
+    });
+
+    return decryptedTokens;
+  } catch (error) {
+    console.error("Error fetching tokens from Supabase:", error);
+    return null;
+  }
+}
+
 app.get("/api/calendar/events", async (req, res) => {
-  if (!req.session.tokens) return res.status(401).json({ error: "Unauthorized" });
-  
+  // Try to get tokens from session or fallback to Supabase
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({ error: "Unauthorized - No Google tokens found" });
+  }
+
   try {
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials(userTokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-    
+
     const response = await calendar.events.list({
       calendarId: 'primary',
       timeMin: new Date().toISOString(),
@@ -1212,7 +1287,7 @@ app.get("/api/calendar/events", async (req, res) => {
       singleEvents: true,
       orderBy: 'startTime',
     });
-    
+
     res.json(response.data.items);
   } catch (error) {
     await handleGoogleApiError(error, req, res, 'calendar');
@@ -1220,19 +1295,23 @@ app.get("/api/calendar/events", async (req, res) => {
 });
 
 app.get("/api/gmail/messages", async (req, res) => {
-  if (!req.session.tokens) return res.status(401).json({ error: "Unauthorized" });
-  
+  // Try to get tokens from session or fallback to Supabase
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({ error: "Unauthorized - No Google tokens found" });
+  }
+
   try {
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials(userTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    
+
     const response = await gmail.users.messages.list({
       userId: 'me',
       maxResults: 5,
       q: 'is:unread'
     });
-    
+
     const messages = [];
     if (response.data.messages) {
       for (const msg of response.data.messages) {
@@ -1242,20 +1321,20 @@ app.get("/api/gmail/messages", async (req, res) => {
           format: 'metadata',
           metadataHeaders: ['Subject', 'From', 'Date']
         });
-        
+
         const headers = msgData.data.payload?.headers;
         const subject = headers?.find(h => h.name === 'Subject')?.value || 'No Subject';
         const fromHeader = headers?.find(h => h.name === 'From')?.value || 'Unknown';
         const date = headers?.find(h => h.name === 'Date')?.value || '';
-        
+
         // Clean up "From" name
         const fromMatch = fromHeader.match(/^(.*?)\s*</);
         const from = fromMatch ? fromMatch[1].replace(/"/g, '') : fromHeader;
-        
+
         messages.push({ id: msg.id, subject, from, date, snippet: msgData.data.snippet });
       }
     }
-    
+
     res.json(messages);
   } catch (error) {
     await handleGoogleApiError(error, req, res, 'gmail');

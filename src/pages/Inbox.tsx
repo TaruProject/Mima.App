@@ -8,7 +8,7 @@ import { useGoogleAuth } from "../hooks/useGoogleAuth";
 export default function Inbox() {
   const { t } = useTranslation();
   const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
-  
+
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +24,10 @@ export default function Inbox() {
     setError(null);
     try {
       const headers = getAuthHeaders();
-      const response = await fetch('/api/gmail/messages', { headers });
+      const response = await fetch('/api/gmail/messages', {
+        headers,
+        credentials: 'include' // Required to send session cookie
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -56,7 +59,7 @@ export default function Inbox() {
           </button>
         </div>
       </header>
-      
+
       <div className="px-6 pt-2 pb-4">
         <h1 className="text-3xl font-bold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">{t('inbox.action_items')}</h1>
         <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
@@ -85,7 +88,7 @@ export default function Inbox() {
             <p className="text-sm text-slate-400 mb-6">
               {t('inbox.connect_description')}
             </p>
-            <button 
+            <button
               onClick={() => handleConnect()}
               className="w-full py-3 px-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
             >

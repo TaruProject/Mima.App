@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 export function useGoogleAuth() {
   const { t } = useTranslation();
   const { user, session } = useAuth();
-  
+
   const [isConnected, setIsConnected] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -19,7 +19,10 @@ export function useGoogleAuth() {
     try {
       const headers = getAuthHeaders();
       console.log('Checking Google auth status...');
-      const response = await fetch(`/api/auth/status`, { headers });
+      const response = await fetch(`/api/auth/status`, {
+        headers,
+        credentials: 'include' // Required to send session cookie
+      });
       if (response.ok) {
         const data = await response.json();
         console.log('Auth status response:', data);
@@ -41,8 +44,11 @@ export function useGoogleAuth() {
     try {
       setAuthError(null);
       const headers = getAuthHeaders();
-      const response = await fetch(`/api/auth/url`, { headers });
-      
+      const response = await fetch(`/api/auth/url`, {
+        headers,
+        credentials: 'include' // Required to send session cookie
+      });
+
       if (!response.ok) {
         throw new Error('Failed to get auth URL');
       }

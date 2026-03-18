@@ -33,9 +33,9 @@ export default function Calendar() {
   const { user } = useAuth();
   const dateLocale = getDateLocale(i18n.language);
   const weekDays = useMemo(() => getLocalizedWeekDays(i18n.language), [i18n.language]);
-  
+
   const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
-  
+
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +52,10 @@ export default function Calendar() {
     setError(null);
     try {
       const headers = getAuthHeaders();
-      const response = await fetch('/api/calendar/events', { headers });
+      const response = await fetch('/api/calendar/events', {
+        headers,
+        credentials: 'include' // Required to send session cookie
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -92,14 +95,14 @@ export default function Calendar() {
       <div className="px-4 pb-2">
         <div className="bg-surface-dark rounded-2xl p-4 shadow-lg border border-surface-highlight/50">
           <div className="flex items-center justify-between mb-4 px-2">
-            <button 
+            <button
               onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
               className="text-text-secondary hover:text-white transition-colors"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
             <h2 className="text-lg font-bold">{format(currentDate, 'MMMM yyyy', { locale: dateLocale })}</h2>
-            <button 
+            <button
               onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
               className="text-text-secondary hover:text-white transition-colors"
             >
@@ -125,8 +128,8 @@ export default function Calendar() {
               });
 
               return (
-                <button 
-                  key={i} 
+                <button
+                  key={i}
                   className={`h-9 w-9 flex items-center justify-center rounded-full text-sm transition-colors relative
                     ${!isCurrentMonth ? 'text-text-secondary/50' : ''}
                     ${isTodayDate ? 'bg-primary text-white font-bold shadow-md shadow-primary/30' : 'text-white hover:bg-surface-highlight'}
@@ -156,7 +159,7 @@ export default function Calendar() {
             <p className="text-sm text-slate-400 mb-6">
               {t('calendar.connect_description')}
             </p>
-            <button 
+            <button
               onClick={() => handleConnect()}
               className="w-full py-3 px-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
             >
@@ -188,7 +191,7 @@ export default function Calendar() {
               const start = event.start.dateTime || event.start.date;
               const end = event.end.dateTime || event.end.date;
               const isAllDay = !event.start.dateTime;
-              
+
               const use24h = i18n.language === 'fi' || i18n.language === 'sv';
               const timeFormat = use24h ? 'HH:mm' : 'hh:mm a';
               const startTime = isAllDay ? t('calendar.all_day') : format(parseISO(start), timeFormat, { locale: dateLocale });
