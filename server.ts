@@ -733,13 +733,20 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
   
   let event: any = {
     summary: eventData.summary,
-    description: eventData.description,
   };
   
+  // Only add description if provided
+  if (eventData.description) {
+    event.description = eventData.description;
+  }
+  
   if (eventData.isAllDay) {
-    // All-day event format
+    // All-day event format - Google Calendar uses exclusive end date
     const startDateStr = eventData.startDate.toISOString().split('T')[0];
-    const endDateStr = eventData.endDate.toISOString().split('T')[0];
+    // For all-day events, Google Calendar expects the day AFTER as the end date
+    const nextDay = new Date(eventData.endDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const endDateStr = nextDay.toISOString().split('T')[0];
     event.start = { date: startDateStr };
     event.end = { date: endDateStr };
   } else {
@@ -894,7 +901,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   // Decision logic
   if (isBusinessMode && isComplexTask) {
     return { 
-      model: 'gemini-1.5-pro-latest', 
+      model: 'gemini-1.5-pro', 
       reason: 'Business mode + complex analysis task',
       maxTokens: 2000 
     };
@@ -902,7 +909,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   
   if (isComplexTask && isLongContext) {
     return { 
-      model: 'gemini-1.5-pro-latest', 
+      model: 'gemini-1.5-pro', 
       reason: 'Complex analysis with long context',
       maxTokens: 2000 
     };
@@ -910,7 +917,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   
   // Default: Use Flash for speed and cost efficiency (95% of tasks)
   return { 
-    model: 'gemini-1.5-flash-latest', 
+    model: 'gemini-1.5-flash', 
     reason: 'Standard task - Flash sufficient',
     maxTokens: 1000 
   };

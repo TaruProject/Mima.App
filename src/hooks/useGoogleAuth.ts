@@ -18,13 +18,22 @@ export function useGoogleAuth() {
   const checkConnectionStatus = useCallback(async () => {
     try {
       const headers = getAuthHeaders();
+      console.log('Checking Google auth status...');
       const response = await fetch(`/api/auth/status`, { headers });
       if (response.ok) {
         const data = await response.json();
+        console.log('Auth status response:', data);
         setIsConnected(data.isConnected);
+        if (!data.isConnected && data.reason) {
+          console.log('Not connected, reason:', data.reason);
+        }
+      } else {
+        console.error('Auth status check failed:', response.status);
+        setIsConnected(false);
       }
     } catch (error) {
       console.error("Failed to check status", error);
+      setIsConnected(false);
     }
   }, [getAuthHeaders]);
 
@@ -60,8 +69,14 @@ export function useGoogleAuth() {
       setAuthError(null);
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
-      // Refresh status to confirm
-      checkConnectionStatus();
+      // Refresh status to confirm (with delay to allow cookie to settle)
+      setTimeout(() => {
+        checkConnectionStatus();
+      }, 500);
+      // Double-check after 2 seconds
+      setTimeout(() => {
+        checkConnectionStatus();
+      }, 2000);
     } else if (error === 'google_auth_failed') {
       const errorMsg = errorDescription || t('common.auth_failed');
       console.error('Google OAuth failed:', errorMsg);
