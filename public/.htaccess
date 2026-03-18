@@ -1,9 +1,51 @@
-RewriteEngine On
+# Apache configuration for React SPA on Hostinger
+# Place this file in the root of public_html (or public_html/dist)
 
-# Priorizar archivos físicos (Imágenes, CSS, JS)
-# Esto evita el error "Invalid source image" al saltarse el proceso de Node.js
-RewriteCond %{REQUEST_FILENAME} -f
-RewriteRule ^ - [L]
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  
+  # If the request is for an existing file or directory, serve it directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  
+  # If the request starts with /api, do not rewrite (let the backend handle it)
+  RewriteCond %{REQUEST_URI} ^/api/
+  RewriteRule ^ - [L]
+  
+  # For all other requests, serve index.html (SPA routing)
+  RewriteRule ^ index.html [L]
+</IfModule>
 
-# Regla existente para el Proxy de Node.js
-RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
+# Enable CORS for API requests (optional but recommended)
+<IfModule mod_headers.c>
+  <IfModule mod_rewrite.c>
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(.*)$ $1 [R=200,L]
+  </IfModule>
+  
+  # Security headers
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  
+  # CSP Header - adjust as needed
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co https://api.elevenlabs.io https://generativelanguage.googleapis.com https://www.googleapis.com; frame-src https://accounts.google.com;"
+</IfModule>
+
+# Disable server signature for security
+ServerSignature Off
+
+# Enable compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Cache static assets
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType text/css "access plus 1 month"
+  ExpiresByType application/javascript "access plus 1 month"
+</IfModule>

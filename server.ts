@@ -7,11 +7,30 @@ import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
+
+// In-memory log store for debugging (works in Hostinger without file permissions)
+const oauthLogs: string[] = [];
+const MAX_LOGS = 100;
+
+function logToFile(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data, null, 2) : ''}`;
+  
+  // Store in memory
+  oauthLogs.push(logEntry);
+  if (oauthLogs.length > MAX_LOGS) {
+    oauthLogs.shift(); // Remove oldest
+  }
+  
+  // Also log to console
+  console.log(logEntry);
+}
 
 // Validate critical environment variables before starting
 const requiredEnvVars = [
@@ -67,16 +86,26 @@ const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
+// Session configuration optimized for Hostinger
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  name: 'mima.session', // Specific cookie name to avoid conflicts
   cookie: {
-    secure: true,
-    sameSite: 'none',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    secure: true, // Required for HTTPS (Hostinger)
+    sameSite: 'lax', // Changed from 'none' to 'lax' for better compatibility
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true // Security: prevent XSS access to cookie
   }
 }));
+
+// Log session configuration on startup
+console.log('🔧 Session configuration:');
+console.log('   - Cookie secure:', true);
+console.log('   - Cookie sameSite: lax');
+console.log('   - Cookie httpOnly: true');
+console.log('   - Trust proxy: enabled');
 
 declare module 'express-session' {
   interface SessionData {
@@ -139,6 +168,22 @@ app.get("/api/auth/url", async (req, res) => {
     if (error || !user) return res.status(401).json({ error: 'Invalid token' });
 
     req.session.userId = user.id;
+    
+    // CRÍTICO: Guardar sesión ANTES de redirigir a Google
+    // Si no se guarda, la sesión se pierde cuando el usuario vuelve del callback
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('CRITICAL: Failed to save session before OAuth:', err);
+          logToFile("SESSION SAVE FAILED", { error: err.message, userId: user.id });
+          reject(err);
+        } else {
+          console.log('✅ Session saved with userId:', user.id);
+          logToFile("SESSION SAVED", { userId: user.id, sessionID: req.sessionID });
+          resolve();
+        }
+      });
+    });
 
     const oauth2Client = getOAuth2Client(req);
     const scopes = [
@@ -152,10 +197,10 @@ app.get("/api/auth/url", async (req, res) => {
       prompt: 'consent',
       state: `google_auth:${user.id}`
     });
-    console.log("Generated Auth URL with state fallback:", url);
+    console.log("🔗 Generated Google Auth URL:", url);
     res.json({ url });
   } catch (error) {
-    console.error('Error generating auth url', error);
+    console.error('❌ Error generating auth url:', error);
     res.status(500).json({ error: "Failed to generate auth url", details: error instanceof Error ? error.message : String(error) });
   }
 });
@@ -178,6 +223,35 @@ app.get("/api/debug", (req, res) => {
   });
 });
 
+// OAuth Debug endpoint - check session status
+app.get("/api/oauth/debug", (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    sessionID: req.sessionID,
+    hasSession: !!req.session,
+    sessionUserId: req.session?.userId || null,
+    sessionTokens: req.session?.tokens ? 'present' : 'absent',
+    cookies: req.headers.cookie,
+    userAgent: req.headers['user-agent'],
+    message: 'Use this endpoint to verify session persistence'
+  });
+});
+
+// Read OAuth logs (for debugging)
+app.get("/api/oauth/logs", (req, res) => {
+  try {
+    if (oauthLogs.length === 0) {
+      res.setHeader('Content-Type', 'text/plain');
+      res.send('No logs yet. Try connecting to Google first.\n\nEndpoint working correctly.');
+    } else {
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(oauthLogs.join('\n'));
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Cannot read logs', details: e instanceof Error ? e.message : 'Unknown error' });
+  }
+});
+
 // Helper to get app URL
 function getAppUrl(req?: express.Request): string {
   const customDomain = "https://me.mima-app.com";
@@ -196,67 +270,110 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
   let userId = req.session.userId;
   const appUrl = getAppUrl(req);
   
-  console.log("OAuth callback received", { 
-    code: code ? "present" : "absent", 
-    error: googleError, 
-    state,
-    hasSessionUserId: !!userId,
+  // Log to both console and file
+  const logData = {
+    code: code ? "present" : "absent",
+    googleError: googleError || null,
+    state: state || null,
     sessionID: req.sessionID,
-    appUrl
-  });
+    hasSession: !!req.session,
+    sessionUserId: userId || null,
+    cookies: req.headers.cookie ? "present" : "absent",
+    userAgent: req.headers['user-agent']
+  };
+  
+  logToFile("OAUTH CALLBACK RECEIVED", logData);
+  
+  console.log("═══════════════════════════════════════════");
+  console.log("🔑 OAUTH CALLBACK RECEIVED");
+  console.log("═══════════════════════════════════════════");
+  console.log("   Code:", code ? "✅ present" : "❌ absent");
+  console.log("   Error from Google:", googleError || "none");
+  console.log("   State:", state || "none");
+  console.log("   Session ID:", req.sessionID);
+  console.log("   Has session:", !!req.session);
+  console.log("   Session userId:", userId || "❌ NOT SET");
+  console.log("   App URL:", appUrl);
+  console.log("   Cookies received:", req.headers.cookie ? "✅ yes" : "❌ none");
   
   // Fallback for lost session: extract userId from state
   if (!userId && state && typeof state === 'string' && state.startsWith('google_auth:')) {
     userId = state.split(':')[1];
-    console.log("Recovered userId from state fallback:", userId);
+    console.log("🔄 Recovered userId from state fallback:", userId);
     req.session.userId = userId;
+    
+    // Save session immediately after recovery
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      console.log("✅ Session saved after userId recovery");
+    } catch (e) {
+      console.error("❌ Failed to save session after recovery:", e);
+    }
   }
   
   // Helper function to redirect with error
   const redirectWithError = (message: string) => {
-    console.error("OAuth Error, redirecting:", message);
+    console.error("❌ OAUTH ERROR:", message);
+    logToFile("OAUTH ERROR", { message, sessionID: req.sessionID });
     const errorParam = encodeURIComponent(message);
-    // Redirect to the main app with error parameter
+    console.log("   Redirecting to:", `${appUrl}/?error=google_auth_failed`);
     res.redirect(`${appUrl}/?error=google_auth_failed&error_description=${errorParam}`);
   };
   
   // Helper function to redirect with success
   const redirectWithSuccess = () => {
-    console.log("OAuth Success, redirecting to app");
+    console.log("✅ OAUTH SUCCESS - Redirecting to app...");
+    logToFile("OAUTH SUCCESS", { sessionID: req.sessionID, userId });
     res.redirect(`${appUrl}/?google_connected=true`);
   };
   
   // Validate prerequisites
   if (googleError) {
-    return redirectWithError(`Google OAuth error: ${googleError}`);
+    return redirectWithError(`Google returned error: ${googleError}`);
   }
   
   if (!code) {
-    return redirectWithError("No authorization code provided");
+    return redirectWithError("No authorization code provided by Google");
   }
   
   if (!userId) {
-    return redirectWithError("Session expired or invalid");
+    console.error("❌ CRITICAL: No userId in session or state");
+    console.error("   This usually means the session cookie was not sent by the browser");
+    console.error("   Possible causes:");
+    console.error("     - Cookie was blocked (secure/sameSite settings)");
+    console.error("     - Session expired");
+    console.error("     - Browser blocking third-party cookies");
+    return redirectWithError("Session expired or invalid. Please try again.");
   }
 
   try {
-    console.log("Starting token exchange...");
+    console.log("🔄 Starting token exchange with Google...");
     
     // Process tokens
     const oauth2Client = getOAuth2Client(req);
+    console.log("   OAuth2Client created with redirectUri");
+    
     const { tokens } = await oauth2Client.getToken(code as string);
-    console.log("Tokens retrieved successfully from Google");
+    console.log("✅ Tokens retrieved from Google:");
+    console.log("   - Access token:", tokens.access_token ? "✅ present" : "❌ missing");
+    console.log("   - Refresh token:", tokens.refresh_token ? "✅ present" : "⚠️  missing (will use existing if available)");
+    console.log("   - Expiry date:", tokens.expiry_date);
     
     let finalTokens = tokens;
 
     // Save tokens to Supabase
     if (supabaseUrl && supabaseAnonKey) {
-      console.log("Saving tokens to Supabase...");
+      console.log("💾 Saving tokens to Supabase...");
       const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
       
       // If we didn't get a refresh token, try to preserve the existing one
       if (!tokens.refresh_token) {
-        console.log("No refresh token in response, checking for existing token...");
+        console.log("   No refresh token, checking for existing token in DB...");
         const { data } = await supabaseAdmin
           .from('user_google_tokens')
           .select('tokens')
@@ -268,33 +385,38 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
             const existingTokens = JSON.parse(decrypt(data.tokens));
             if (existingTokens.refresh_token) {
               finalTokens = { ...existingTokens, ...tokens };
-              console.log("Merged existing refresh token with new tokens");
+              console.log("✅ Merged existing refresh token with new tokens");
             }
           } catch (e) {
-            console.error("Failed to decrypt existing tokens for merge", e);
+            console.error("⚠️  Failed to decrypt existing tokens for merge:", e);
           }
+        } else {
+          console.log("   No existing tokens found in DB");
         }
       }
 
       // Save to session
       req.session.tokens = finalTokens;
+      console.log("   Tokens assigned to session");
       
       // IMPORTANT: Save session before redirect to ensure cookie is written
       await new Promise<void>((resolve, reject) => {
         req.session.save((err) => {
           if (err) {
-            console.error("Session save error:", err);
+            console.error("❌ Session save error:", err);
             reject(err);
           } else {
-            console.log("Session saved successfully");
+            console.log("✅ Session saved successfully");
             resolve();
           }
         });
       });
       
       // Encrypt and save to database
+      console.log("   Encrypting tokens for database...");
       const encryptedTokens = encrypt(JSON.stringify(finalTokens));
       
+      console.log("   Upserting to user_google_tokens table...");
       const { error: upsertError } = await supabaseAdmin
         .from('user_google_tokens')
         .upsert({ 
@@ -304,12 +426,13 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         }, { onConflict: 'user_id' });
         
       if (upsertError) {
-        throw new Error(`Database error: ${upsertError.message}`);
+        throw new Error(`Database upsert failed: ${upsertError.message}`);
       }
       
-      console.log("Tokens saved to Supabase successfully");
+      console.log("✅ Tokens saved to Supabase successfully");
     } else {
       // Save to session only
+      console.log("   Supabase not configured, saving to session only");
       req.session.tokens = finalTokens;
       await new Promise<void>((resolve, reject) => {
         req.session.save((err) => {
@@ -319,11 +442,24 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       });
     }
     
-    console.log("OAuth flow completed successfully, redirecting...");
+    console.log("═══════════════════════════════════════════");
+    console.log("✅ OAUTH FLOW COMPLETED SUCCESSFULLY");
+    console.log("═══════════════════════════════════════════");
     return redirectWithSuccess();
     
   } catch (err: any) {
-    console.error('OAuth Error:', err);
+    const errorDetails = {
+      message: err.message,
+      stack: err.stack,
+      sessionID: req.sessionID,
+      userId: userId || null
+    };
+    logToFile("OAUTH EXCEPTION", errorDetails);
+    console.error("═══════════════════════════════════════════");
+    console.error("❌ OAUTH ERROR:");
+    console.error("   Message:", err.message);
+    console.error("   Stack:", err.stack);
+    console.error("═══════════════════════════════════════════");
     const errorMessage = err instanceof Error ? err.message : 'Unknown error during authentication';
     return redirectWithError(errorMessage);
   }

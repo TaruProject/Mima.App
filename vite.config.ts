@@ -27,12 +27,12 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: 'https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg',
+              src: '/assets/logo.jpg',
               sizes: '192x192',
               type: 'image/jpeg'
             },
             {
-              src: 'https://i.postimg.cc/cJwnS5cZ/mima_logo.jpg',
+              src: '/assets/logo.jpg',
               sizes: '512x512',
               type: 'image/jpeg'
             }
@@ -49,9 +49,28 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      // CSP-friendly build options
+      target: 'es2020',
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          // Avoid optimizations that may use eval
+          drop_console: false,
+          drop_debugger: true,
+        },
+        format: {
+          comments: false,
+        },
+      },
+    },
     server: {
       allowedHosts: true,
       hmr: false,
+    },
+    // Define env variables without using eval
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
     },
   };
 });

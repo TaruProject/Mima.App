@@ -22,6 +22,7 @@ i18n
     fallbackLng: 'en',
     ns: ['common'],
     defaultNS: 'common',
+    // CSP-friendly configuration - avoids eval()
     interpolation: {
       escapeValue: false,
     },
@@ -33,10 +34,9 @@ i18n
     react: {
       useSuspense: false,
     },
-    saveMissing: import.meta.env.MODE !== 'production',
-    missingKeyHandler: (lng, ns, key, fallbackValue) => {
-      console.warn(`🚨 MISSING i18n KEY: ${lng} → ${ns}:${key}`);
-    },
+    // Disable features that may use eval in production
+    debug: false,
+    saveMissing: false,
   });
 
 export default i18n;

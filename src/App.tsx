@@ -7,6 +7,7 @@ import Calendar from "./pages/Calendar";
 import Inbox from "./pages/Inbox";
 import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
+import GoogleCallback from "./pages/GoogleCallback";
 import UpdateOverlay from "./components/UpdateOverlay";
 import InstallPWA from "./components/InstallPWA";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -95,6 +96,9 @@ function AppRoutes() {
       <InstallPWA />
       <Routes>
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />
+        {/* Google OAuth callback routes - must be accessible without auth */}
+        <Route path="/api/auth/callback/google" element={<GoogleCallback />} />
+        <Route path="/auth/callback/google" element={<GoogleCallback />} />
         <Route
           path="/"
           element={
