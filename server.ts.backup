@@ -56,21 +56,11 @@ const requiredEnvVars = [
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
-// CRITICAL variables that will prevent server from starting
-const criticalVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
-const missingCritical = missingVars.filter(v => criticalVars.includes(v));
-
-if (missingCritical.length > 0) {
+if (missingVars.length > 0) {
   console.error('❌ CRITICAL: Missing required environment variables:');
-  missingCritical.forEach(varName => console.error(`   - ${varName}`));
+  missingVars.forEach(varName => console.error(`   - ${varName}`));
   console.error('\nServer cannot start. Please check your .env file.');
   process.exit(1);
-}
-
-if (missingVars.length > 0) {
-  console.warn('⚠️  WARNING: Some optional variables are missing:');
-  missingVars.forEach(varName => console.warn(`   - ${varName}`));
-  console.warn('Server will start but some features may not work.\n');
 }
 
 console.log('✅ All critical environment variables loaded successfully');
@@ -209,40 +199,6 @@ app.get("/api/health", (req, res) => {
       nodeEnv: process.env.NODE_ENV
     }
   });
-});
-
-// Detailed health check - works in production
-app.get("/api/health-detailed", (req, res) => {
-  const healthData = {
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    server: {
-      uptime: process.uptime(),
-      nodeVersion: process.version,
-      platform: process.platform
-    },
-    gemini: {
-      initialized: geminiInitialized,
-      initError: geminiInitError,
-      apiKeyPresent: !!process.env.GEMINI_API_KEY,
-      apiKeyLength: process.env.GEMINI_API_KEY?.length || 0
-    },
-    environment: {
-      nodeEnv: process.env.NODE_ENV,
-      appUrl: process.env.APP_URL,
-      hasSessionSecret: !!process.env.SESSION_SECRET,
-      hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
-      hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY,
-      hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
-    }
-  };
-  
-  // If Gemini failed, mark as degraded
-  if (!geminiInitialized && geminiInitError) {
-    healthData.status = "degraded";
-  }
-  
-  res.json(healthData);
 });
 
 // Simple health check for Gemini configuration
