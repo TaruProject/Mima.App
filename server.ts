@@ -1402,15 +1402,33 @@ INSTRUCCIONES IMPORTANTES:
 
     let response;
     try {
-      response = await ai.models.generateContent({
-        model: modelSelection.model,
-        contents: message,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          maxOutputTokens: modelSelection.maxTokens,
-        },
-      });
+      // Use fallback if the specified model fails (could happen if 2.5 is not yet globally available)
+      const primaryModel = modelSelection.model;
+      const fallbackModel = 'gemini-1.5-flash';
+      
+      try {
+        console.log(`🔄 Attempting Gemini call with primary model: ${primaryModel}`);
+        response = await ai.models.generateContent({
+          model: primaryModel,
+          contents: message,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+            maxOutputTokens: modelSelection.maxTokens,
+          },
+        });
+      } catch (primaryError: any) {
+        console.warn(`⚠️ Primary model ${primaryModel} failed, trying fallback ${fallbackModel}:`, primaryError.message);
+        response = await ai.models.generateContent({
+          model: fallbackModel,
+          contents: message,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+            maxOutputTokens: 1000,
+          },
+        });
+      }
 
       console.log("✅ Gemini API response received");
       console.log("   Response text length:", response.text?.length || 0);

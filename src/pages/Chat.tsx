@@ -74,8 +74,13 @@ export default function Chat() {
         const prefsResponse = await fetch('/api/user/preferences', { headers });
         if (prefsResponse.ok) {
           const prefs = await prefsResponse.json();
+          console.log("Loaded prefs from backend:", prefs);
           if (prefs.voice_id) setVoiceId(prefs.voice_id);
           if (prefs.language) i18n.changeLanguage(prefs.language);
+          if (prefs.onboarding_done) {
+            setShowOnboarding(false);
+            localStorage.setItem('mima_onboarding_done', 'true');
+          }
         }
       } catch (error) {
         console.error("Failed to load data from Supabase:", error);
@@ -217,11 +222,19 @@ export default function Chat() {
         if (previewAudioRef.current) {
           previewAudioRef.current.pause();
         }
-        const audio = new Audio(data.audio);
+        
+        // Safety check for double prefix
+        let audioUrl = data.audio;
+        if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
+          audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
+        }
+
+        const audio = new Audio(audioUrl);
         previewAudioRef.current = audio;
         
         audio.onended = () => setIsPreviewPlaying(false);
-        audio.onerror = () => {
+        audio.onerror = (e) => {
+          console.error("Preview audio error:", e);
           setIsPreviewPlaying(false);
           setIsPreviewLoading(false);
         };
@@ -269,9 +282,27 @@ export default function Chat() {
     }
 
     if (audioData) {
-      const audio = new Audio(audioData);
+      // Safety check for double prefix
+      let audioUrl = audioData;
+      if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
+        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
+      }
+
+      const audio = new Audio(audioUrl);
       audioRef.current = audio;
-      audio.play();
+      
+      audio.onerror = (e) => {
+        console.error("Audio playback error:", e);
+        setPlayingAudio(null);
+        setAudioProgress(0);
+      };
+
+      await audio.play().catch(e => {
+        console.error("Audio play promise rejected:", e);
+        setPlayingAudio(null);
+        setAudioProgress(0);
+      });
+      
       setPlayingAudio(msgId.toString());
       audio.onended = () => {
         setPlayingAudio(null);
@@ -338,7 +369,24 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-full relative">
       {showOnboarding && (
-        <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+        <OnboardingFlow onComplete={async () => {
+          setShowOnboarding(false);
+          // Sync with Supabase if logged in
+          if (user) {
+            try {
+              await fetch('/api/user/preferences', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${user.id}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ onboarding_done: true })
+              });
+            } catch (e) {
+              console.error("Failed to sync onboarding status:", e);
+            }
+          }
+        }} />
       )}
       <header className="flex items-center justify-between p-4 pt-6 shrink-0 z-10 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md sticky top-0">
         <div className="flex items-center gap-3">

@@ -136,43 +136,41 @@ export default function Profile() {
 
   const playVoicePreview = async (id: string) => {
     if (previewPlayingId === id) {
-      previewAudioRef.current?.pause();
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.currentTime = 0;
+      }
       setPreviewPlayingId(null);
       return;
     }
 
-    // Prevent multiple simultaneous requests
     if (previewLoadingId) return;
 
     try {
       setPreviewLoadingId(id);
       
-      // Use cached preview endpoint for better performance
-      const response = await fetch(`/api/tts/preview?voiceId=${id}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch preview: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.audio) {
-        throw new Error("No audio data received");
-      }
-      
+      // Stop current playback
       if (previewAudioRef.current) {
         previewAudioRef.current.pause();
       }
 
-      const audio = new Audio(data.audio);
-      audio.preload = "metadata";
+      const response = await fetch(`/api/tts/preview?voiceId=${id}`);
+      if (!response.ok) throw new Error(`Failed to fetch preview: ${response.status}`);
+      const data = await response.json();
+      
+      if (!data.audio) throw new Error("No audio data received");
+      
+      // Clear double prefix if exists (safety check)
+      let audioUrl = data.audio;
+      if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
+        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
+      }
+
+      const audio = new Audio(audioUrl);
       previewAudioRef.current = audio;
       
-      audio.oncanplaythrough = () => {
-        setPreviewLoadingId(null);
-      };
-      
       audio.onplay = () => {
+        setPreviewLoadingId(null);
         setPreviewPlayingId(id);
       };
       
@@ -180,7 +178,8 @@ export default function Profile() {
         setPreviewPlayingId(null);
       };
       
-      audio.onerror = () => {
+      audio.onerror = (e) => {
+        console.error("Audio error:", e);
         setPreviewPlayingId(null);
         setPreviewLoadingId(null);
         showToast(t('chat.audio_error'), "error");

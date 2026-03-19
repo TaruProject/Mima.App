@@ -39,10 +39,16 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 3) setStep(step + 1);
     else {
-      // Save preferences to Supabase (will be associated with user after login)
+      // Save preferences to localStorage ( survives logout)
+      localStorage.setItem('mima_onboarding_done', 'true');
+      localStorage.setItem('mima_voice_id', selectedVoice);
+      
+      // Save preferences to Supabase if the user provided userId
+      // Note: OnboardingFlow is often shown before the user is fully identified in the local state,
+      // but if the parent component (Chat.tsx) has the user, it will also sync.
       onComplete();
     }
   };
@@ -74,7 +80,13 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       
       if (audioRef.current) audioRef.current.pause();
 
-      const audio = new Audio(audioBase64);
+      // Safety check for double prefix
+      let audioUrl = audioBase64;
+      if (audioUrl && audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
+        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
+      }
+
+      const audio = new Audio(audioUrl);
       audioRef.current = audio;
       
       audio.onplay = () => {
@@ -83,9 +95,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       };
       
       audio.onended = () => setPreviewPlayingId(null);
+      audio.onerror = (e) => {
+        console.error("Onboarding audio error:", e);
+        setPreviewLoadingId(null);
+      };
+
       await audio.play();
     } catch (error) {
-      console.error(error);
+      console.error("Onboarding playback error:", error);
       setPreviewLoadingId(null);
     }
   };

@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS public.user_google_tokens (
+    user_id UUID PRIMARY KEY,
+    tokens TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 2. Habilitar RLS
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
@@ -59,6 +65,15 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users delete own messages' AND tablename = 'chat_messages') THEN
         CREATE POLICY "Users delete own messages" ON public.chat_messages FOR DELETE USING (TRUE);
+    END IF;
+
+    -- user_google_tokens (Service role bypass is used from backend, but add policy for safety)
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users view own google tokens' AND tablename = 'user_google_tokens') THEN
+        CREATE POLICY "Users view own google tokens" ON public.user_google_tokens FOR SELECT USING (TRUE);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users upsert own google tokens' AND tablename = 'user_google_tokens') THEN
+        CREATE POLICY "Users upsert own google tokens" ON public.user_google_tokens FOR ALL USING (TRUE);
     END IF;
 END $$;
 
