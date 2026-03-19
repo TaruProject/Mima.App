@@ -1885,7 +1885,12 @@ async function startServer() {
   } else {
     app.use(express.static("dist", {
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+        // Assets in dist/assets/* have content hashes and can be cached indefinitely
+        if (filePath.includes(path.join('dist', 'assets'))) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } 
+        // index.html and sw.js should never be cached
+        else if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
       }

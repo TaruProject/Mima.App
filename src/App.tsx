@@ -49,6 +49,7 @@ function AppRoutes() {
     onRegisterError(error) {
       console.log('SW registration error', error);
     },
+    immediate: true,
   });
 
   useEffect(() => {
