@@ -21,28 +21,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
         console.error("Supabase getSession error:", error.message);
-        if (error.message.includes('Refresh Token Not Found')) {
-          supabase.auth.signOut();
+
+        // Handle refresh token errors gracefully
+        if (error.message.includes('Refresh Token Not Found') ||
+            error.message.includes('refresh token') ||
+            error.message.includes('expired')) {
+          console.warn("Session expired, signing out user...");
+          // Sign out but don't wait - we want to clear local state regardless
+          supabase.auth.signOut().catch(signOutError => {
+            console.error("Error during sign out after token error:", signOutError);
+          }).finally(() => {
+            setSession(null);
+            setUser(null);
+            setIsLoading(false);
+          });
+          return;
         }
+
+        console.error("Unhandled getSession error:", error);
       }
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
     }).catch((err) => {
       console.error("Supabase getSession catch:", err);
+      // Still set loading to false to prevent infinite loading
       setIsLoading(false);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("Auth event:", event);
+
+      // Handle token refresh errors
+      if (event === 'TOKEN_REFRESHED') {
+        console.log("Token refreshed successfully");
+      }
+
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
-        // Clear local storage preferences
-        localStorage.removeItem('mima_language');
-        localStorage.removeItem('mima_voice_id');
-        localStorage.removeItem('mima_chat_history');
+        // No need to clear localStorage - all data is now in Supabase
       } else {
         setSession(session);
         setUser(session?.user ?? null);
@@ -50,16 +69,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    // Clear all user preferences from localStorage
-    localStorage.removeItem('mima_onboarding_done');
-    localStorage.removeItem('mima_language');
-    localStorage.removeItem('mima_voice_id');
-    localStorage.removeItem('mima_chat_history');
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Error during sign out:", error);
+    } finally {
+      // Clear local session data
+      setSession(null);
+      setUser(null);
+      // No need to clear localStorage - all data is now in Supabase
+    }
   };
 
   return (

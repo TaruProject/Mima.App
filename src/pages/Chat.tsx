@@ -12,14 +12,7 @@ export default function Chat() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const [messages, setMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem('mima_chat_history');
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error("Failed to load chat history", e);
-    }
+    // Initial messages - will be loaded from Supabase when user is authenticated
     return [
       {
         id: 1,
@@ -32,13 +25,7 @@ export default function Chat() {
   });
   const [input, setInput] = useState("");
   const [mode, setMode] = useState("Neutral Mode");
-  const [voiceId, setVoiceId] = useState(() => {
-    try {
-      return localStorage.getItem('mima_voice_id') || "DODLEQrClDo8wCz460ld";
-    } catch (e) {
-      return "DODLEQrClDo8wCz460ld";
-    }
-  });
+  const [voiceId, setVoiceId] = useState("DODLEQrClDo8wCz460ld");
   const [isLoading, setIsLoading] = useState(false);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState(0);
@@ -58,24 +45,83 @@ export default function Chat() {
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Update initial message when language changes if it's the only message
+  // Load chat history and preferences from Supabase when user is authenticated
   useEffect(() => {
-    if (messages.length === 1 && messages[0].id === 1) {
-      setMessages([{
-        ...messages[0],
-        text: t('chat.welcome_message')
-      }]);
-    }
-  }, [t, messages.length]);
+    if (!user) return;
 
-  // Save chat history
+    const loadData = async () => {
+      try {
+        const headers = {
+          'Authorization': `Bearer ${user?.id}`
+        };
+
+        // Load chat history
+        const historyResponse = await fetch('/api/chat/history', { headers });
+        if (historyResponse.ok) {
+          const history = await historyResponse.json();
+          if (history.length > 0) {
+            setMessages(history.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.role === 'user' ? t('common.you') : 'Mima',
+              text: msg.content,
+              time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              audio: msg.audio_data,
+            })));
+          }
+        }
+
+        // Load preferences
+        const prefsResponse = await fetch('/api/user/preferences', { headers });
+        if (prefsResponse.ok) {
+          const prefs = await prefsResponse.json();
+          if (prefs.voice_id) setVoiceId(prefs.voice_id);
+          if (prefs.language) i18n.changeLanguage(prefs.language);
+        }
+      } catch (error) {
+        console.error("Failed to load data from Supabase:", error);
+      }
+    };
+
+    loadData();
+  }, [user, t, i18n]);
+
+  // Save chat history to Supabase
   useEffect(() => {
-    try {
-      localStorage.setItem('mima_chat_history', JSON.stringify(messages));
-    } catch (e) {
-      console.error("Failed to save chat history", e);
-    }
-  }, [messages]);
+    if (!user || messages.length <= 1) return; // Don't save welcome message only
+
+    const saveHistory = async () => {
+      try {
+        const headers = {
+          'Authorization': `Bearer ${user?.id}`,
+          'Content-Type': 'application/json'
+        };
+
+        // Save only new messages (exclude welcome message)
+        const messagesToSave = messages
+          .filter(m => m.id !== 1)
+          .map(msg => ({
+            user_id: user.id,
+            role: msg.sender === t('common.you') ? 'user' : 'assistant' as const,
+            content: msg.text,
+            mode,
+            audio_data: msg.audio
+          }));
+
+        if (messagesToSave.length > 0) {
+          await fetch('/api/chat/message', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(messagesToSave[messagesToSave.length - 1]) // Save last message
+          });
+        }
+      } catch (error) {
+        console.error("Failed to save chat history:", error);
+      }
+    };
+
+    const timeoutId = setTimeout(saveHistory, 1000); // Debounce save
+    return () => clearTimeout(timeoutId);
+  }, [messages, user, mode, t]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -241,6 +287,31 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Cleanup audio elements on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Cleanup main audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current.load();
+        audioRef.current = null;
+      }
+      // Cleanup preview audio
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.src = '';
+        previewAudioRef.current.load();
+        previewAudioRef.current = null;
+      }
+      // Cleanup abort controller
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let animationFrameId: number;

@@ -42,8 +42,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   const handleNext = () => {
     if (step < 3) setStep(step + 1);
     else {
-      localStorage.setItem('mima_onboarding_done', 'true');
-      localStorage.setItem('mima_voice_id', selectedVoice);
+      // Save preferences to Supabase (will be associated with user after login)
       onComplete();
     }
   };
@@ -52,9 +51,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     if (step > 0) setStep(step - 1);
   };
 
-  const changeLanguage = (code: string) => {
+  const changeLanguage = async (code: string) => {
     i18n.changeLanguage(code);
-    localStorage.setItem('mima_language', code);
     setHasSelectedLanguage(true);
     // Auto advance after 400ms when a user selects a language for the first time
     if (step === 0) {

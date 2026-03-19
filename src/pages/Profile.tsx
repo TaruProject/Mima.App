@@ -15,14 +15,8 @@ export default function Profile() {
   const [fullName, setFullName] = useState("Mima User");
   const [username, setUsername] = useState("mima_user");
   const [language, setLanguage] = useState(i18n.language);
-  const [voiceId, setVoiceId] = useState(() => {
-    try {
-      return localStorage.getItem('mima_voice_id') || voices[0].id;
-    } catch (e) {
-      return voices[0].id;
-    }
-  });
-  
+  const [voiceId, setVoiceId] = useState(voices[0].id);
+
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -39,11 +33,12 @@ export default function Profile() {
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
-  // Load profile from Supabase
+  // Load profile and preferences from Supabase
   useEffect(() => {
     const loadProfile = async () => {
       if (!user) return;
       try {
+        // Load profile
         const { data, error } = await supabase
           .from('profiles')
           .select('*')
@@ -65,18 +60,29 @@ export default function Profile() {
           setUsername(loadedUsername);
           setLanguage(loadedLang);
           setVoiceId(loadedVoice);
-          
+
           setInitialValues({
             fullName: loadedName,
             username: loadedUsername,
             language: loadedLang
           });
 
-          // Sync localStorage
-          localStorage.setItem('mima_language', loadedLang);
-          localStorage.setItem('mima_voice_id', loadedVoice);
           if (loadedLang !== i18n.language) {
             i18n.changeLanguage(loadedLang);
+          }
+        }
+
+        // Also load preferences from new endpoint
+        const headers = {
+          'Authorization': `Bearer ${user.id}`
+        };
+        const prefsResponse = await fetch('/api/user/preferences', { headers });
+        if (prefsResponse.ok) {
+          const prefs = await prefsResponse.json();
+          if (prefs.voice_id) setVoiceId(prefs.voice_id);
+          if (prefs.language) {
+            setLanguage(prefs.language);
+            i18n.changeLanguage(prefs.language);
           }
         }
       } catch (err) {
@@ -99,27 +105,26 @@ export default function Profile() {
   const handleVoiceSelect = async (id: string) => {
     if (id === voiceId) return;
     setVoiceId(id);
-    
-    // Optimistic local update
-    try {
-      localStorage.setItem('mima_voice_id', id);
-    } catch (e) {
-      console.error("Error saving voice to localStorage", e);
-    }
 
     // Save to Supabase if user is logged in
     if (user) {
       try {
-        const { error } = await supabase
-          .from('profiles')
-          .upsert({
-            id: user.id,
-            voice_id: id,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'id' });
-          
-        if (error) throw error;
-        showToast(t('profile.voice_updated'), "success");
+        const headers = {
+          'Authorization': `Bearer ${user.id}`,
+          'Content-Type': 'application/json'
+        };
+
+        const response = await fetch('/api/user/preferences', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ voice_id: id })
+        });
+
+        if (response.ok) {
+          showToast(t('profile.voice_updated'), "success");
+        } else {
+          throw new Error('Failed to save voice');
+        }
       } catch (err) {
         console.error("Error saving voice to Supabase:", err);
         showToast(t('chat.error_message'), "error");
@@ -189,10 +194,27 @@ export default function Profile() {
     }
   };
 
-  const handleLanguageChange = (newLang: string) => {
+  const handleLanguageChange = async (newLang: string) => {
     setLanguage(newLang);
     i18n.changeLanguage(newLang);
-    localStorage.setItem('mima_language', newLang);
+
+    // Save to Supabase if user is logged in
+    if (user) {
+      try {
+        const headers = {
+          'Authorization': `Bearer ${user.id}`,
+          'Content-Type': 'application/json'
+        };
+
+        await fetch('/api/user/preferences', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ language: newLang })
+        });
+      } catch (err) {
+        console.error("Error saving language to Supabase:", err);
+      }
+    }
   };
 
   const handleSave = async () => {

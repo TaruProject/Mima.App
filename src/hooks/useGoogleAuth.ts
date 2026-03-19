@@ -66,23 +66,30 @@ export function useGoogleAuth() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const googleConnected = urlParams.get('google_connected');
+    const sessionSaved = urlParams.get('session_saved');
     const error = urlParams.get('error');
     const errorDescription = urlParams.get('error_description');
 
     if (googleConnected === 'true') {
       console.log('Google OAuth successful');
+      // Set connected optimistically, but verify with backend
       setIsConnected(true);
       setAuthError(null);
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
-      // Refresh status to confirm (with delay to allow cookie to settle)
-      setTimeout(() => {
-        checkConnectionStatus();
-      }, 500);
-      // Double-check after 2 seconds
-      setTimeout(() => {
-        checkConnectionStatus();
-      }, 2000);
+
+      // Wait for session to be fully saved before confirming
+      const checkStatus = async () => {
+        // First check after 1 second
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await checkConnectionStatus();
+
+        // Second check after 3 seconds (ensure persistence)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await checkConnectionStatus();
+      };
+
+      checkStatus();
     } else if (error === 'google_auth_failed') {
       const errorMsg = errorDescription || t('common.auth_failed');
       console.error('Google OAuth failed:', errorMsg);

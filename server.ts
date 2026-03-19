@@ -10,6 +10,13 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import * as chrono from "chrono-node";
+import {
+  getUserPreferences,
+  updateUserPreferences,
+  getChatHistory,
+  saveChatMessage,
+  clearChatHistory
+} from "./src/services/userPreferencesService";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,6 +95,25 @@ const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
+// CSP headers - Allow eval for Google GenAI SDK and Google OAuth flow
+app.use((req, res, next) => {
+  // Only set CSP in production for security
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; " +
+      "font-src https://fonts.gstatic.com data:; " +
+      "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com; " +
+      "img-src 'self' data: https: blob:; " +
+      "worker-src 'self' blob:; " +
+      "frame-src 'self' https://accounts.google.com https://*.google.com;"
+    );
+  }
+  next();
+});
+
 // Session configuration optimized for Hostinger
 app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -114,6 +140,21 @@ declare module 'express-session' {
     tokens: any;
     userId?: string;
   }
+}
+
+// Helper function to save session reliably - prevents race conditions
+async function saveSession(req: express.Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) {
+        console.error('❌ Session save error:', err);
+        reject(err);
+      } else {
+        console.log('✅ Session saved successfully');
+        resolve();
+      }
+    });
+  });
 }
 
 const getOAuth2Client = (req?: express.Request) => {
@@ -162,10 +203,17 @@ app.get("/api/health", (req, res) => {
 
 // Simple health check for Gemini configuration
 app.get("/api/test/gemini-config", (req, res) => {
+  // Only allow in development
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({
+      error: "Endpoint disabled in production",
+      message: "For security reasons, this endpoint is only available in development"
+    });
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   res.json({
     hasApiKey: !!apiKey,
-    apiKeyFirstChars: apiKey ? apiKey.substring(0, 10) + '...' : 'NOT SET',
     nodeEnv: process.env.NODE_ENV,
     timestamp: new Date().toISOString()
   });
@@ -173,6 +221,14 @@ app.get("/api/test/gemini-config", (req, res) => {
 
 // Test endpoint for Gemini API - use this to verify the chat is working
 app.get("/api/test/gemini", async (req, res) => {
+  // Only allow in development
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({
+      status: "error",
+      message: "Endpoint disabled in production for security reasons"
+    });
+  }
+
   console.log("🧪 Gemini test endpoint called");
 
   try {
@@ -187,7 +243,7 @@ app.get("/api/test/gemini", async (req, res) => {
         solution: "Add GEMINI_API_KEY to your environment variables in Hostinger"
       });
     }
-    console.log("✅ API key found:", apiKey.substring(0, 10) + "...");
+    console.log("✅ API key found");
 
     // Step 2: Initialize client
     console.log("🔄 Initializing GoogleGenAI client...");
@@ -206,11 +262,11 @@ app.get("/api/test/gemini", async (req, res) => {
     }
 
     // Step 3: Make API call
-    console.log("🔄 Calling Gemini API with model gemini-1.5-flash...");
+    console.log("🔄 Calling Gemini API with model gemini-2.5-flash...");
     let response;
     try {
       response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         contents: "Hola, ¿cómo estás?",
         config: {
           systemInstruction: "Eres Mima, un asistente personal. SIEMPRE responde en español.",
@@ -225,7 +281,7 @@ app.get("/api/test/gemini", async (req, res) => {
         message: "Gemini API call failed",
         error: apiError.message,
         details: apiError.stack,
-        model: "gemini-1.5-flash"
+        model: "gemini-2.5-flash"
       });
     }
 
@@ -236,7 +292,7 @@ app.get("/api/test/gemini", async (req, res) => {
       step: "complete",
       message: "Gemini API is working correctly",
       response: response.text,
-      model: "gemini-1.5-flash"
+      model: "gemini-2.5-flash"
     });
 
   } catch (error: any) {
@@ -252,26 +308,42 @@ app.get("/api/test/gemini", async (req, res) => {
 });
 
 // Debug endpoint for chat - test chat with specific parameters
+// Only available in development for security
 app.get("/api/debug/chat", async (req, res) => {
+  // Only allow in development
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({
+      status: "error",
+      message: "Endpoint disabled in production for security reasons"
+    });
+  }
+
   const { message = 'test', language = 'es', mode = 'Neutral' } = req.query;
 
   console.log("🔍 Debug chat endpoint called");
 
-  const debugInfo = {
+  const debugInfo: any = {
     timestamp: new Date().toISOString(),
     geminiInitialized,
     geminiInitError,
     hasApiKey: !!process.env.GEMINI_API_KEY,
     apiKeyFirstChars: process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'NOT SET',
+    apiKeyLength: process.env.GEMINI_API_KEY?.length || 0,
     testParams: { message, language, mode },
     languageInstructions: Object.keys(languageInstructions)
   };
 
   try {
     // Test Gemini API
+    console.log("🔄 Testing Gemini API connection...");
     const ai = getGenAI();
+    console.log("✅ Gemini client obtained");
+
+    const selectedModel = 'gemini-2.5-flash';
+    console.log(`🔄 Calling model: ${selectedModel}`);
+
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: selectedModel,
       contents: message as string,
       config: {
         systemInstruction: languageInstructions[language as string] || languageInstructions.en,
@@ -280,14 +352,32 @@ app.get("/api/debug/chat", async (req, res) => {
     });
 
     debugInfo['testResponse'] = response.text?.substring(0, 100) || 'EMPTY_RESPONSE';
+    debugInfo['fullResponse'] = response.text;
+    debugInfo['responseLength'] = response.text?.length || 0;
     debugInfo['status'] = 'SUCCESS';
+    debugInfo['modelUsed'] = selectedModel;
 
     res.json(debugInfo);
   } catch (error: any) {
+    console.error("❌ Debug chat error:", error);
     debugInfo['error'] = error.message;
+    debugInfo['errorStack'] = error.stack;
+    debugInfo['errorDetails'] = JSON.stringify(error, null, 2);
+    debugInfo['errorCause'] = error.cause;
     debugInfo['status'] = 'FAILED';
     res.status(500).json(debugInfo);
   }
+});
+
+// Endpoint to get last chat error - for debugging production issues
+app.get("/api/debug/last-chat-error", (req, res) => {
+  // Return last OAuth log which may contain error info
+  const lastLogs = oauthLogs.slice(-10);
+  res.json({
+    timestamp: new Date().toISOString(),
+    lastLogs,
+    message: "Check server logs for detailed error information"
+  });
 });
 
 app.get("/api/auth/url", async (req, res) => {
@@ -304,19 +394,14 @@ app.get("/api/auth/url", async (req, res) => {
 
     // CRÍTICO: Guardar sesión ANTES de redirigir a Google
     // Si no se guarda, la sesión se pierde cuando el usuario vuelve del callback
-    await new Promise<void>((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('CRITICAL: Failed to save session before OAuth:', err);
-          logToFile("SESSION SAVE FAILED", { error: err.message, userId: user.id });
-          reject(err);
-        } else {
-          console.log('✅ Session saved with userId:', user.id);
-          logToFile("SESSION SAVED", { userId: user.id, sessionID: req.sessionID });
-          resolve();
-        }
-      });
-    });
+    try {
+      await saveSession(req);
+      logToFile("SESSION SAVED", { userId: user.id, sessionID: req.sessionID });
+    } catch (err: any) {
+      console.error('CRITICAL: Failed to save session before OAuth:', err);
+      logToFile("SESSION SAVE FAILED", { error: err.message, userId: user.id });
+      return res.status(500).json({ error: "Failed to save session" });
+    }
 
     const oauth2Client = getOAuth2Client(req);
     const scopes = [
@@ -437,12 +522,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
     // Save session immediately after recovery
     try {
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
+      await saveSession(req);
       console.log("✅ Session saved after userId recovery");
     } catch (e) {
       console.error("❌ Failed to save session after recovery:", e);
@@ -462,7 +542,11 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
   const redirectWithSuccess = () => {
     console.log("✅ OAUTH SUCCESS - Redirecting to app...");
     logToFile("OAUTH SUCCESS", { sessionID: req.sessionID, userId });
-    res.redirect(`${appUrl}/?google_connected=true`);
+
+    // Add a small delay to ensure session cookie is written before redirect
+    // This prevents the "connected but not working" issue
+    res.setHeader('Refresh', '1; url=${appUrl}/?google_connected=true');
+    res.redirect(`${appUrl}/?google_connected=true&session_saved=true`);
   };
 
   // Validate prerequisites
@@ -533,17 +617,12 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       console.log("   Tokens assigned to session");
 
       // IMPORTANT: Save session before redirect to ensure cookie is written
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error("❌ Session save error:", err);
-            reject(err);
-          } else {
-            console.log("✅ Session saved successfully");
-            resolve();
-          }
-        });
-      });
+      try {
+        await saveSession(req);
+      } catch (err: any) {
+        console.error("❌ Session save error:", err);
+        throw err;
+      }
 
       // Encrypt and save to database
       console.log("   Encrypting tokens for database...");
@@ -567,12 +646,12 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       // Save to session only
       console.log("   Supabase not configured, saving to session only");
       req.session.tokens = finalTokens;
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
+      try {
+        await saveSession(req);
+      } catch (err: any) {
+        console.error("❌ Session save error:", err);
+        throw err;
+      }
     }
 
     console.log("═══════════════════════════════════════════");
@@ -633,6 +712,160 @@ app.get("/api/auth/status", async (req, res) => {
   } catch (error) {
     console.error("Error checking token status in Supabase:", error);
     return res.json({ isConnected: false });
+  }
+});
+
+// ---- User Preferences Endpoints ----
+
+// Get user preferences
+app.get("/api/user/preferences", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const preferences = await getUserPreferences(user.id);
+    res.json(preferences || {
+      user_id: user.id,
+      onboarding_done: false,
+      voice_id: 'DODLEQrClDo8wCz460ld',
+      language: 'en'
+    });
+  } catch (error: any) {
+    console.error("Error fetching user preferences:", error);
+    res.status(500).json({ error: "Failed to fetch preferences" });
+  }
+});
+
+// Update user preferences
+app.post("/api/user/preferences", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const { onboarding_done, voice_id, language } = req.body;
+    const success = await updateUserPreferences(user.id, {
+      ...(onboarding_done !== undefined && { onboarding_done }),
+      ...(voice_id !== undefined && { voice_id }),
+      ...(language !== undefined && { language })
+    });
+
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ error: "Failed to update preferences" });
+    }
+  } catch (error: any) {
+    console.error("Error updating user preferences:", error);
+    res.status(500).json({ error: "Failed to update preferences" });
+  }
+});
+
+// Get chat history
+app.get("/api/chat/history", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const limit = parseInt(req.query.limit as string) || 50;
+    const messages = await getChatHistory(user.id, limit);
+    res.json(messages);
+  } catch (error: any) {
+    console.error("Error fetching chat history:", error);
+    res.status(500).json({ error: "Failed to fetch chat history" });
+  }
+});
+
+// Save chat message
+app.post("/api/chat/message", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const { role, content, mode, audio_data } = req.body;
+    const success = await saveChatMessage({
+      user_id: user.id,
+      role,
+      content,
+      mode,
+      audio_data
+    });
+
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ error: "Failed to save message" });
+    }
+  } catch (error: any) {
+    console.error("Error saving chat message:", error);
+    res.status(500).json({ error: "Failed to save message" });
+  }
+});
+
+// Clear chat history
+app.delete("/api/chat/history", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const success = await clearChatHistory(user.id);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ error: "Failed to clear chat history" });
+    }
+  } catch (error: any) {
+    console.error("Error clearing chat history:", error);
+    res.status(500).json({ error: "Failed to clear chat history" });
   }
 });
 
@@ -964,10 +1197,10 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   const isLongContext = message.length > 500;
   const isBusinessMode = mode === 'Business Mode';
 
-  // Decision logic
+  // Decision logic - Using Gemini 2.5 models (1.5 is deprecated)
   if (isBusinessMode && isComplexTask) {
     return {
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-pro',
       reason: 'Business mode + complex analysis task',
       maxTokens: 2000
     };
@@ -975,7 +1208,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
 
   if (isComplexTask && isLongContext) {
     return {
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-pro',
       reason: 'Complex analysis with long context',
       maxTokens: 2000
     };
@@ -983,7 +1216,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
 
   // Default: Use Flash for speed and cost efficiency (95% of tasks)
   return {
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     reason: 'Standard task - Flash sufficient',
     maxTokens: 1000
   };
@@ -999,6 +1232,8 @@ app.post("/api/chat", async (req, res) => {
   console.log("   Mode:", mode || 'Neutral');
   console.log("   Language:", language || 'en');
   console.log("   UserId:", userId || 'Not provided');
+  console.log("   GEMINI_API_KEY set:", !!process.env.GEMINI_API_KEY);
+  console.log("   GEMINI_API_KEY length:", process.env.GEMINI_API_KEY?.length || 0);
 
   // Log request timestamp for debugging
   const requestStart = Date.now();
@@ -1019,6 +1254,16 @@ app.post("/api/chat", async (req, res) => {
         error: "AI service unavailable",
         errorCode: "GEMINI_NOT_CONFIGURED",
         details: geminiInitError
+      });
+    }
+
+    // Check if API key exists
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("❌ GEMINI_API_KEY is not set in environment variables");
+      return res.status(503).json({
+        error: "AI service unavailable",
+        errorCode: "GEMINI_NOT_CONFIGURED",
+        details: "GEMINI_API_KEY environment variable is not set"
       });
     }
 
@@ -1087,25 +1332,42 @@ INSTRUCCIONES IMPORTANTES:
 
     console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
     console.log("📝 Language instruction:", langInstruction);
+    console.log("📝 Model to use:", modelSelection.model);
+    console.log("📝 Max tokens:", modelSelection.maxTokens);
 
     // Call Gemini API with selected model
     console.log("🔄 Calling Gemini API...");
-    const response = await ai.models.generateContent({
-      model: modelSelection.model,
-      contents: message,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        maxOutputTokens: modelSelection.maxTokens,
-      },
-    });
+    console.log("🔄 Model:", modelSelection.model);
+    console.log("🔄 Contents:", message.substring(0, 100));
 
-    console.log("✅ Gemini API response received");
-    console.log("   Response text length:", response.text?.length || 0);
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: modelSelection.model,
+        contents: message,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          maxOutputTokens: modelSelection.maxTokens,
+        },
+      });
 
-    if (!response.text) {
-      console.error("❌ Gemini returned empty response");
-      throw new Error("Empty response from Gemini API");
+      console.log("✅ Gemini API response received");
+      console.log("   Response text length:", response.text?.length || 0);
+      console.log("   Response text preview:", response.text?.substring(0, 100));
+
+      if (!response.text) {
+        console.error("❌ Gemini returned empty response");
+        console.error("   Full response:", JSON.stringify(response, null, 2));
+        throw new Error("Empty response from Gemini API");
+      }
+    } catch (apiError: any) {
+      console.error("❌ Gemini API call failed:", apiError.message);
+      console.error("   Error details:", JSON.stringify(apiError, null, 2));
+      console.error("   Error stack:", apiError.stack);
+
+      // Re-throw with more context
+      throw new Error(`Gemini API error: ${apiError.message}`);
     }
 
     // CHECK FOR FUNCTION CALL (Calendar Tools)
@@ -1430,16 +1692,12 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     // Save to session for future requests (cache)
     req.session.tokens = decryptedTokens;
-    await new Promise<void>((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.log("⚠️ Failed to save tokens to session:", err);
-        } else {
-          console.log("✅ Tokens saved to session for future requests");
-        }
-        resolve();
-      });
-    });
+    try {
+      await saveSession(req);
+    } catch (err: any) {
+      console.log("⚠️ Failed to save tokens to session:", err);
+      // Continue anyway - session cache is optional
+    }
 
     return decryptedTokens;
   } catch (error: any) {

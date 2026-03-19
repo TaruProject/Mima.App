@@ -171,8 +171,12 @@ Runs `tsc --noEmit`. No ESLint or Prettier configured.
 
 ### Gemini API
 - **Used for**: Chat AI responses
-- **Model**: `gemini-3-flash-preview`
-- **⚠️ CRITICAL**: Currently called directly from the frontend (key is exposed via `vite.config.ts` define). Must be moved to backend proxy.
+- **Models** (Updated March 2026):
+  - Default: `gemini-2.5-flash` — Fast, cost-efficient (95% of tasks)
+  - Complex tasks: `gemini-2.5-pro` — Advanced reasoning (Business Mode, long context)
+- **Previous models** (deprecated): `gemini-1.5-flash`, `gemini-1.5-pro`
+- **Backend proxy**: All calls go through `/api/chat` endpoint
+- **System instructions**: Custom prompts per mode (Neutral, Business, Family, Zen)
 
 ---
 
@@ -358,6 +362,7 @@ Unknown. No migration files or RLS policies found in the codebase.
 
 ### ✅ Fixed Issues (March 2026)
 
+#### Critical Bug Fixes
 1. **✅ Voice region labels corrected** — Finland/Swedish voices now show correct region names in `src/constants/voices.ts`
 2. **✅ Enhanced error handling in Gemini API** — Added timeout (30s), error codes, and localized error messages in `src/services/geminiService.ts`
 3. **✅ Improved Google OAuth token handling** — Better error detection for expired tokens in `server.ts` with automatic cleanup
@@ -365,6 +370,24 @@ Unknown. No migration files or RLS policies found in the codebase.
 5. **✅ Added debug endpoints** — `/api/debug/chat` and improved `/api/test/gemini` for diagnostics
 6. **✅ Added i18n keys** — New keys for error states: `calendar.error_loading`, `inbox.token_expired`, `common.reconnect`
 7. **✅ Improved logging** — Detailed console logs in `server.ts` for chat, calendar, and gmail endpoints
+
+#### March 2026 Security & Stability Fixes
+8. **✅ Fixed memory leak in Chat audio refs** — Added proper cleanup in `src/pages/Chat.tsx` useEffect to prevent audio element memory leaks
+9. **✅ Secured API key exposure** — Disabled `/api/test/gemini*` and `/api/debug/chat` endpoints in production
+10. **✅ Fixed Supabase configuration validation** — Now throws error on missing/invalid config instead of using dangerous placeholders in `src/lib/supabase.ts`
+11. **✅ Fixed OAuth session race condition** — Created `saveSession()` helper function in `server.ts` to prevent session loss during OAuth flow
+12. **✅ Fixed AuthContext refresh token error handling** — Now properly handles expired tokens and signs out user gracefully in `src/contexts/AuthContext.tsx`
+
+#### Chat Error Fixes (Latest)
+13. **✅ Fixed CSP blocking Google GenAI SDK** — Added Content-Security-Policy headers allowing 'unsafe-eval' required by @google/genai package
+14. **✅ Enhanced chat error logging** — Added detailed console logs in `/api/chat` endpoint showing API key status, model selection, and specific error messages
+15. **✅ Added debug endpoints** — Created `/api/debug/last-chat-error` for production debugging and enhanced `/api/debug/chat` with full error details
+16. **✅ Updated Gemini models to 2.5** — Replaced deprecated `gemini-1.5-flash` and `gemini-1.5-pro` with `gemini-2.5-flash` and `gemini-2.5-pro`
+
+#### Pre-Deploy Fixes (March 2026)
+17. **✅ Fixed onboarding reset on logout** — `mima_onboarding_done` is now preserved on sign out (onboarding is per-device, not per-session)
+18. **✅ Fixed Calendar connection after OAuth** — Added proper session save delay and improved `useGoogleAuth` hook to wait for session persistence
+19. **✅ Enhanced CSP for Google OAuth** — Updated Content-Security-Policy to allow Google OAuth scripts and frames from `accounts.google.com`
 
 ---
 
@@ -402,9 +425,23 @@ Unknown. No migration files or RLS policies found in the codebase.
 
 ### Chat & Gemini API
 - `GET /api/health` - General health check with env status
-- `GET /api/test/gemini-config` - Check Gemini API key configuration
-- `GET /api/test/gemini` - Test Gemini API call with sample message
-- `GET /api/debug/chat?message=test&language=es` - Debug chat with custom parameters
+- `GET /api/test/gemini-config` - Check Gemini API key configuration (dev only)
+- `GET /api/test/gemini` - Test Gemini API call with sample message (dev only)
+- `GET /api/debug/chat?message=test&language=es` - Debug chat with custom parameters (dev only)
+- `GET /api/debug/last-chat-error` - Get last chat error from logs (for production debugging)
+
+### How to Debug Chat Errors in Production
+
+1. **Check the browser console** - Look for the specific error message in the network tab
+2. **Visit `/api/debug/last-chat-error`** - Returns recent server logs
+3. **Check Hostinger server logs** - Look for the detailed error output:
+   ```
+   ═══════════════════════════════════════════
+   🤖 CHAT API REQUEST
+   ═══════════════════════════════════════════
+      GEMINI_API_KEY set: true/false
+      GEMINI_API_KEY length: XX
+   ```
 
 ### OAuth & Google Integration
 - `GET /api/auth/status` - Check Google connection status
