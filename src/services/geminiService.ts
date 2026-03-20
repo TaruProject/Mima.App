@@ -16,7 +16,7 @@ export async function generateChatResponse(
   mode: string,
   language?: string,
   history?: Array<{ role: string; content: string }>,
-  userId?: string
+  authToken?: string
 ): Promise<string> {
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), 30000); // 30s timeout
@@ -32,7 +32,6 @@ export async function generateChatResponse(
         mode,
         language: language || 'en',
         history: history || [],
-        userId,
       }),
       signal: abortController.signal,
     });
@@ -96,7 +95,7 @@ export async function generateChatResponse(
   }
 }
 
-export async function generateSpeech(text: string, voiceId?: string, signal?: AbortSignal): Promise<string | null> {
+export async function generateSpeech(text: string, voiceId?: string, authToken?: string, signal?: AbortSignal): Promise<string | null> {
   const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld";
   
   try {
@@ -104,6 +103,7 @@ export async function generateSpeech(text: string, voiceId?: string, signal?: Ab
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
       },
       body: JSON.stringify({
         text,
@@ -118,8 +118,10 @@ export async function generateSpeech(text: string, voiceId?: string, signal?: Ab
       return null;
     }
 
-    const data = await response.json();
-    return data.audio;
+    // Return as blob/url handled by the hook usually, 
+    // but here we just need to know if it's successful for legacy calls if any.
+    // The new hook will call the API directly.
+    return "success"; 
   } catch (error: any) {
     if (error.name === 'AbortError') {
       console.log('TTS request aborted');

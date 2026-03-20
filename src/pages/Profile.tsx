@@ -6,6 +6,7 @@ import { LogOut, User, Settings, Shield, Bell, Camera, Check, Loader2, Globe, Vo
 import { supabase } from '../lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { voices } from '../constants/voices';
+import { useAudioPlayback } from '../hooks/useAudioPlayback';
 
 export default function Profile() {
   const { t, i18n } = useTranslation();
@@ -21,8 +22,9 @@ export default function Profile() {
   const [hasChanges, setHasChanges] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  
+  const { play: playAudio, stop: stopAudio, isPlaying: isAudioPlaying, cleanup: cleanupAudio } = useAudioPlayback();
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Initial values to track changes
   const [initialValues, setInitialValues] = useState({
@@ -73,9 +75,11 @@ export default function Profile() {
         }
 
         // Also load preferences from new endpoint
-        const headers = {
-          'Authorization': `Bearer ${user.id}`
-        };
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = {};
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
         const prefsResponse = await fetch('/api/user/preferences', { headers });
         if (prefsResponse.ok) {
           const prefs = await prefsResponse.json();
@@ -109,10 +113,13 @@ export default function Profile() {
     // Save to Supabase if user is logged in
     if (user) {
       try {
-        const headers = {
-          'Authorization': `Bearer ${user.id}`,
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = {
           'Content-Type': 'application/json'
         };
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
 
         const response = await fetch('/api/user/preferences', {
           method: 'POST',
@@ -136,10 +143,7 @@ export default function Profile() {
 
   const playVoicePreview = async (id: string) => {
     if (previewPlayingId === id) {
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
-        previewAudioRef.current.currentTime = 0;
-      }
+      stopAudio();
       setPreviewPlayingId(null);
       return;
     }
@@ -148,50 +152,27 @@ export default function Profile() {
 
     try {
       setPreviewLoadingId(id);
-      
-      // Stop current playback
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
-      }
-
-      const response = await fetch(`/api/tts/preview?voiceId=${id}`);
-      if (!response.ok) throw new Error(`Failed to fetch preview: ${response.status}`);
-      const data = await response.json();
-      
-      if (!data.audio) throw new Error("No audio data received");
-      
-      // Clear double prefix if exists (safety check)
-      let audioUrl = data.audio;
-      if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
-        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
-      }
-
-      const audio = new Audio(audioUrl);
-      previewAudioRef.current = audio;
-      
-      audio.onplay = () => {
-        setPreviewLoadingId(null);
-        setPreviewPlayingId(id);
-      };
-      
-      audio.onended = () => {
-        setPreviewPlayingId(null);
-      };
-      
-      audio.onerror = (e) => {
-        console.error("Audio error:", e);
-        setPreviewPlayingId(null);
-        setPreviewLoadingId(null);
-        showToast(t('chat.audio_error'), "error");
-      };
-
-      await audio.play();
+      await playAudio(`/api/tts/preview?voiceId=${id}`);
+      setPreviewPlayingId(id);
     } catch (error) {
       console.error("Error playing preview", error);
-      setPreviewLoadingId(null);
       showToast(t('chat.audio_error'), "error");
+    } finally {
+      setPreviewLoadingId(null);
     }
   };
+
+  // Synchronize playing ID with hook state
+  useEffect(() => {
+    if (!isAudioPlaying) {
+      setPreviewPlayingId(null);
+    }
+  }, [isAudioPlaying]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => cleanupAudio();
+  }, [cleanupAudio]);
 
   const handleLanguageChange = async (newLang: string) => {
     setLanguage(newLang);

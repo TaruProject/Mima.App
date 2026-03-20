@@ -1,13 +1,12 @@
 import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { supabase } from "../lib/supabase";
 import { useTranslation } from "react-i18next";
-import { useGoogleAuth } from "../hooks/useGoogleAuth";
+import { useGoogleConnection } from "../hooks/useGoogleConnection";
 
 export default function Inbox() {
   const { t } = useTranslation();
-  const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
+  const { isConnected, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
 
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -23,18 +22,17 @@ export default function Inbox() {
     setIsLoading(true);
     setError(null);
     try {
-      const headers = getAuthHeaders();
       const response = await fetch('/api/gmail/messages', {
-        headers,
-        credentials: 'include' // Required to send session cookie
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (response.ok) {
         const data = await response.json();
         setEmails(data || []);
       } else if (response.status === 401) {
-        setIsConnected(false);
         setError(t('inbox.token_expired'));
+        checkStatus();
       } else if (response.status === 403) {
         setError(t('inbox.permission_denied'));
       } else {
@@ -83,7 +81,7 @@ export default function Inbox() {
       </div>
 
       <main className="flex-1 overflow-y-auto px-4 space-y-4 flex flex-col no-scrollbar">
-        {!isConnected ? (
+        {isConnected === false ? (
           <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-white/5 max-w-sm w-full mt-8 mx-auto">
             <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
               <MailIcon className="w-8 h-8 text-primary" />
@@ -93,7 +91,7 @@ export default function Inbox() {
               {t('inbox.connect_description')}
             </p>
             <button
-              onClick={() => handleConnect()}
+              onClick={() => connect()}
               className="w-full py-3 px-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -105,26 +103,24 @@ export default function Inbox() {
               {t('common.signin_google')}
             </button>
           </div>
-        ) : isLoading ? (
+        ) : isConnected === null || isLoading ? (
           <div className="flex justify-center mt-10">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           </div>
-        ) : (error || authError) ? (
+        ) : error ? (
           <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-red-500/30 max-w-sm w-full mt-8 mx-auto">
             <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
               <MailIcon className="w-8 h-8 text-red-400" />
             </div>
             <h3 className="text-lg font-bold text-white mb-2">{t('inbox.error_loading')}</h3>
-            <p className="text-sm text-red-400 mb-4">{error || authError}</p>
+            <p className="text-sm text-red-400 mb-4">{error}</p>
             <div className="flex gap-2 w-full">
-              {!isConnected && (
-                <button
-                  onClick={() => handleConnect()}
-                  className="flex-1 py-2 px-4 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors text-sm"
-                >
-                  {t('common.reconnect')}
-                </button>
-              )}
+              <button
+                onClick={() => connect()}
+                className="flex-1 py-2 px-4 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors text-sm"
+              >
+                {t('common.reconnect')}
+              </button>
               <button onClick={fetchEmails} className="flex-1 py-2 px-4 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">
                 {t('common.try_again')}
               </button>

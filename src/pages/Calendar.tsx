@@ -8,7 +8,7 @@ import { enUS } from 'date-fns/locale/en-US';
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import { useTranslation } from "react-i18next";
-import { useGoogleAuth } from "../hooks/useGoogleAuth";
+import { useGoogleConnection } from "../hooks/useGoogleConnection";
 
 const localeMap: Record<string, Locale> = { fi, sv, es, en: enUS };
 
@@ -21,10 +21,8 @@ function getLocalizedWeekDays(lang: string): string[] {
   const formatter = new Intl.DateTimeFormat(locale, { weekday: 'narrow' });
   // Generate days starting from Sunday (0)
   return Array.from({ length: 7 }, (_, i) => {
-    const date = new Date(2024, 0, i); // Jan 2024: 0=Mon... but we need Sun start
-    // Jan 7 2024 is Sunday
-    const d = new Date(2024, 0, 7 + i);
-    return formatter.format(d);
+    const date = new Date(2024, 0, 7 + i);
+    return formatter.format(date);
   });
 }
 
@@ -34,7 +32,7 @@ export default function Calendar() {
   const dateLocale = getDateLocale(i18n.language);
   const weekDays = useMemo(() => getLocalizedWeekDays(i18n.language), [i18n.language]);
 
-  const { isConnected, setIsConnected, authError, handleConnect, getAuthHeaders } = useGoogleAuth();
+  const { isConnected, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
 
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -51,18 +49,17 @@ export default function Calendar() {
     setIsLoading(true);
     setError(null);
     try {
-      const headers = getAuthHeaders();
       const response = await fetch('/api/calendar/events', {
-        headers,
-        credentials: 'include' // Required to send session cookie
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (response.ok) {
         const data = await response.json();
         setEvents(data || []);
       } else if (response.status === 401) {
-        setIsConnected(false);
         setError(t('calendar.token_expired'));
+        checkStatus(); // Verify if still connected
       } else if (response.status === 403) {
         setError(t('calendar.permission_denied'));
       } else {
@@ -154,7 +151,7 @@ export default function Calendar() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-0 custom-scrollbar pb-32 flex flex-col no-scrollbar">
-        {!isConnected ? (
+        {isConnected === false ? (
           <div className="flex flex-col items-center justify-center text-center p-6 bg-surface-dark rounded-2xl border border-white/5 max-w-sm w-full mt-8 mx-auto">
             <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
               <CalendarIcon className="w-8 h-8 text-primary" />
@@ -164,7 +161,7 @@ export default function Calendar() {
               {t('calendar.connect_description')}
             </p>
             <button
-              onClick={() => handleConnect()}
+              onClick={() => connect()}
               className="w-full py-3 px-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -176,7 +173,7 @@ export default function Calendar() {
               {t('common.signin_google')}
             </button>
           </div>
-        ) : isLoading ? (
+        ) : isConnected === null || isLoading ? (
           <div className="flex justify-center mt-10">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           </div>
@@ -188,14 +185,12 @@ export default function Calendar() {
             <h3 className="text-lg font-bold text-white mb-2">{t('calendar.error_loading')}</h3>
             <p className="text-sm text-red-400 mb-4">{error}</p>
             <div className="flex gap-2 w-full">
-              {!isConnected && (
-                <button
-                  onClick={() => handleConnect()}
-                  className="flex-1 py-2 px-4 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors text-sm"
-                >
-                  {t('common.reconnect')}
-                </button>
-              )}
+              <button
+                onClick={() => connect()}
+                className="flex-1 py-2 px-4 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors text-sm"
+              >
+                {t('common.reconnect')}
+              </button>
               <button onClick={fetchEvents} className="flex-1 py-2 px-4 bg-surface-highlight rounded-lg text-sm hover:bg-white/10 transition-colors">
                 {t('common.try_again')}
               </button>

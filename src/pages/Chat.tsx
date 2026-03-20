@@ -1,25 +1,33 @@
 import { useState, useRef, useEffect } from "react";
 import { Menu, Settings, Mic, ArrowUp, Plus, Volume2, Square, Play } from "lucide-react";
-import { generateChatResponse, generateSpeech } from "../services/geminiService";
+import { generateChatResponse } from "../services/geminiService";
 import Markdown from "react-markdown";
 import { ActionMenu } from "../components/ui/ActionMenu";
 import { ModeBottomSheet } from "../components/ui/ModeBottomSheet";
 import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
+import { useAudioPlayback } from "../hooks/useAudioPlayback";
+import { useVoiceRecording } from "../hooks/useVoiceRecording";
+import { supabase } from "../lib/supabase";
 
 export default function Chat() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
-  const [messages, setMessages] = useState(() => {
-    // Initial messages - will be loaded from Supabase when user is authenticated
+  const { play, stop, isPlaying: isAudioPlaying } = useAudioPlayback();
+  const { isRecording, isTranscribing, startRecording, stopRecording } = useVoiceRecording();
+  
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState(0);
+
+  const [messages, setMessages] = useState<any[]>(() => {
+    // Initial messages
     return [
       {
         id: 1,
         sender: "Mima",
         text: t('chat.welcome_message'),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        audio: null as string | null,
       },
     ];
   });
@@ -27,13 +35,6 @@ export default function Chat() {
   const [mode, setMode] = useState("Neutral Mode");
   const [voiceId, setVoiceId] = useState("DODLEQrClDo8wCz460ld");
   const [isLoading, setIsLoading] = useState(false);
-  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
-  const [audioProgress, setAudioProgress] = useState(0);
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -51,8 +52,11 @@ export default function Chat() {
 
     const loadData = async () => {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
         const headers = {
-          'Authorization': `Bearer ${user?.id}`
+          'Authorization': `Bearer ${session.access_token}`
         };
 
         // Load chat history
@@ -96,8 +100,11 @@ export default function Chat() {
 
     const saveHistory = async () => {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
         const headers = {
-          'Authorization': `Bearer ${user?.id}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json'
         };
 
@@ -155,7 +162,8 @@ export default function Chat() {
           content: m.text
         }));
 
-      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history, user?.id);
+      const { data: { session } } = await supabase.auth.getSession();
+      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history, session?.access_token);
       
       setMessages((prev) => [
         ...prev,
@@ -164,7 +172,6 @@ export default function Chat() {
           sender: "Mima",
           text: responseText,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          audio: null,
         },
       ]);
     } catch (error) {
@@ -184,132 +191,39 @@ export default function Chat() {
     }
   };
 
-  const stopAudio = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-    if (previewAudioRef.current) {
-      previewAudioRef.current.pause();
-      previewAudioRef.current.currentTime = 0;
-      setIsPreviewPlaying(false);
-    }
-    setPlayingAudio(null);
-    setAudioProgress(0);
-  };
-
-  const playVoicePreview = async () => {
-    if (isPreviewPlaying && previewAudioRef.current) {
-      previewAudioRef.current.pause();
-      previewAudioRef.current.currentTime = 0;
-      setIsPreviewPlaying(false);
-      return;
-    }
-
-    stopAudio();
-    setIsPreviewLoading(true);
-
-    try {
-      const response = await fetch(`/api/tts/preview?voiceId=${voiceId}`);
-      if (!response.ok) throw new Error("Failed to fetch preview");
-      const data = await response.json();
-      
-      if (data.audio) {
-        if (previewAudioRef.current) {
-          previewAudioRef.current.pause();
-        }
-        
-        // Safety check for double prefix
-        let audioUrl = data.audio;
-        if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
-          audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
-        }
-
-        const audio = new Audio(audioUrl);
-        previewAudioRef.current = audio;
-        
-        audio.onended = () => setIsPreviewPlaying(false);
-        audio.onerror = (e) => {
-          console.error("Preview audio error:", e);
-          setIsPreviewPlaying(false);
-          setIsPreviewLoading(false);
-        };
-        
-        await audio.play();
-        setIsPreviewPlaying(true);
+  const handleMicClick = async () => {
+    if (isRecording) {
+      const text = await stopRecording();
+      if (text) {
+        setInput(text);
       }
-    } catch (error) {
-      console.error("Error playing voice preview:", error);
-    } finally {
-      setIsPreviewLoading(false);
+    } else {
+      await startRecording();
     }
   };
 
   const handlePlayAudio = async (msgId: number, text: string) => {
-    const msg = messages.find(m => m.id === msgId);
-    if (!msg) return;
-
-    if (playingAudio === msgId.toString()) {
-      stopAudio();
+    if (playingId === msgId.toString()) {
+      stop();
+      setPlayingId(null);
       return;
     }
 
-    // Stop any currently playing audio
-    stopAudio();
-
-    let audioData = msg.audio;
-    
-    if (!audioData) {
-      setPlayingAudio("loading-" + msgId);
-      
-      abortControllerRef.current = new AbortController();
-      const generatedAudio = await generateSpeech(text, voiceId, abortControllerRef.current.signal);
-      
-      if (generatedAudio) {
-        audioData = generatedAudio;
-        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, audio: audioData } : m));
-      } else if (abortControllerRef.current?.signal.aborted) {
-        return; // Silently return if aborted
-      } else {
-        setPlayingAudio(null);
-        alert(t('chat.audio_error'));
-        return;
-      }
-    }
-
-    if (audioData) {
-      // Safety check for double prefix
-      let audioUrl = audioData;
-      if (audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
-        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
-      }
-
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onerror = (e) => {
-        console.error("Audio playback error:", e);
-        setPlayingAudio(null);
-        setAudioProgress(0);
-      };
-
-      await audio.play().catch(e => {
-        console.error("Audio play promise rejected:", e);
-        setPlayingAudio(null);
-        setAudioProgress(0);
-      });
-      
-      setPlayingAudio(msgId.toString());
-      audio.onended = () => {
-        setPlayingAudio(null);
-        setAudioProgress(0);
-      };
+    try {
+      setPlayingId(msgId.toString());
+      await play('/api/tts', { text, voiceId });
+    } catch (error) {
+      console.error("Audio playback error:", error);
+      setPlayingId(null);
     }
   };
+
+  // Reset playingId when audio stops naturally
+  useEffect(() => {
+    if (!isAudioPlaying) {
+      setPlayingId(null);
+    }
+  }, [isAudioPlaying]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -319,52 +233,7 @@ export default function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  // Cleanup audio elements on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      // Cleanup main audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-        audioRef.current.load();
-        audioRef.current = null;
-      }
-      // Cleanup preview audio
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
-        previewAudioRef.current.src = '';
-        previewAudioRef.current.load();
-        previewAudioRef.current = null;
-      }
-      // Cleanup abort controller
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let animationFrameId: number;
-
-    const updateProgress = () => {
-      if (audioRef.current && playingAudio && !playingAudio.startsWith('loading-')) {
-        const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
-        setAudioProgress(isNaN(progress) ? 0 : progress);
-        animationFrameId = requestAnimationFrame(updateProgress);
-      }
-    };
-
-    if (playingAudio && !playingAudio.startsWith('loading-')) {
-      animationFrameId = requestAnimationFrame(updateProgress);
-    } else {
-      setAudioProgress(0);
-    }
-
-    return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    };
-  }, [playingAudio]);
+  // Scrolling logic replaced by simple scroll to bottom on message change
 
   return (
     <div className="flex flex-col h-full relative">
@@ -467,24 +336,20 @@ export default function Chat() {
                     <button 
                       onClick={() => handlePlayAudio(msg.id, msg.text)}
                       className={`p-1.5 rounded-full transition-all ${
-                        playingAudio === msg.id.toString() 
+                        playingId === msg.id.toString() 
                           ? "text-primary bg-primary/10 hover:bg-primary/20" 
-                          : playingAudio === "loading-" + msg.id
-                          ? "text-text-secondary animate-pulse"
                           : "text-text-secondary hover:bg-surface-highlight hover:text-white"
                       }`}
-                      title={playingAudio === msg.id.toString() ? t('chat.stop_audio') : t('chat.play_audio')}
+                      title={playingId === msg.id.toString() ? t('chat.stop_audio') : t('chat.play_audio')}
                     >
-                      {playingAudio === msg.id.toString() ? (
+                      {playingId === msg.id.toString() ? (
                         <Square className="w-4 h-4 fill-current" />
-                      ) : playingAudio === "loading-" + msg.id ? (
-                        <div className="w-4 h-4 border-2 border-text-secondary border-t-transparent rounded-full animate-spin"></div>
                       ) : (
                         <Play className="w-4 h-4 fill-current ml-0.5" />
                       )}
                     </button>
                     
-                    {playingAudio === msg.id.toString() && (
+                    {playingId === msg.id.toString() && (
                       <div className="w-24 h-1.5 bg-surface-highlight rounded-full overflow-hidden ml-1">
                         <div 
                           className="h-full bg-primary transition-all duration-100 ease-linear"
@@ -536,8 +401,19 @@ export default function Chat() {
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
               disabled={isLoading}
             />
-            <button className="mr-2 w-8 h-8 flex items-center justify-center rounded-full text-text-secondary hover:text-primary transition-colors">
-              <Mic className="w-5 h-5" />
+            <button 
+              onClick={handleMicClick}
+              disabled={isLoading || isTranscribing}
+              className={`mr-2 w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
+                isRecording ? "text-red-500 bg-red-500/10 animate-pulse" : 
+                isTranscribing ? "text-primary animate-spin" : "text-text-secondary hover:text-primary"
+              }`}
+            >
+              {isTranscribing ? (
+                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Mic className="w-5 h-5" />
+              )}
             </button>
           </div>
           <button

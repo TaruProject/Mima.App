@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronRight, ChevronLeft, Check, Volume2, Play, Square, Loader2 } from 'lucide-react';
-import { generateSpeech } from '../../services/geminiService';
 import { useTranslation } from 'react-i18next';
 import { voices } from '../../constants/voices';
+import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -37,7 +37,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
-  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const { play: playAudio, stop: stopAudio, isPlaying: isAudioPlaying, cleanup: cleanupAudio } = useAudioPlayback();
 
   const handleNext = async () => {
     if (step < 3) setStep(step + 1);
@@ -68,44 +68,36 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
   const playPreview = async (id: string) => {
     if (previewPlayingId === id) {
-      audioRef.current?.pause();
+      stopAudio();
       setPreviewPlayingId(null);
       return;
     }
 
+    if (previewLoadingId) return;
+
     try {
       setPreviewLoadingId(id);
-      const previewText = t('onboarding.voice_preview_text');
-      const audioBase64 = await generateSpeech(previewText, id);
-      
-      if (audioRef.current) audioRef.current.pause();
-
-      // Safety check for double prefix
-      let audioUrl = audioBase64;
-      if (audioUrl && audioUrl.startsWith('data:audio/mpeg;base64,data:audio/mpeg;base64,')) {
-        audioUrl = audioUrl.replace('data:audio/mpeg;base64,', '');
-      }
-
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onplay = () => {
-        setPreviewLoadingId(null);
-        setPreviewPlayingId(id);
-      };
-      
-      audio.onended = () => setPreviewPlayingId(null);
-      audio.onerror = (e) => {
-        console.error("Onboarding audio error:", e);
-        setPreviewLoadingId(null);
-      };
-
-      await audio.play();
+      // We don't need body for preview, simple GET works now
+      await playAudio(`/api/tts/preview?voiceId=${id}`);
+      setPreviewPlayingId(id);
     } catch (error) {
       console.error("Onboarding playback error:", error);
+    } finally {
       setPreviewLoadingId(null);
     }
   };
+
+  // Sync playing state
+  useEffect(() => {
+    if (!isAudioPlaying) {
+      setPreviewPlayingId(null);
+    }
+  }, [isAudioPlaying]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => cleanupAudio();
+  }, [cleanupAudio]);
 
   return (
     <div className="fixed inset-0 z-[200] bg-background-dark flex flex-col overflow-hidden">

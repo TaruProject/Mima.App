@@ -10,6 +10,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import * as chrono from "chrono-node";
+import multer from "multer";
 import {
   getUserPreferences,
   updateUserPreferences,
@@ -166,6 +167,40 @@ async function saveSession(req: express.Request): Promise<void> {
     });
   });
 }
+
+// Configure multer for memory storage
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
+
+// Middleware to authenticate Supabase users
+const authenticateSupabaseUser = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: "Missing or invalid authorization header" });
+  }
+
+  const token = authHeader.split(' ')[1];
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      console.error("❌ Auth error:", error?.message);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Attach user to request for use in endpoints
+    (req as any).user = user;
+    next();
+  } catch (err) {
+    console.error("❌ Unexpected auth error:", err);
+    return res.status(500).json({ error: "Internal server error during authentication" });
+  }
+};
 
 const getOAuth2Client = (req?: express.Request) => {
   // Use the custom domain as the primary one
@@ -424,16 +459,9 @@ app.get("/api/debug/last-chat-error", (req, res) => {
   });
 });
 
-app.get("/api/auth/url", async (req, res) => {
+app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-    const token = authHeader.split(' ')[1];
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: 'Invalid token' });
-
+    const user = (req as any).user;
     req.session.userId = user.id;
 
     // CRÍTICO: Guardar sesión ANTES de redirigir a Google
@@ -587,10 +615,8 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     console.log("✅ OAUTH SUCCESS - Redirecting to app...");
     logToFile("OAUTH SUCCESS", { sessionID: req.sessionID, userId });
 
-    // Add a small delay to ensure session cookie is written before redirect
-    // This prevents the "connected but not working" issue
-    res.setHeader('Refresh', '1; url=${appUrl}/?google_connected=true');
-    res.redirect(`${appUrl}/?google_connected=true&session_saved=true`);
+    // Redirect with success param - no delay needed if we awaited saveSession
+    res.redirect(`${appUrl}/?google_connected=true`);
   };
 
   // Validate prerequisites
@@ -762,21 +788,9 @@ app.get("/api/auth/status", async (req, res) => {
 // ---- User Preferences Endpoints ----
 
 // Get user preferences
-app.get("/api/user/preferences", async (req, res) => {
+app.get("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
+    const user = (req as any).user;
     const preferences = await getUserPreferences(user.id);
 
     // Fallback si no hay preferencias o la tabla no existe
@@ -790,7 +804,7 @@ app.get("/api/user/preferences", async (req, res) => {
     console.error("Error fetching user preferences:", error);
     // Fallback - retornar valores por defecto en lugar de error 500
     res.status(200).json({
-      user_id: req.headers.authorization ? 'unknown' : 'anonymous',
+      user_id: (req as any).user?.id || 'unknown',
       onboarding_done: false,
       voice_id: 'DODLEQrClDo8wCz460ld',
       language: 'en',
@@ -800,21 +814,9 @@ app.get("/api/user/preferences", async (req, res) => {
 });
 
 // Update user preferences
-app.post("/api/user/preferences", async (req, res) => {
+app.post("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
+    const user = (req as any).user;
     const { onboarding_done, voice_id, language } = req.body;
     const success = await updateUserPreferences(user.id, {
       ...(onboarding_done !== undefined && { onboarding_done }),
@@ -837,21 +839,9 @@ app.post("/api/user/preferences", async (req, res) => {
 });
 
 // Get chat history
-app.get("/api/chat/history", async (req, res) => {
+app.get("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
+    const user = (req as any).user;
     const limit = parseInt(req.query.limit as string) || 50;
     const messages = await getChatHistory(user.id, limit);
     res.json(messages);
@@ -863,21 +853,9 @@ app.get("/api/chat/history", async (req, res) => {
 });
 
 // Save chat message
-app.post("/api/chat/message", async (req, res) => {
+app.post("/api/chat/message", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
+    const user = (req as any).user;
     const { role, content, mode, audio_data } = req.body;
     const success = await saveChatMessage({
       user_id: user.id,
@@ -901,21 +879,9 @@ app.post("/api/chat/message", async (req, res) => {
 });
 
 // Clear chat history
-app.delete("/api/chat/history", async (req, res) => {
+app.delete("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
+    const user = (req as any).user;
     const success = await clearChatHistory(user.id);
     if (success) {
       res.json({ success: true });
@@ -931,14 +897,10 @@ app.delete("/api/chat/history", async (req, res) => {
 
 const ttsPreviewCache: Record<string, string> = {};
 
-app.get("/api/tts/preview", async (req, res) => {
+app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
   const { voiceId } = req.query;
   if (!voiceId || typeof voiceId !== 'string') {
     return res.status(400).json({ error: "voiceId is required" });
-  }
-
-  if (ttsPreviewCache[voiceId]) {
-    return res.json({ audio: ttsPreviewCache[voiceId] });
   }
 
   if (!process.env.ELEVENLABS_API_KEY) {
@@ -969,20 +931,29 @@ app.get("/api/tts/preview", async (req, res) => {
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const base64Audio = buffer.toString('base64');
-    const audioDataUri = `data:audio/mpeg;base64,${base64Audio}`;
+    // Set headers for binary audio stream
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-    ttsPreviewCache[voiceId] = audioDataUri;
-    res.json({ audio: audioDataUri });
+    if (response.body) {
+      // Use pipeline for more robust streaming
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } else {
+      throw new Error("Empty response body from ElevenLabs");
+    }
   } catch (error) {
     console.error("Preview TTS Error:", error);
     res.status(500).json({ error: "Failed to generate preview audio" });
   }
 });
 
-app.post("/api/tts", async (req, res) => {
+app.post("/api/tts", authenticateSupabaseUser, async (req, res) => {
   const { text, voiceId } = req.body;
   console.log("TTS request received", { textLength: text?.length, voiceId });
 
@@ -1018,12 +989,21 @@ app.post("/api/tts", async (req, res) => {
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const base64Audio = buffer.toString('base64');
+    // Set headers for binary audio stream
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-    console.log("TTS generated successfully, sending base64 audio");
-    res.json({ audio: `data:audio/mpeg;base64,${base64Audio}` });
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } else {
+      throw new Error("Empty response body from ElevenLabs");
+    }
   } catch (error) {
     console.error('TTS Error:', error);
     res.status(500).json({ error: "Failed to generate speech", details: error instanceof Error ? error.message : String(error) });
@@ -1076,7 +1056,7 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
     // All-day event format - Google Calendar uses exclusive end date
     const startDateStr = eventData.startDate.toISOString().split('T')[0];
     // For all-day events, Google Calendar expects the day AFTER as the end date
-    const nextDay = new Date(eventData.endDate);
+    const nextDay = new Date(eventData.endDate || eventData.startDate);
     nextDay.setDate(nextDay.getDate() + 1);
     const endDateStr = nextDay.toISOString().split('T')[0];
     event.start = { date: startDateStr };
@@ -1094,6 +1074,57 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
 
   return response.data;
 }
+
+// ---- STT (Speech to Text) Endpoint ----
+
+app.post("/api/transcribe", authenticateSupabaseUser, upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No audio file provided" });
+  }
+
+  console.log("🎙️ Transcription request received", {
+    size: req.file.size,
+    mimetype: req.file.mimetype
+  });
+
+  try {
+    const ai = getGenAI();
+
+    // Convert buffer to base64 for Gemini
+    const audioData = {
+      inlineData: {
+        data: req.file.buffer.toString("base64"),
+        mimeType: req.file.mimetype
+      }
+    };
+
+    const prompt = "Transcribe the following audio precisely. Output ONLY the transcription text, no extra words or explanations.";
+
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            audioData
+          ]
+        }
+      ]
+    });
+
+    const text = result.text;
+
+    console.log("✅ Transcription successful:", text);
+    res.json({ text });
+  } catch (error: any) {
+    console.error("❌ Transcription Error:", error);
+    res.status(500).json({
+      error: "Failed to transcribe audio",
+      details: error.message
+    });
+  }
+});
 
 // List calendar events
 async function listCalendarEvents(userTokens: any, startDate: string, endDate: string, maxResults: number = 10): Promise<any[]> {
@@ -1282,8 +1313,10 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   };
 }
 
-app.post("/api/chat", async (req, res) => {
-  const { message, mode, language, history, userId } = req.body;
+app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
+  const { message, mode, language, history } = req.body;
+  const user = (req as any).user;
+  const userId = user.id;
 
   console.log("═══════════════════════════════════════════");
   console.log("🤖 CHAT API REQUEST");
@@ -1291,7 +1324,7 @@ app.post("/api/chat", async (req, res) => {
   console.log("   Message:", message?.substring(0, 100));
   console.log("   Mode:", mode || 'Neutral');
   console.log("   Language:", language || 'en');
-  console.log("   UserId:", userId || 'Not provided');
+  console.log("   UserId:", userId);
   console.log("   GEMINI_API_KEY set:", !!process.env.GEMINI_API_KEY);
   console.log("   GEMINI_API_KEY length:", process.env.GEMINI_API_KEY?.length || 0);
 
@@ -1382,13 +1415,12 @@ Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO 
 Si NO es una petición de calendario, responde normalmente.` : '';
 
     // CRITICAL: Explicit system prompt with language enforcement
-    const systemInstruction = modeInstruction + ' ' + langInstruction + calendarToolsInstruction + `
-
-INSTRUCCIONES IMPORTANTES:
-1. SIEMPRE responde en el idioma del usuario (${langCode}).
-2. Si el usuario escribe en español, tú respondes en español.
-3. Si el usuario escribe en inglés, tú respondes en inglés.
-4. Mantén un tono amigable y profesional.`;
+    const systemInstruction = `${modeInstruction}\n\n${langInstruction}\n\n${calendarToolsInstruction}\n\n` +
+      `STRICT INSTRUCTIONS:\n` +
+      `1. You MUST ALWAYS respond in the user's selected language: ${langCode}.\n` +
+      `2. Do not use any other language unless explicitly asked by the user.\n` +
+      `3. If you use a tool (JSON format), that's the only thing you should return.\n` +
+      `4. Maintain the persona: ${mode || 'Neutral'}.`;
 
     console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
     console.log("📝 Language instruction:", langInstruction);
@@ -1402,33 +1434,18 @@ INSTRUCCIONES IMPORTANTES:
 
     let response;
     try {
-      // Use fallback if the specified model fails (could happen if 2.5 is not yet globally available)
       const primaryModel = modelSelection.model;
-      const fallbackModel = 'gemini-1.5-flash';
-      
-      try {
-        console.log(`🔄 Attempting Gemini call with primary model: ${primaryModel}`);
-        response = await ai.models.generateContent({
-          model: primaryModel,
-          contents: message,
-          config: {
-            systemInstruction,
-            temperature: 0.7,
-            maxOutputTokens: modelSelection.maxTokens,
-          },
-        });
-      } catch (primaryError: any) {
-        console.warn(`⚠️ Primary model ${primaryModel} failed, trying fallback ${fallbackModel}:`, primaryError.message);
-        response = await ai.models.generateContent({
-          model: fallbackModel,
-          contents: message,
-          config: {
-            systemInstruction,
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-          },
-        });
-      }
+
+      console.log(`🔄 Attempting Gemini call with: ${primaryModel}`);
+      response = await ai.models.generateContent({
+        model: primaryModel,
+        contents: message,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          maxOutputTokens: modelSelection.maxTokens,
+        },
+      });
 
       console.log("✅ Gemini API response received");
       console.log("   Response text length:", response.text?.length || 0);
@@ -1709,33 +1726,16 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
   console.log("⏳ Session tokens not found, trying Supabase fallback...");
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    console.log("❌ No authorization header provided");
+  const user = (req as any).user;
+  if (!user) {
+    console.log("❌ No user object in request (middleware failed or bypassed)");
     return null;
   }
 
-  const token = authHeader.split(' ')[1];
-  if (!token || !supabaseUrl || !supabaseAnonKey) {
-    console.log("❌ Missing token or Supabase config");
-    return null;
-  }
+  console.log(`🔑 User confirmed from request: ${user.id}`);
 
   try {
-    // Create Supabase client with timeout
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    // Get user from auth token with timeout
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      console.log("❌ Invalid user token:", authError?.message);
-      return null;
-    }
-
-    console.log(`🔑 User authenticated: ${user.id}`);
-
-    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
 
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       console.error("❌ FATAL: SUPABASE_SERVICE_ROLE_KEY not configured");
@@ -1765,26 +1765,55 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
     }
 
     // Decrypt and return tokens
-    const decryptedTokens = JSON.parse(decrypt(tokenData.tokens));
+    const tokens = JSON.parse(decrypt(tokenData.tokens));
     console.log("✅ Successfully fetched tokens from Supabase fallback");
 
     // Save to session for future requests (cache)
-    req.session.tokens = decryptedTokens;
+    req.session.tokens = tokens;
     try {
       await saveSession(req);
     } catch (err: any) {
       console.log("⚠️ Failed to save tokens to session:", err);
-      // Continue anyway - session cache is optional
     }
 
-    return decryptedTokens;
+    // Set up auto-refresh listener if not already set
+    const oauth2Client = getOAuth2Client(req);
+    oauth2Client.setCredentials(tokens);
+
+    // This is the key part: listen for the 'tokens' event which fires when the client refreshes the access token
+    oauth2Client.on('tokens', async (newTokens) => {
+      console.log("🔄 Google tokens refreshed automatically");
+      const updatedTokens = { ...tokens, ...newTokens };
+
+      // Update local session
+      req.session.tokens = updatedTokens;
+      try {
+        await saveSession(req);
+      } catch (e) {
+        console.error("❌ Failed to save session after refresh:", e);
+      }
+
+      // Update Supabase
+      const encrypted = encrypt(JSON.stringify(updatedTokens));
+      await supabaseAdmin
+        .from('user_google_tokens')
+        .upsert({
+          user_id: user.id,
+          tokens: encrypted,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      console.log("✅ Refreshed tokens persisted to session and Supabase");
+    });
+
+    return tokens;
   } catch (error: any) {
     console.error("❌ Error fetching tokens from Supabase:", error.message);
     return null;
   }
 }
 
-app.get("/api/calendar/events", async (req, res) => {
+app.get("/api/calendar/events", authenticateSupabaseUser, async (req, res) => {
   console.log("📅 Calendar events request received");
 
   // Try to get tokens from session or fallback to Supabase
@@ -1820,7 +1849,7 @@ app.get("/api/calendar/events", async (req, res) => {
   }
 });
 
-app.get("/api/gmail/messages", async (req, res) => {
+app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
   console.log("📧 Gmail messages request received");
 
   // Try to get tokens from session or fallback to Supabase
