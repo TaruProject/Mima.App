@@ -132,8 +132,8 @@ app.use(session({
   saveUninitialized: false,
   name: 'mima.session', // Specific cookie name to avoid conflicts
   cookie: {
-    secure: true, // Required for HTTPS (Hostinger)
-    sameSite: 'none', // Required for cross-origin requests
+    secure: process.env.NODE_ENV === 'production', // Only require HTTPS in production
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true // Security: prevent XSS access to cookie
   }
@@ -179,23 +179,39 @@ const upload = multer({
 // Middleware to authenticate Supabase users
 const authenticateSupabaseUser = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: "Missing or invalid authorization header" });
-  }
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
-  const token = authHeader.split(' ')[1];
   const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) {
-      console.error("❌ Auth error:", error?.message);
-      return res.status(401).json({ error: "Unauthorized" });
+    // 1. Try Token Authentication (Standard)
+    if (token) {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (!error && user) {
+        (req as any).user = user;
+        return next();
+      }
+      console.warn("⚠️ Token auth failed, trying session fallback...");
     }
 
-    // Attach user to request for use in endpoints
-    (req as any).user = user;
-    next();
+    // 2. Try Session Fallback (If headers are stripped by proxy)
+    const sessionUserId = req.session.userId;
+    if (sessionUserId) {
+      console.log("🔄 Authenticating via session userId:", sessionUserId);
+      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+      const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(sessionUserId);
+      
+      if (!error && user) {
+        (req as any).user = user;
+        return next();
+      }
+    }
+
+    console.error("❌ Auth failed: No valid token or session");
+    return res.status(401).json({ 
+      error: "Unauthorized", 
+      details: "No valid authentication found. If you are seeing this, try logging in again." 
+    });
   } catch (err) {
     console.error("❌ Unexpected auth error:", err);
     return res.status(500).json({ error: "Internal server error during authentication" });
@@ -746,6 +762,7 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
     return redirectWithError(errorMessage);
   }
 });
+
 
 app.get("/api/auth/status", async (req, res) => {
   // If we already have tokens in session, we're connected
@@ -1470,8 +1487,16 @@ Si NO es una petición de calendario, responde normalmente.` : '';
 
     if (userId) {
       try {
-        // Try to parse as JSON function call
-        const trimmedText = responseText.trim();
+        // Try to parse as JSON function call - allow for markdown blocks
+        let trimmedText = responseText.trim();
+        if (trimmedText.includes('```json')) {
+          const match = trimmedText.match(/```json\s*([\s\S]*?)\s*```/);
+          if (match) trimmedText = match[1].trim();
+        } else if (trimmedText.includes('```')) {
+          const match = trimmedText.match(/```\s*([\s\S]*?)\s*```/);
+          if (match) trimmedText = match[1].trim();
+        }
+
         if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
           console.log("🔧 Detected function call, parsing...");
           const functionCall = JSON.parse(trimmedText);

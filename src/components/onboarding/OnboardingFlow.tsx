@@ -247,24 +247,25 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
       {/* Footer Buttons */}
       <div className="p-8 flex gap-4 h-28">
-        {step > 0 && (
-          <>
-            <button 
-              onClick={handleBack}
-              className="flex-1 py-4 rounded-2xl bg-white/5 text-white font-bold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5" />
-              {t('common.back')}
-            </button>
-            <button 
-              onClick={handleNext}
-              className="flex-[2] py-4 rounded-2xl bg-primary text-white font-bold flex items-center justify-center gap-2 hover:bg-primary-dark transition-all active:scale-95 shadow-lg shadow-primary/20"
-            >
-              {step === 3 ? t('onboarding.go_to_chat') : t('common.continue')}
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </>
+        {step > 0 ? (
+          <button 
+            onClick={handleBack}
+            className="flex-1 py-4 rounded-2xl bg-white/5 text-white font-bold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+          >
+            <ChevronLeft className="w-5 h-5" />
+            {t('common.back')}
+          </button>
+        ) : (
+          <div className="flex-1" /> // Spacer to keep Next button right-aligned on step 0
         )}
+        
+        <button 
+          onClick={handleNext}
+          className="flex-[2] py-4 rounded-2xl bg-primary text-white font-bold flex items-center justify-center gap-2 hover:bg-primary-dark transition-all active:scale-95 shadow-lg shadow-primary/20"
+        >
+          {step === 3 ? t('onboarding.go_to_chat') : t('common.continue')}
+          <ChevronRight className="w-5 h-5" />
+        </button>
       </div>
     </div>
   );
