@@ -57,21 +57,22 @@ const requiredEnvVars = [
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
-// CRITICAL variables that will prevent server from starting
+// CRITICAL variables that should ideally be present
 const criticalVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
 const missingCritical = missingVars.filter(v => criticalVars.includes(v));
 
+// We collect errors but NO LONGER EXIT with process.exit(1) to avoid 503 errors on Hostinger
+// Instead, we will report the error via middleware and health check
+const envErrors: string[] = [];
+
 if (missingCritical.length > 0) {
-  console.error('❌ CRITICAL: Missing required environment variables:');
-  missingCritical.forEach(varName => console.error(`   - ${varName}`));
-  console.error('\nServer cannot start. Please check your .env file.');
-  process.exit(1);
+  const errorMsg = `❌ CRITICAL: Missing required environment variables: ${missingCritical.join(', ')}`;
+  envErrors.push(errorMsg);
+  console.error(errorMsg);
 }
 
-if (missingVars.length > 0) {
-  console.warn('⚠️  WARNING: Some optional variables are missing:');
-  missingVars.forEach(varName => console.warn(`   - ${varName}`));
-  console.warn('Server will start but some features may not work.\n');
+if (missingVars.length > 0 && envErrors.length === 0) {
+  console.warn('⚠️  WARNING: Some optional variables are missing: ' + missingVars.join(', '));
 }
 
 console.log('✅ All critical environment variables loaded successfully');
@@ -89,7 +90,15 @@ if (IS_PROD && process.env.NODE_ENV !== 'production') {
 console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 console.log(`📡 Port: ${PORT}`);
 
-const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET, 'salt', 32);
+// Safe initialization of encryption key
+let ENCRYPTION_KEY: Buffer;
+try {
+  const secret = process.env.SESSION_SECRET || 'mima-default-fallback-secret-32-chars-long';
+  ENCRYPTION_KEY = crypto.scryptSync(secret, 'salt', 32);
+} catch (err) {
+  console.error("❌ Failed to initialize encryption key:", err);
+  ENCRYPTION_KEY = Buffer.alloc(32, 'a'); // Last resort fallback
+}
 const IV_LENGTH = 16;
 
 function encrypt(text: string) {
@@ -112,6 +121,19 @@ function decrypt(text: string) {
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+
+// Panic middleware to catch configuration errors early
+app.use((req, res, next) => {
+  if (envErrors.length > 0 && req.path === '/') {
+    return res.status(503).json({
+      error: "Configuration Error",
+      message: "The server is running but some critical environment variables are missing.",
+      missing: missingCritical,
+      timestamp: new Date().toISOString()
+    });
+  }
+  next();
+});
 
 app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
@@ -137,7 +159,7 @@ app.use((req, res, next) => {
 
 // Session configuration optimized for Hostinger
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'mima-session-fallback-secret',
   resave: false,
   saveUninitialized: false,
   name: 'mima.session', // Specific cookie name to avoid conflicts
