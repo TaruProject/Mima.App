@@ -1,7 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// Helper to get Supabase client with latest environment variables
+function getSupabase() {
+  const url = process.env.VITE_SUPABASE_URL || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!url || !key) {
+    console.error('❌ Supabase configuration missing for UserPreferencesService');
+  }
+  return createClient(url, key);
+}
 
 /**
  * User Preferences Service
@@ -31,7 +38,7 @@ export interface ChatMessage {
 // Get user preferences
 export async function getUserPreferences(userId: string): Promise<UserPreferences | null> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     const { data, error } = await supabase
       .from('user_preferences')
       .select('*')
@@ -67,7 +74,7 @@ export async function updateUserPreferences(
   preferences: Partial<UserPreferences>
 ): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     
     const { error } = await supabase
       .from('user_preferences')
@@ -97,7 +104,7 @@ export async function getChatHistory(
   limit: number = 50
 ): Promise<ChatMessage[]> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
@@ -120,7 +127,7 @@ export async function getChatHistory(
 // Save chat message
 export async function saveChatMessage(message: ChatMessage): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     
     const { error } = await supabase
       .from('chat_messages')
@@ -145,7 +152,7 @@ export async function saveChatMessage(message: ChatMessage): Promise<boolean> {
 // Save multiple chat messages (for batch saves)
 export async function saveChatMessages(messages: ChatMessage[]): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     
     const messagesWithTimestamps = messages.map(msg => ({
       ...msg,
@@ -172,7 +179,7 @@ export async function saveChatMessages(messages: ChatMessage[]): Promise<boolean
 // Clear chat history for user
 export async function clearChatHistory(userId: string): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     
     const { error } = await supabase
       .from('chat_messages')
@@ -194,7 +201,7 @@ export async function clearChatHistory(userId: string): Promise<boolean> {
 // Delete old chat messages (keep only last N messages)
 export async function pruneOldMessages(userId: string, keepCount: number = 100): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabase();
     
     // Get IDs of messages to keep
     const { data: messagesToKeep } = await supabase

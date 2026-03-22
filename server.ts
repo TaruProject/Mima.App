@@ -1,6 +1,8 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import dotenv from "dotenv";
 import session from "express-session";
 import { google } from "googleapis";
 import path from "path";
@@ -21,8 +23,6 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-dotenv.config();
 
 // In-memory log store for debugging (works in Hostinger without file permissions)
 const oauthLogs: string[] = [];
@@ -78,8 +78,8 @@ if (missingVars.length > 0 && envErrors.length === 0) {
 console.log('✅ All critical environment variables loaded successfully');
 
 const app = express();
-// Port 3000 as fallback, but Hostinger often provides a port via env
-const PORT = Number(process.env.PORT) || 3000;
+// Port 3000 as fallback. Hostinger may provide a numeric port or a Unix Socket string.
+const PORT = process.env.PORT || 3000;
 
 // Determine environment - default to production if PORT is provided (likely hosting)
 const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.PORT;
@@ -2034,8 +2034,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Server listening on 0.0.0.0:${PORT}`);
+  // Use any to avoid TS overload confusion with numeric vs string (Unix socket) ports
+  app.listen(PORT as any, "0.0.0.0", () => {
+    console.log(`✅ Server listening on ${PORT}`);
     console.log('✨ Mima App ready for service');
   });
 }
