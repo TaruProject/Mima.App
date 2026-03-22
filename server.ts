@@ -77,7 +77,17 @@ if (missingVars.length > 0) {
 console.log('✅ All critical environment variables loaded successfully');
 
 const app = express();
-const PORT = 3000;
+// Port 3000 as fallback, but Hostinger often provides a port via env
+const PORT = Number(process.env.PORT) || 3000;
+
+// Determine environment - default to production if PORT is provided (likely hosting)
+const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.PORT;
+if (IS_PROD && process.env.NODE_ENV !== 'production') {
+  process.env.NODE_ENV = 'production';
+}
+
+console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📡 Port: ${PORT}`);
 
 const ENCRYPTION_KEY = crypto.scryptSync(process.env.SESSION_SECRET, 'salt', 32);
 const IV_LENGTH = 16;
@@ -1330,6 +1340,34 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   };
 }
 
+// Debug endpoint to check environment status (safe, no keys revealed)
+app.get("/api/debug/env-status", (req, res) => {
+  const status: Record<string, any> = {};
+  const requiredVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'GOOGLE_CLIENT_ID', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'APP_URL'];
+  
+  requiredVars.forEach(v => {
+    const val = process.env[v];
+    status[v] = {
+      exists: !!val,
+      length: val ? val.length : 0,
+      prefix: val ? val.substring(0, 4) + '...' : undefined
+    };
+  });
+
+  res.json({
+    node_env: process.env.NODE_ENV,
+    port: PORT,
+    vars: status,
+    timestamp: new Date().toISOString(),
+    static_dirs: {
+      dist: fs.existsSync(path.join(__dirname, "dist")),
+      public_html: fs.existsSync(path.join(__dirname, "public_html")),
+      cwd: process.cwd(),
+      dirname: __dirname
+    }
+  });
+});
+
 app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
   const { message, mode, language, history } = req.body;
   const user = (req as any).user;
@@ -1743,8 +1781,8 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
 // Helper function to get tokens from session or fallback to Supabase
 // Includes caching and timeout for better reliability
 async function getUserTokens(req: express.Request): Promise<any | null> {
-  // First, try to get tokens from session (fastest)
-  if (req.session.tokens) {
+  // First, try to get tokens from session (fastest) - with null safety
+  if (req.session?.tokens) {
     console.log("✅ Using tokens from session");
     return req.session.tokens;
   }
@@ -1929,18 +1967,32 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
 });
 
 async function startServer() {
+  console.log('🚀 Starting server sequence...');
+  
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    console.log('🛠️ Registering Vite middleware (DEVELOPMENT MODE)');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist", {
+    // Portability for Hostinger: search for static files in dist or public_html
+    const staticPath = fs.existsSync(path.join(__dirname, "dist")) 
+      ? "dist" 
+      : (fs.existsSync(path.join(__dirname, "public_html")) ? "public_html" : "dist");
+    
+    console.log(`📦 Serving static files from: ${path.resolve(__dirname, staticPath)}`);
+    
+    if (!fs.existsSync(path.resolve(__dirname, staticPath))) {
+      console.error(`❌ CRITICAL: Static folder '${staticPath}' not found at ${path.resolve(__dirname, staticPath)}`);
+    }
+
+    app.use(express.static(staticPath, {
       setHeaders: (res, filePath) => {
-        // Assets in dist/assets/* have content hashes and can be cached indefinitely
-        if (filePath.includes(path.join('dist', 'assets'))) {
+        // Assets in staticPath/assets/* have content hashes and can be cached indefinitely
+        if (filePath.includes(path.join(staticPath, 'assets'))) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         } 
         // index.html and sw.js should never be cached
@@ -1951,13 +2003,18 @@ async function startServer() {
     }));
     app.get("*", (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
+      const indexPath = path.resolve(__dirname, staticPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send("Error: index.html not found. Please run 'npm run build' first.");
+      }
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log('Server started successfully');
+    console.log(`✅ Server listening on 0.0.0.0:${PORT}`);
+    console.log('✨ Mima App ready for service');
   });
 }
 
