@@ -39,14 +39,16 @@ export default defineConfig(({ mode }) => {
           display: 'standalone',
           icons: [
             {
-              src: '/assets/logo.jpg',
+              src: '/logo.jpg',
               sizes: '192x192',
-              type: 'image/jpeg'
+              type: 'image/jpeg',
+              purpose: 'any maskable'
             },
             {
-              src: '/assets/logo.jpg',
+              src: '/logo.jpg',
               sizes: '512x512',
-              type: 'image/jpeg'
+              type: 'image/jpeg',
+              purpose: 'any maskable'
             }
           ]
         },

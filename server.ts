@@ -42,7 +42,10 @@ function logToFile(message: string, data?: any) {
   console.log(logEntry);
 }
 
-// Validate critical environment variables before starting
+// Environment variables validation - deferred until after dotenv loads completely
+let envValidationComplete = false;
+let envValidationResult = { valid: false, missing: [] as string[], critical: [] as string[] };
+
 const requiredEnvVars = [
   'SESSION_SECRET',
   'GEMINI_API_KEY',
@@ -55,27 +58,28 @@ const requiredEnvVars = [
   'APP_URL'
 ];
 
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
-// CRITICAL variables that should ideally be present
 const criticalVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
-const missingCritical = missingVars.filter(v => criticalVars.includes(v));
 
-// We collect errors but NO LONGER EXIT with process.exit(1) to avoid 503 errors on Hostinger
-// Instead, we will report the error via middleware and health check
-const envErrors: string[] = [];
+// Validate after a short delay to ensure dotenv has loaded completely
+setTimeout(() => {
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+  const missingCritical = missingVars.filter(v => criticalVars.includes(v));
 
-if (missingCritical.length > 0) {
-  const errorMsg = `❌ CRITICAL: Missing required environment variables: ${missingCritical.join(', ')}`;
-  envErrors.push(errorMsg);
-  console.error(errorMsg);
-}
+  envValidationResult = {
+    valid: missingCritical.length === 0,
+    missing: missingVars,
+    critical: missingCritical
+  };
+  envValidationComplete = true;
 
-if (missingVars.length > 0 && envErrors.length === 0) {
-  console.warn('⚠️  WARNING: Some optional variables are missing: ' + missingVars.join(', '));
-}
-
-console.log('✅ All critical environment variables loaded successfully');
+  if (missingCritical.length > 0) {
+    console.error('❌ CRITICAL: Missing required environment variables:', missingCritical.join(', '));
+  } else if (missingVars.length > 0) {
+    console.warn('⚠️  WARNING: Some optional variables are missing:', missingVars.join(', '));
+  } else {
+    console.log('✅ All environment variables loaded successfully');
+  }
+}, 100);
 
 const app = express();
 
@@ -85,14 +89,17 @@ app.get("/api/ping", (req, res) => res.status(200).send("pong"));
 // Port 3000 as fallback. Hostinger may provide a numeric port or a Unix Socket string.
 const PORT = process.env.PORT || 3000;
 
-// Determine environment - default to production if PORT is provided (likely hosting)
-const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.PORT;
-if (IS_PROD && process.env.NODE_ENV !== 'production') {
-  process.env.NODE_ENV = 'production';
-}
+// Determine environment explicitly
+const IS_HOSTINGER = !!process.env.HOSTINGER_ENV || !!process.env.HOSTINGER;
+const IS_PROD = process.env.NODE_ENV === 'production' || IS_HOSTINGER;
 
-console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`📡 Port: ${PORT}`);
+// Log environment detection
+console.log('🔍 Environment detection:', {
+  NODE_ENV: process.env.NODE_ENV || 'not set',
+  IS_HOSTINGER,
+  IS_PROD,
+  HAS_PORT: !!process.env.PORT
+});
 
 // Safe initialization of encryption key
 let ENCRYPTION_KEY: Buffer;
@@ -126,38 +133,26 @@ function decrypt(text: string) {
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 
-// Panic middleware to catch configuration errors early
-app.use((req, res, next) => {
-  if (envErrors.length > 0 && req.path === '/') {
-    return res.status(503).json({
-      error: "Configuration Error",
-      message: "The server is running but some critical environment variables are missing.",
-      missing: missingCritical,
-      timestamp: new Date().toISOString()
-    });
-  }
-  next();
-});
+// NOTE: Panic middleware removed - env validation now happens asynchronously
+// Errors are reported via /api/health and /api/health-detailed endpoints instead of 503
 
 app.use(express.json());
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
-// CSP headers - Allow eval for Google GenAI SDK and Google OAuth flow
+// CSP headers - Unified for all environments
 app.use((req, res, next) => {
-  // Only set CSP in production for security
-  if (process.env.NODE_ENV === 'production') {
-    res.setHeader(
-      'Content-Security-Policy',
-      "default-src 'self'; " +
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com; " +
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; " +
-      "font-src https://fonts.gstatic.com data:; " +
-      "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com; " +
-      "img-src 'self' data: https: blob:; " +
-      "worker-src 'self' blob:; " +
-      "frame-src 'self' https://accounts.google.com https://*.google.com;"
-    );
-  }
+  const cspDirectives = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
+    "img-src 'self' data: https: blob:",
+    "worker-src 'self' blob:",
+    "frame-src 'self' https://accounts.google.com https://*.google.com"
+  ];
+
+  res.setHeader('Content-Security-Policy', cspDirectives.join('; '));
   next();
 });
 
@@ -168,8 +163,8 @@ app.use(session({
   saveUninitialized: false,
   name: 'mima.session', // Specific cookie name to avoid conflicts
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Only require HTTPS in production
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: IS_PROD, // Require HTTPS in production
+    sameSite: IS_PROD ? 'none' : 'lax',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true // Security: prevent XSS access to cookie
   }
@@ -177,8 +172,8 @@ app.use(session({
 
 // Log session configuration on startup
 console.log('🔧 Session configuration:');
-console.log('   - Cookie secure:', true);
-console.log('   - Cookie sameSite: lax');
+console.log('   - Cookie secure:', IS_PROD);
+console.log('   - Cookie sameSite:', IS_PROD ? 'none' : 'lax');
 console.log('   - Cookie httpOnly: true');
 console.log('   - Trust proxy: enabled');
 
@@ -189,19 +184,36 @@ declare module 'express-session' {
   }
 }
 
-// Helper function to save session reliably - prevents race conditions
-async function saveSession(req: express.Request): Promise<void> {
-  return new Promise((resolve, reject) => {
-    req.session.save((err) => {
-      if (err) {
-        console.error('❌ Session save error:', err);
-        reject(err);
-      } else {
-        console.log('✅ Session saved successfully');
-        resolve();
+// Helper function to save session reliably with retries
+async function saveSession(req: express.Request, maxRetries = 3): Promise<void> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+      console.log(`✅ Session saved successfully (attempt ${attempt})`);
+      return; // Success
+    } catch (err: any) {
+      lastError = err;
+      console.error(`❌ Session save error (attempt ${attempt}/${maxRetries}):`, err.message);
+
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt)); // Staggered retry
       }
-    });
-  });
+    }
+  }
+
+  // All retries failed
+  console.error('❌ Session save failed after all retries');
+  throw lastError;
 }
 
 // Configure multer for memory storage
@@ -267,7 +279,7 @@ const getOAuth2Client = (req?: express.Request) => {
       // If not on custom domain, use APP_URL (preview)
       baseUrl = process.env.APP_URL || `https://${host}`;
     }
-  } else if (process.env.NODE_ENV !== 'production') {
+  } else if (!IS_PROD) {
     baseUrl = process.env.APP_URL || "http://localhost:3000";
   }
 
@@ -293,7 +305,9 @@ app.get("/api/health", (req, res) => {
       hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
       hasGeminiKey: !!process.env.GEMINI_API_KEY,
       appUrl: process.env.APP_URL,
-      nodeEnv: process.env.NODE_ENV
+      nodeEnv: process.env.NODE_ENV,
+      envValidationComplete,
+      envValidation: envValidationComplete ? envValidationResult : 'pending'
     }
   });
 });
@@ -320,22 +334,50 @@ app.get("/api/health-detailed", (req, res) => {
       hasSessionSecret: !!process.env.SESSION_SECRET,
       hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
       hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY,
-      hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      isHostinger: IS_HOSTINGER,
+      isProd: IS_PROD
+    },
+    envValidation: {
+      complete: envValidationComplete,
+      valid: envValidationResult.valid,
+      missing: envValidationResult.missing,
+      critical: envValidationResult.critical
     }
   };
-  
+
   // If Gemini failed, mark as degraded
   if (!geminiInitialized && geminiInitError) {
     healthData.status = "degraded";
   }
-  
+
+  // If env validation failed, mark as error
+  if (envValidationComplete && !envValidationResult.valid) {
+    healthData.status = "error";
+  }
+
   res.json(healthData);
 });
 
-// Simple health check for Gemini configuration
+// Environment variables status endpoint
+app.get("/api/health/env", (req, res) => {
+  res.json({
+    complete: envValidationComplete,
+    valid: envValidationResult.valid,
+    missing: envValidationResult.missing,
+    critical: envValidationResult.critical,
+    all: requiredEnvVars.map(v => ({
+      name: v,
+      present: !!process.env[v],
+      critical: criticalVars.includes(v)
+    }))
+  });
+});
+
+// Simple health check for Gemini configuration - Development only
 app.get("/api/test/gemini-config", (req, res) => {
   // Only allow in development
-  if (process.env.NODE_ENV === 'production') {
+  if (IS_PROD) {
     return res.status(403).json({
       error: "Endpoint disabled in production",
       message: "For security reasons, this endpoint is only available in development"
@@ -350,10 +392,10 @@ app.get("/api/test/gemini-config", (req, res) => {
   });
 });
 
-// Test endpoint for Gemini API - use this to verify the chat is working
+// Test endpoint for Gemini API - use this to verify the chat is working - Development only
 app.get("/api/test/gemini", async (req, res) => {
   // Only allow in development
-  if (process.env.NODE_ENV === 'production') {
+  if (IS_PROD) {
     return res.status(403).json({
       status: "error",
       message: "Endpoint disabled in production for security reasons"
@@ -442,7 +484,7 @@ app.get("/api/test/gemini", async (req, res) => {
 // Only available in development for security
 app.get("/api/debug/chat", async (req, res) => {
   // Only allow in development
-  if (process.env.NODE_ENV === 'production') {
+  if (IS_PROD) {
     return res.status(403).json({
       status: "error",
       message: "Endpoint disabled in production for security reasons"
@@ -1274,27 +1316,64 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
 let genAI: GoogleGenAI | null = null;
 let geminiInitialized = false;
 let geminiInitError: string | null = null;
+let geminiInitAttempts = 0;
+const MAX_INIT_ATTEMPTS = 3;
 
-function getGenAI(): GoogleGenAI {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      const errorMsg = "GEMINI_API_KEY is not configured";
-      console.error("❌ GEMINI INIT ERROR:", errorMsg);
-      geminiInitError = errorMsg;
-      throw new Error(errorMsg);
-    }
+async function initializeGeminiClient(): Promise<GoogleGenAI | null> {
+  if (genAI) return genAI; // Already initialized
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    geminiInitError = "GEMINI_API_KEY is not configured";
+    console.error("❌ GEMINI CONFIG ERROR:", geminiInitError);
+    return null;
+  }
+
+  // Retry with exponential backoff
+  for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt++) {
     try {
-      console.log("🔧 Initializing Gemini AI client...");
+      console.log(`🔧 Initializing Gemini AI client (attempt ${attempt}/${MAX_INIT_ATTEMPTS})...`);
       genAI = new GoogleGenAI({ apiKey });
+
+      // Verify initialization worked
+      if (!genAI) {
+        throw new Error("GoogleGenAI constructor returned null");
+      }
+
       geminiInitialized = true;
       geminiInitError = null;
       console.log("✅ Gemini AI client initialized successfully");
+      return genAI;
     } catch (error: any) {
-      const errorMsg = `Failed to initialize Gemini: ${error.message}`;
-      console.error("❌ GEMINI INIT ERROR:", errorMsg);
       geminiInitError = error.message;
-      throw error;
+      console.error(`❌ GEMINI INIT ERROR (attempt ${attempt}/${MAX_INIT_ATTEMPTS}):`, error.message);
+
+      if (attempt < MAX_INIT_ATTEMPTS) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s
+        console.log(`⏳ Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  // All attempts failed
+  console.error("❌ Gemini initialization failed after all attempts");
+  return null;
+}
+
+function getGenAI(): GoogleGenAI | null {
+  if (!genAI && !geminiInitError) {
+    // First call - try to initialize synchronously
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      geminiInitError = "GEMINI_API_KEY is not configured";
+      return null;
+    }
+    try {
+      genAI = new GoogleGenAI({ apiKey });
+      geminiInitialized = true;
+    } catch (error: any) {
+      geminiInitError = error.message;
     }
   }
   return genAI;
@@ -1302,13 +1381,8 @@ function getGenAI(): GoogleGenAI {
 
 // Pre-initialize Gemini on server start (optional health check)
 async function initializeGemini(): Promise<boolean> {
-  try {
-    getGenAI();
-    return true;
-  } catch (error: any) {
-    console.error("❌ Gemini initialization failed:", error.message);
-    return false;
-  }
+  const client = await initializeGeminiClient();
+  return client !== null;
 }
 
 const languageInstructions: Record<string, string> = {
@@ -1366,11 +1440,18 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   };
 }
 
-// Debug endpoint to check environment status (safe, no keys revealed)
+// Debug endpoint to check environment status (safe, no keys revealed) - Development only
 app.get("/api/debug/env-status", (req, res) => {
+  if (IS_PROD) {
+    return res.status(403).json({
+      error: "Endpoint disabled in production",
+      message: "For security reasons, this endpoint is only available in development"
+    });
+  }
+
   const status: Record<string, any> = {};
   const requiredVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'GOOGLE_CLIENT_ID', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'APP_URL'];
-  
+
   requiredVars.forEach(v => {
     const val = process.env[v];
     status[v] = {
@@ -1691,7 +1772,7 @@ Si NO es una petición de calendario, responde normalmente.` : '';
       console.error("   ⚠️  Quota exceeded");
     }
 
-    console.error("═══════════════════════════════════════════");
+    console.error("═══════════�����═══════════════════════════════");
 
     // Calculate request duration
     const duration = Date.now() - requestStart;
@@ -1994,9 +2075,9 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
 
 async function startServer() {
   console.log('🚀 Starting server sequence...');
-  
+
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!IS_PROD) {
     console.log('🛠️ Registering Vite middleware (DEVELOPMENT MODE)');
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -2005,15 +2086,37 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Portability for Hostinger: search for static files in dist or public_html
-    const staticPath = fs.existsSync(path.join(__dirname, "dist")) 
-      ? "dist" 
-      : (fs.existsSync(path.join(__dirname, "public_html")) ? "public_html" : "dist");
-    
-    console.log(`📦 Serving static files from: ${path.resolve(__dirname, staticPath)}`);
-    
-    if (!fs.existsSync(path.resolve(__dirname, staticPath))) {
-      console.error(`❌ CRITICAL: Static folder '${staticPath}' not found at ${path.resolve(__dirname, staticPath)}`);
+    // Portability for Hostinger: determine correct static path
+    let staticPath: string;
+    const possiblePaths = [
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, 'public_html'),
+      path.join(__dirname, '../public_html'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'public_html'),
+    ];
+
+    // Find first existing path
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        staticPath = p;
+        console.log(`✅ Found static folder at: ${p}`);
+        break;
+      }
+    }
+
+    // Fallback to dist with absolute path
+    if (!staticPath) {
+      staticPath = path.join(process.cwd(), 'dist');
+      console.warn(`⚠️  No static folder found, using fallback: ${staticPath}`);
+    }
+
+    console.log(`📦 Serving static files from: ${staticPath}`);
+
+    if (!fs.existsSync(staticPath)) {
+      console.error(`❌ CRITICAL: Static folder not found at ${staticPath}`);
+      console.error(`   Checked paths: ${possiblePaths.join(', ')}`);
     }
 
     app.use(express.static(staticPath, {
@@ -2021,16 +2124,17 @@ async function startServer() {
         // Assets in staticPath/assets/* have content hashes and can be cached indefinitely
         if (filePath.includes(path.join(staticPath, 'assets'))) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        } 
+        }
         // index.html and sw.js should never be cached
         else if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
       }
     }));
+
     app.get("*", (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      const indexPath = path.resolve(__dirname, staticPath, "index.html");
+      const indexPath = path.resolve(staticPath, "index.html");
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
