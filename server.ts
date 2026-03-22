@@ -1576,6 +1576,44 @@ IMPORTANTE: Si el usuario dice "elimina mi reunión de mañana", PRIMERO busca c
 Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO con el JSON de la herramienta, sin texto adicional.
 Si NO es una petición de calendario, responde normalmente.` : '';
 
+    // GMAIL TOOLS INSTRUCTIONS for function calling
+    const gmailToolsInstruction = userId ? `
+
+GMAIL TOOLS (BORRADORES SEGUROS):
+Tienes acceso a Gmail del usuario. IMPORTANTE: NUNCA envíes emails automáticamente. Siempre crea borradores que el usuario debe revisar y aprobar antes de enviar.
+
+Para leer un email completo (cuando el usuario quiere ver el contenido):
+{"tool": "readGmailMessage", "messageId": "id_del_email"}
+
+Para crear un borrador de respuesta (SAFE - no se envía):
+{"tool": "createGmailDraft", "to": "email@ejemplo.com", "subject": "Re: Asunto original", "body": "<p>Cuerpo del email en HTML</p>", "inReplyTo": "message-id-original", "threadId": "thread-id-opcional"}
+
+Para ver lista de borradores existentes:
+{"tool": "listGmailDrafts"}
+
+Para eliminar un borrador:
+{"tool": "deleteGmailDraft", "draftId": "id_del_borrador"}
+
+Para ENVIAR un borrador (SOLO con confirmación explícita del usuario):
+{"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
+
+REGLAS IMPORTANTES DE GMAIL:
+1. NUNCA envíes emails sin confirmación explícita del usuario
+2. Siempre crea borradores primero
+3. Cuando el usuario diga "responde este email", crea un borrador y dile que lo revise
+4. El borrador se envía SOLO si el usuario dice explícitamente "envía el borrador" o "sí, envíalo"
+5. Usa HTML simple en el cuerpo (<p>, <br>, <b>, etc.)
+6. Para respuestas, usa "Re: " en el asunto y mantén el threadId original
+
+EJEMPLO DE FLUJO SEGURO:
+Usuario: "Responde este email diciendo que estaré allí"
+Tú: {"tool": "createGmailDraft", "to": "persona@ejemplo.com", "subject": "Re: Reunión", "body": "<p>Hola,<br>Estaré allí. Saludos.</p>", "inReplyTo": "message-id-original"}
+Tú (después): "He creado un borrador. ¿Quieres que lo envíe?"
+Usuario: "Sí, envíalo"
+Tú: {"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
+
+Si NO es una petición de Gmail, responde normalmente.` : '';
+
     // CRITICAL: Explicit system prompt with language enforcement
     const systemInstruction = `${modeInstruction}\n\n${langInstruction}\n\n${calendarToolsInstruction}\n\n` +
       `STRICT INSTRUCTIONS:\n` +
@@ -1743,12 +1781,146 @@ Si NO es una petición de calendario, responde normalmente.` : '';
                 const updatedEvent = await updateCalendarEvent(userTokens, functionCall.eventId, updates);
                 responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
               }
+
+              // GMAIL TOOLS EXECUTION
+              else if (functionCall.tool === 'readGmailMessage') {
+                try {
+                  console.log("   Reading Gmail message:", functionCall.messageId);
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(userTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const message = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: functionCall.messageId,
+                    format: 'full'
+                  });
+
+                  const headers = message.data.payload?.headers || [];
+                  const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+                  const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+                  const date = headers.find(h => h.name === 'Date')?.value || '';
+                  const bodyText = extractBody(message.data.payload);
+
+                  responseText = `📧 Email de: ${from}\nAsunto: ${subject}\nFecha: ${date}\n\n${bodyText.substring(0, 500)}${bodyText.length > 500 ? '...' : ''}`;
+                  console.log("   Message read successfully");
+                } catch (error: any) {
+                  console.error("   Error reading message:", error.message);
+                  responseText = "No pude leer ese email. Asegúrate de que el ID sea correcto.";
+                }
+              }
+              else if (functionCall.tool === 'createGmailDraft') {
+                try {
+                  console.log("   Creating Gmail draft...");
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(userTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const raw = createEmailMessage(
+                    functionCall.to,
+                    functionCall.subject,
+                    functionCall.body,
+                    functionCall.inReplyTo,
+                    functionCall.threadId
+                  );
+
+                  const draft = await gmail.users.drafts.create({
+                    userId: 'me',
+                    requestBody: {
+                      message: { raw }
+                    }
+                  });
+
+                  responseText = `📝 Borrador creado exitosamente.\nPara: ${functionCall.to}\nAsunto: ${functionCall.subject}\n\nEl borrador está guardado. ¿Quieres que lo envíe o prefieres revisarlo primero?`;
+                  console.log("   Draft created:", draft.data.id);
+                } catch (error: any) {
+                  console.error("   Error creating draft:", error.message);
+                  responseText = "No pude crear el borrador. Verifica los datos e intenta de nuevo.";
+                }
+              }
+              else if (functionCall.tool === 'listGmailDrafts') {
+                try {
+                  console.log("   Listing Gmail drafts...");
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(userTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const response = await gmail.users.drafts.list({
+                    userId: 'me',
+                    maxResults: 10
+                  });
+
+                  if (!response.data.drafts || response.data.drafts.length === 0) {
+                    responseText = "📋 No tienes borradores guardados.";
+                  } else {
+                    const draftsList = response.data.drafts.map((d: any, i: number) =>
+                      `${i + 1}. ID: ${d.id}`
+                    ).join('\n');
+                    responseText = `📋 Borradores existentes:\n${draftsList}\n\n¿Quieres que envíe, edite o elimine alguno?`;
+                  }
+                } catch (error: any) {
+                  console.error("   Error listing drafts:", error.message);
+                  responseText = "No pude listar los borradores. Intenta de nuevo.";
+                }
+              }
+              else if (functionCall.tool === 'deleteGmailDraft') {
+                try {
+                  console.log("   Deleting Gmail draft:", functionCall.draftId);
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(userTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  await gmail.users.drafts.delete({
+                    userId: 'me',
+                    id: functionCall.draftId
+                  });
+
+                  responseText = `🗑️ Borrador eliminado exitosamente.`;
+                  console.log("   Draft deleted");
+                } catch (error: any) {
+                  console.error("   Error deleting draft:", error.message);
+                  responseText = "No pude eliminar el borrador. Verifica el ID e intenta de nuevo.";
+                }
+              }
+              else if (functionCall.tool === 'sendGmailDraft') {
+                // CRITICAL: Require explicit confirmation
+                if (!functionCall.confirmSend) {
+                  responseText = "⚠️ Para enviar el borrador necesito tu confirmación explícita. Por favor di 'sí, envía el borrador' o 'confirmo que quiero enviar este email'.";
+                  console.log("   Send rejected - no confirmation");
+                } else {
+                  try {
+                    console.log("   Sending Gmail draft:", functionCall.draftId);
+                    const oauth2Client = getOAuth2Client();
+                    oauth2Client.setCredentials(userTokens);
+                    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                    const sent = await gmail.users.drafts.send({
+                      userId: 'me',
+                      requestBody: {
+                        id: functionCall.draftId
+                      }
+                    });
+
+                    // Delete draft after sending
+                    await gmail.users.drafts.delete({
+                      userId: 'me',
+                      id: functionCall.draftId
+                    }).catch(() => {});
+
+                    responseText = `🚀 Email enviado exitosamente.`;
+                    console.log("   Email sent:", sent.data.id);
+                  } catch (error: any) {
+                    console.error("   Error sending draft:", error.message);
+                    responseText = "No pude enviar el email. Verifica el borrador e intenta de nuevo.";
+                  }
+                }
+              }
             }
           }
         }
       } catch (functionError: any) {
         console.error("❌ Function call error:", functionError.message);
-        responseText = "Hubo un problema al procesar tu solicitud de calendario. Por favor, intenta de nuevo.";
+        responseText = "Hubo un problema al procesar tu solicitud. Por favor, intenta de nuevo.";
       }
     }
 
@@ -2072,6 +2244,453 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
+
+// ---- Gmail Message Full Content Endpoint ----
+
+// Get full message content by ID
+app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) => {
+  console.log("📧 Gmail message details request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const { id } = req.params;
+    console.log(`📧 Fetching message ${id}...`);
+
+    const message = await gmail.users.messages.get({
+      userId: 'me',
+      id,
+      format: 'full'
+    });
+
+    const headers = message.data.payload?.headers || [];
+    const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+    const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+    const to = headers.find(h => h.name === 'To')?.value || '';
+    const date = headers.find(h => h.name === 'Date')?.value || '';
+    const messageId = headers.find(h => h.name === 'Message-ID')?.value || '';
+
+    // Extract body content
+    let bodyText = '';
+    let bodyHtml = '';
+
+    // Try to get body from parts
+    if (message.data.payload?.parts) {
+      for (const part of message.data.payload.parts) {
+        if (part.mimeType === 'text/plain' && part.body?.data) {
+          bodyText = Buffer.from(part.body.data, 'base64').toString('utf-8');
+        } else if (part.mimeType === 'text/html' && part.body?.data) {
+          bodyHtml = Buffer.from(part.body.data, 'base64').toString('utf-8');
+        }
+      }
+    }
+
+    // If no parts, try main body
+    if (!bodyText && !bodyHtml && message.data.payload?.body?.data) {
+      const decoded = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
+      bodyText = decoded;
+    }
+
+    // Get attachments info
+    const attachments = [];
+    if (message.data.payload?.parts) {
+      for (const part of message.data.payload.parts) {
+        if (part.filename && part.filename.length > 0) {
+          attachments.push({
+            filename: part.filename,
+            mimeType: part.mimeType,
+            size: part.body?.size || 0
+          });
+        }
+      }
+    }
+
+    // Get thread ID for conversation context
+    const threadId = message.data.threadId || '';
+
+    res.json({
+      id,
+      threadId,
+      subject,
+      from,
+      to,
+      date,
+      messageId,
+      bodyText,
+      bodyHtml: bodyHtml || bodyText, // Fallback to text if no HTML
+      snippet: message.data.snippet || '',
+      attachments,
+      labels: message.data.labelIds || []
+    });
+  } catch (error: any) {
+    console.error("❌ Error fetching Gmail message:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// ---- Gmail Draft Endpoints ----
+
+// Create a draft (SAFE - does not send)
+app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
+  console.log("📝 Gmail create draft request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  const { to, subject, body, inReplyTo, threadId } = req.body;
+
+  // Validate required fields
+  if (!to || !subject || !body) {
+    return res.status(400).json({
+      error: "Missing required fields",
+      required: ['to', 'subject', 'body'],
+      errorCode: "MISSING_FIELDS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Create raw RFC 2822 message
+    const raw = createEmailMessage(to, subject, body, inReplyTo, threadId);
+
+    console.log("📝 Creating draft...");
+    const draft = await gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: {
+          raw
+        }
+      }
+    });
+
+    console.log(`✅ Draft created: ${draft.data.id}`);
+    res.json({
+      id: draft.data.id,
+      messageId: draft.data.message?.id,
+      threadId: draft.data.message?.threadId,
+      status: 'draft_created',
+      message: 'Borrador creado exitosamente. Revisa y envía cuando estés listo.'
+    });
+  } catch (error: any) {
+    console.error("❌ Error creating draft:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// List all drafts
+app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
+  console.log("📋 Gmail list drafts request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const response = await gmail.users.drafts.list({
+      userId: 'me',
+      maxResults: 20
+    });
+
+    const drafts = [];
+    if (response.data.drafts) {
+      for (const draft of response.data.drafts) {
+        // Get full message details for each draft
+        const message = await gmail.users.drafts.get({
+          userId: 'me',
+          id: draft.id!
+        });
+
+        const headers = message.data.message?.payload?.headers || [];
+        drafts.push({
+          draftId: draft.id,
+          messageId: message.data.message?.id,
+          threadId: message.data.message?.threadId,
+          subject: headers.find(h => h.name === 'Subject')?.value || 'No Subject',
+          to: headers.find(h => h.name === 'To')?.value || '',
+          from: headers.find(h => h.name === 'From')?.value || '',
+          date: headers.find(h => h.name === 'Date')?.value || '',
+          snippet: message.data.message?.snippet || ''
+        });
+      }
+    }
+
+    res.json(drafts);
+  } catch (error: any) {
+    console.error("❌ Error listing drafts:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// Get a specific draft
+app.get("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
+  console.log("📋 Gmail get draft request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const { id } = req.params;
+    const draft = await gmail.users.drafts.get({
+      userId: 'me',
+      id
+    });
+
+    const headers = draft.data.message?.payload?.headers || [];
+    const bodyText = extractBody(draft.data.message?.payload);
+
+    res.json({
+      draftId: draft.data.id,
+      messageId: draft.data.message?.id,
+      threadId: draft.data.message?.threadId,
+      subject: headers.find(h => h.name === 'Subject')?.value || 'No Subject',
+      to: headers.find(h => h.name === 'To')?.value || '',
+      from: headers.find(h => h.name === 'From')?.value || '',
+      date: headers.find(h => h.name === 'Date')?.value || '',
+      bodyText,
+      snippet: draft.data.message?.snippet || ''
+    });
+  } catch (error: any) {
+    console.error("❌ Error getting draft:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// Update a draft
+app.put("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
+  console.log("✏️ Gmail update draft request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  const { id } = req.params;
+  const { to, subject, body, threadId } = req.body;
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Create raw RFC 2822 message
+    const raw = createEmailMessage(to, subject, body, null, threadId);
+
+    const updated = await gmail.users.drafts.update({
+      userId: 'me',
+      id,
+      requestBody: {
+        id,
+        message: {
+          raw
+        }
+      }
+    });
+
+    res.json({
+      id: updated.data.id,
+      messageId: updated.data.message?.id,
+      threadId: updated.data.message?.threadId,
+      status: 'draft_updated',
+      message: 'Borrador actualizado exitosamente.'
+    });
+  } catch (error: any) {
+    console.error("❌ Error updating draft:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// Send a draft (REQUIRES EXPLICIT USER CONFIRMATION)
+app.post("/api/gmail/drafts/:id/send", authenticateSupabaseUser, async (req, res) => {
+  console.log("🚀 Gmail send draft request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  const { id } = req.params;
+  const { confirmSend } = req.body;
+
+  // CRITICAL: Require explicit confirmation
+  if (!confirmSend) {
+    return res.status(400).json({
+      error: "Explicit confirmation required",
+      message: "Debes confirmar explícitamente que deseas enviar este email. Incluye { confirmSend: true } en el request.",
+      errorCode: "CONFIRMATION_REQUIRED"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    console.log(`🚀 Sending draft ${id}...`);
+
+    // Send the draft
+    const sent = await gmail.users.drafts.send({
+      userId: 'me',
+      requestBody: {
+        id
+      }
+    });
+
+    // Optionally delete the draft after sending
+    await gmail.users.drafts.delete({
+      userId: 'me',
+      id
+    }).catch(() => {
+      // Ignore delete errors
+    });
+
+    console.log(`✅ Email sent: ${sent.data.id}`);
+    res.json({
+      id: sent.data.id,
+      threadId: sent.data.threadId,
+      status: 'email_sent',
+      message: 'Email enviado exitosamente.'
+    });
+  } catch (error: any) {
+    console.error("❌ Error sending draft:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// Delete a draft
+app.delete("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
+  console.log("🗑️ Gmail delete draft request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const { id } = req.params;
+    await gmail.users.drafts.delete({
+      userId: 'me',
+      id
+    });
+
+    console.log(`✅ Draft deleted: ${id}`);
+    res.json({
+      id,
+      status: 'draft_deleted',
+      message: 'Borrador eliminado exitosamente.'
+    });
+  } catch (error: any) {
+    console.error("❌ Error deleting draft:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+// Helper function to create RFC 2822 email message
+function createEmailMessage(to: string, subject: string, body: string, inReplyTo?: string, threadId?: string): string {
+  const lineBreak = '\r\n';
+
+  let headers = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset="UTF-8"`,
+    `Content-Transfer-Encoding: 7bit`
+  ];
+
+  // Add In-Reply-To header for threading
+  if (inReplyTo) {
+    headers.push(`In-Reply-To: ${inReplyTo}`);
+    headers.push(`References: ${inReplyTo}`);
+  }
+
+  // Add thread ID header if provided
+  if (threadId) {
+    headers.push(`X-GM-THREAD-ID: ${threadId}`);
+  }
+
+  const message = [
+    ...headers,
+    '',
+    body
+  ].join(lineBreak);
+
+  // Base64 encode the message
+  return Buffer.from(message)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// Helper function to extract body from message payload
+function extractBody(payload: any): string {
+  if (!payload) return '';
+
+  // Try parts first
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+      } else if (part.mimeType === 'text/html' && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+      }
+    }
+  }
+
+  // Try main body
+  if (payload.body?.data) {
+    return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+  }
+
+  return '';
+}
 
 async function startServer() {
   console.log('🚀 Starting server sequence...');
