@@ -2036,8 +2036,7 @@ async function startServer() {
 
   // Use any to avoid TS overload confusion with numeric vs string (Unix socket) ports
   app.listen(PORT as any, "0.0.0.0", () => {
-    console.log(`✅ Server listening on ${PORT}`);
-    console.log('✨ Mima App ready for service');
+    console.log(`✅ Server running on port ${PORT}`);
   });
 }
 

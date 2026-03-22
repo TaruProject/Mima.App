@@ -2,12 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 
 // Helper to get Supabase client with latest environment variables
 function getSupabase() {
-  const url = process.env.VITE_SUPABASE_URL || '';
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!url || !key) {
-    console.error('❌ Supabase configuration missing for UserPreferencesService');
-  }
-  return createClient(url, key);
+  return createClient(
+    process.env.VITE_SUPABASE_URL || '',
+    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  );
 }
 
 /**
