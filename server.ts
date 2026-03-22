@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
-import { createServer as createViteServer } from "vite";
+// Vite is imported dynamically in startServer() to save memory in production
 import session from "express-session";
 import { google } from "googleapis";
 import path from "path";
@@ -78,6 +78,10 @@ if (missingVars.length > 0 && envErrors.length === 0) {
 console.log('✅ All critical environment variables loaded successfully');
 
 const app = express();
+
+// Immediate ping endpoint before anything else can fail
+app.get("/api/ping", (req, res) => res.status(200).send("pong"));
+
 // Port 3000 as fallback. Hostinger may provide a numeric port or a Unix Socket string.
 const PORT = process.env.PORT || 3000;
 
@@ -1994,6 +1998,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     console.log('🛠️ Registering Vite middleware (DEVELOPMENT MODE)');
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -2034,10 +2039,28 @@ async function startServer() {
     });
   }
 
-  // Use any to avoid TS overload confusion with numeric vs string (Unix socket) ports
-  app.listen(PORT as any, "0.0.0.0", () => {
-    console.log(`✅ Server running on port ${PORT}`);
+  // Simple listen: Express/Node will auto-detect if PORT is a string (socket) or number (TCP)
+  // Providing "0.0.0.0" can break Unix Sockets on some hosting providers
+  app.listen(PORT as any, () => {
+    console.log(`✅ Server running on ${PORT}`);
   });
 }
 
-startServer();
+// Global error handlers to prevent silent 503s
+process.on('uncaughtException', (err) => {
+  const errorMsg = `🔥 UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`;
+  console.error(errorMsg);
+  logToFile("UNCAUGHT EXCEPTION", { message: err.message, stack: err.stack });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const errorMsg = `🔥 UNHANDLED REJECTION: ${reason}`;
+  console.error(errorMsg);
+  logToFile("UNHANDLED REJECTION", { reason: String(reason) });
+});
+
+console.log('🚀 Finalizing server initialization...');
+startServer().catch(err => {
+  console.error("🔥 CRITICAL SERVER STARTUP FAILURE:", err);
+  logToFile("CRITICAL STARTUP ERROR", { message: err.message, stack: err.stack });
+});
