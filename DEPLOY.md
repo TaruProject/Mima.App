@@ -1,126 +1,103 @@
-# Guía de Deploy a Hostinger
+# Guia de deploy a Hostinger
 
-## Archivos Necesarios
+## Estrategia soportada
 
-### 1. Archivos del Frontend (dist/)
-Subir todo el contenido de la carpeta `dist/` al directorio `public_html/` de Hostinger:
+La app se despliega en dos partes:
 
-```
-public_html/
-├── .htaccess          # Configuración Apache para SPA
-├── index.html         # Entry point de la aplicación
-├── manifest.webmanifest
-├── sw.js
-├── workbox-*.js
-└── assets/
-    ├── index-*.js
-    ├── index-*.css
-    └── workbox-window.prod.es5-*.js
-```
+1. `public_html/` contiene el frontend compilado (`dist/`).
+2. La raiz del dominio contiene el backend compilado (`dist-server/`), `app.js`, `package.json`, `.env` y `node_modules/`.
 
-### 2. Backend (Node.js)
-Subir estos archivos al directorio raíz (fuera de public_html) o a una carpeta como `api/`:
+`app.js` es el bootstrap que Passenger debe arrancar. Primero intenta cargar `dist-server/server.js` y solo usa `tsx server.ts` como fallback de emergencia.
 
-```
-~/ (raíz del hosting)
-├── server.ts          # Código fuente del servidor
-├── package.json       # Dependencias
-├── package-lock.json
-├── node_modules/      # Instalado en el servidor
-└── .env               # Variables de entorno (VER ABAJO)
-```
-
-## Variables de Entorno (.env)
-
-Crear archivo `.env` en el servidor con:
+## Build local recomendado
 
 ```bash
-# Server
-SESSION_SECRET=tu_secreto_aleatorio_32_chars
+npm install
+npm run build
+```
+
+Eso genera:
+
+- `dist/` para el frontend
+- `dist-server/` para el backend
+
+## Archivos a subir
+
+### En la raiz del dominio
+
+```text
+/home/u482312211/domains/me.mima-app.com/
+  app.js
+  package.json
+  package-lock.json
+  .env
+  dist-server/
+  node_modules/
+```
+
+### En `public_html/`
+
+Sube el contenido de `dist/` junto con `.htaccess`.
+
+## Variables de entorno
+
+```bash
 NODE_ENV=production
 APP_URL=https://me.mima-app.com
+SESSION_SECRET=tu_secreto_aleatorio_32_chars
 
-# Gemini AI
 GEMINI_API_KEY=tu_api_key_de_google_ai
 
-# Google OAuth
 GOOGLE_CLIENT_ID=tu_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=tu_client_secret
 
-# ElevenLabs TTS
 ELEVENLABS_API_KEY=tu_api_key_elevenlabs
 
-# Supabase
 VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=tu_anon_key
 SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key
 ```
 
-## Instrucciones de Deploy
+## Configuracion de Hostinger
 
-### Paso 1: Subir archivos
-1. Subir contenido de `dist/` a `public_html/`
-2. Subir `server.ts`, `package.json`, `package-lock.json` a raíz
+La configuracion de Passenger debe apuntar a:
 
-### Paso 2: Instalar dependencias en Hostinger
-```bash
-cd ~/
-npm install --production
-```
+- `PassengerAppRoot /home/u482312211/domains/me.mima-app.com`
+- `PassengerStartupFile app.js`
 
-### Paso 3: Compilar TypeScript
-```bash
-npx tsc server.ts --outDir dist-server --esModuleInterop --target ES2022 --module commonjs --moduleResolution node
-```
+El `.htaccess` del repo ya viene preparado para esto.
 
-### Paso 4: Iniciar servidor con PM2
-```bash
-npm install -g pm2
-pm2 start dist-server/server.js --name "mima-app"
-pm2 save
-pm2 startup
-```
+## Base de datos
 
-### Paso 5: Configurar dominio
-Asegurar que `me.mima-app.com` apunte al servidor de Hostinger.
+Aplica las migraciones de `supabase/migrations/` antes del deploy productivo. La app necesita:
 
-## Funcionalidades Implementadas
+- `profiles`
+- `user_preferences`
+- `chat_messages`
+- `user_google_tokens`
 
-### Fase 1 ✅
-- ✅ Modelo Gemini corregido (gemini-1.5-flash-latest)
-- ✅ Enrutador inteligente Flash/Pro según complejidad
-- ✅ Respuestas en idioma del usuario (fi/sv/es/en)
-- ✅ Mensajes de error localizados
+## Checklist de validacion
 
-### Fase 2 ✅ (Function Calling)
-- ✅ Crear eventos: "Crea una reunión mañana a las 3pm"
-- ✅ Listar eventos: "Qué tengo esta semana?"
-- ✅ Buscar eventos: "Busca mis reuniones" 
-- ✅ Eliminar eventos: "Elimina mi reunión de mañana"
-- ✅ Actualizar eventos: "Mueve mi reunión al martes"
-
-## Testing Post-Deploy
-
-1. **Chat básico**: "Hola, ¿cómo estás?"
-2. **Idioma**: Verificar respuesta en español/finlandés
-3. **Calendario - Crear**: "Crea un evento llamado Test mañana a las 5pm"
-4. **Calendario - Listar**: "Muéstrame mis eventos de hoy"
-5. **Calendario - Buscar**: "Busca eventos con la palabra reunión"
-6. **Business Mode**: "Analiza mi productividad" (debe usar Pro model)
+1. `GET /api/health`
+2. `GET /api/health-detailed`
+3. Login con Supabase
+4. Guardado de perfil
+5. Conectar Google Calendar / Gmail
+6. Enviar un mensaje al chat
 
 ## Troubleshooting
 
-### Error 500 en API
-```bash
-pm2 logs mima-app
-```
+### 503 al arrancar
 
-### Problemas de OAuth
-Verificar que las URIs de redirección estén registradas en Google Cloud Console:
+Verifica que exista `dist-server/server.js` en la raiz del dominio y que Passenger este arrancando `app.js`.
+
+### OAuth de Google
+
+Las redirect URIs deben incluir:
+
 - `https://me.mima-app.com/api/auth/callback/google`
+- `https://me.mima-app.com/auth/callback/google`
 
-### Problemas de CORS
-Verificar que APP_URL coincida exactamente con el dominio usado.
+### Frontend carga pero la API no responde
 
-### Calendario no funciona
-El usuario debe conectar Google Calendar primero en la sección Calendar.
+Confirma que `.htaccess` no este reescribiendo rutas `/api/*` a `index.html`.

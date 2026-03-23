@@ -1,5 +1,7 @@
 {
   "onboarding": {
+    "language_title": "Elige tu idioma",
+    "language_subtitle": "Selecciona el idioma de la interfaz de Mima",
     "step_language": "Elige tu idioma",
     "step_voice": "Elige la voz de Mima",
     "step_permissions": "Permisos",
@@ -40,8 +42,13 @@
     "title": "Perfil",
     "full_name": "Nombre Completo",
     "username": "Nombre de Usuario",
+    "username_placeholder": "usuario",
     "email_readonly": "Email (Solo lectura)",
     "interface_language": "Idioma de Interfaz",
+    "language_option_en": "🇺🇸 English",
+    "language_option_es": "🇪🇸 Español",
+    "language_option_fi": "🇫🇮 Suomi",
+    "language_option_sv": "🇸🇪 Svenska",
     "voice_title": "Voz de Mima",
     "voice_subtitle": "Elige cómo te habla tu asistente",
     "voice_updated": "Voz actualizada ✓",
@@ -83,7 +90,10 @@
     "sign_in_subtitle": "Ingresa tus datos para acceder a Mima.",
     "sign_up_subtitle": "Regístrate para empezar con tu asistente de IA.",
     "email": "Correo electrónico",
+    "email_placeholder": "tu@ejemplo.com",
     "password": "Contraseña",
+    "password_placeholder": "••••••••",
+    "loading": "...",
     "sign_in": "Iniciar Sesión",
     "sign_up": "Registrarse",
     "no_account": "¿No tienes cuenta?",
@@ -128,6 +138,16 @@
     "title": "Actualización obligatoria\ndisponible",
     "description": "Un parche de seguridad crítico y nuevas funciones están listos. Actualiza para seguir usando Mima.",
     "button": "Actualizar"
+  },
+  "google_callback": {
+    "processing_title": "Conectando...",
+    "processing_description": "Espera mientras completamos la autenticación.",
+    "success_title": "¡Éxito!",
+    "success_description": "¡La cuenta de Google se conectó correctamente!",
+    "error_title": "Conexión fallida",
+    "redirecting": "Redirigiendo...",
+    "no_code": "No se recibió el código de autorización.",
+    "auth_failed": "La autenticación falló."
   },
   "accessibility": {
     "close_notification": "Cerrar notificación"

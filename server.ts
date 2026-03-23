@@ -19,7 +19,7 @@ import {
   getChatHistory,
   saveChatMessage,
   clearChatHistory
-} from "./src/services/userPreferencesService";
+} from "./src/services/userPreferencesService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

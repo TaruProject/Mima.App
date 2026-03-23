@@ -1,86 +1,78 @@
-import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { useToast } from '../hooks/useToast';
-import { generateSpeech } from '../services/geminiService';
-import { LogOut, User, Settings, Shield, Bell, Camera, Check, Loader2, Globe, Volume2, Play, Square } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useTranslation } from 'react-i18next';
-import { voices } from '../constants/voices';
-import { useAudioPlayback } from '../hooks/useAudioPlayback';
+import { useEffect, useState } from "react";
+import { LogOut, Settings, Camera, Check, Loader2, Globe, Volume2, Play, Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../hooks/useToast";
+import { supabase } from "../lib/supabase";
+import { voices } from "../constants/voices";
+import { useAudioPlayback } from "../hooks/useAudioPlayback";
 
 export default function Profile() {
   const { t, i18n } = useTranslation();
   const { user, signOut } = useAuth();
   const { showToast } = useToast();
+  const { play: playAudio, stop: stopAudio, isPlaying: isAudioPlaying, cleanup: cleanupAudio } = useAudioPlayback();
 
-  const [fullName, setFullName] = useState("Mima User");
-  const [username, setUsername] = useState("mima_user");
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
   const [language, setLanguage] = useState(i18n.language);
   const [voiceId, setVoiceId] = useState(voices[0].id);
-
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
-  
-  const { play: playAudio, stop: stopAudio, isPlaying: isAudioPlaying, cleanup: cleanupAudio } = useAudioPlayback();
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
-
-  // Initial values to track changes
   const [initialValues, setInitialValues] = useState({
-    fullName: "Mima User",
-    username: "mima_user",
-    language: i18n.language
+    fullName: "",
+    username: "",
+    language: i18n.language,
+    voiceId: voices[0].id,
   });
 
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-
-  // Load profile and preferences from Supabase
   useEffect(() => {
     const loadProfile = async () => {
       if (!user) return;
-      try {
-        // Load profile
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
 
-        if (error && error.code !== 'PGRST116') {
-          console.error('Error loading profile:', error);
+      try {
+        const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+
+        if (error && error.code !== "PGRST116") {
+          console.error("Error loading profile:", error);
           return;
         }
 
-        if (data) {
-          const loadedName = data.name || "Mima User";
-          const loadedUsername = data.username || "mima_user";
-          const loadedLang = data.language || i18n.language;
-          const loadedVoice = data.voice_id || voices[0].id;
+        const loadedName = data?.name || "";
+        const loadedUsername = data?.username || "";
+        const loadedLang = data?.language || i18n.language;
+        const loadedVoice = data?.voice_id || voices[0].id;
 
-          setFullName(loadedName);
-          setUsername(loadedUsername);
-          setLanguage(loadedLang);
-          setVoiceId(loadedVoice);
+        setFullName(loadedName);
+        setUsername(loadedUsername);
+        setLanguage(loadedLang);
+        setVoiceId(loadedVoice);
+        setInitialValues({
+          fullName: loadedName,
+          username: loadedUsername,
+          language: loadedLang,
+          voiceId: loadedVoice,
+        });
 
-          setInitialValues({
-            fullName: loadedName,
-            username: loadedUsername,
-            language: loadedLang
-          });
-
-          if (loadedLang !== i18n.language) {
-            i18n.changeLanguage(loadedLang);
-          }
+        if (loadedLang !== i18n.language) {
+          i18n.changeLanguage(loadedLang);
         }
 
-        // Also load preferences from new endpoint
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers: Record<string, string> = {};
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-        const prefsResponse = await fetch('/api/user/preferences', { headers });
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) return;
+
+        const prefsResponse = await fetch("/api/user/preferences", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
         if (prefsResponse.ok) {
           const prefs = await prefsResponse.json();
           if (prefs.voice_id) setVoiceId(prefs.voice_id);
@@ -89,55 +81,61 @@ export default function Profile() {
             i18n.changeLanguage(prefs.language);
           }
         }
-      } catch (err) {
-        console.error('Error in loadProfile:', err);
-      } finally {
-        setIsLoadingProfile(false);
+      } catch (error) {
+        console.error("Error in loadProfile:", error);
       }
     };
+
     loadProfile();
   }, [user, i18n]);
 
   useEffect(() => {
-    const changed = 
-      fullName !== initialValues.fullName || 
-      username !== initialValues.username || 
-      language !== initialValues.language;
+    const changed =
+      fullName !== initialValues.fullName ||
+      username !== initialValues.username ||
+      language !== initialValues.language ||
+      voiceId !== initialValues.voiceId;
+
     setHasChanges(changed);
-  }, [fullName, username, language, initialValues]);
+  }, [fullName, username, language, voiceId, initialValues]);
+
+  useEffect(() => {
+    if (!isAudioPlaying) setPreviewPlayingId(null);
+  }, [isAudioPlaying]);
+
+  useEffect(() => () => cleanupAudio(), [cleanupAudio]);
 
   const handleVoiceSelect = async (id: string) => {
     if (id === voiceId) return;
     setVoiceId(id);
 
-    // Save to Supabase if user is logged in
-    if (user) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json'
-        };
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
+    if (!user) {
+      showToast(t("profile.voice_updated"), "success");
+      return;
+    }
 
-        const response = await fetch('/api/user/preferences', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ voice_id: id })
-        });
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        if (response.ok) {
-          showToast(t('profile.voice_updated'), "success");
-        } else {
-          throw new Error('Failed to save voice');
-        }
-      } catch (err) {
-        console.error("Error saving voice to Supabase:", err);
-        showToast(t('chat.error_message'), "error");
+      const response = await fetch("/api/user/preferences", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ voice_id: id }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save voice");
       }
-    } else {
-      showToast(t('profile.voice_updated'), "success");
+
+      showToast(t("profile.voice_updated"), "success");
+    } catch (error) {
+      console.error("Error saving voice to Supabase:", error);
+      showToast(t("chat.error_message"), "error");
     }
   };
 
@@ -156,80 +154,70 @@ export default function Profile() {
       setPreviewPlayingId(id);
     } catch (error) {
       console.error("Error playing preview", error);
-      showToast(t('chat.audio_error'), "error");
+      showToast(t("chat.audio_error"), "error");
     } finally {
       setPreviewLoadingId(null);
     }
   };
 
-  // Synchronize playing ID with hook state
-  useEffect(() => {
-    if (!isAudioPlaying) {
-      setPreviewPlayingId(null);
-    }
-  }, [isAudioPlaying]);
-
-  // Cleanup audio on unmount
-  useEffect(() => {
-    return () => cleanupAudio();
-  }, [cleanupAudio]);
-
   const handleLanguageChange = async (newLang: string) => {
     setLanguage(newLang);
     i18n.changeLanguage(newLang);
 
-    // Save to Supabase if user is logged in
-    if (user) {
-      try {
-        const headers = {
-          'Authorization': `Bearer ${user.id}`,
-          'Content-Type': 'application/json'
-        };
+    if (!user) return;
 
-        await fetch('/api/user/preferences', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ language: newLang })
-        });
-      } catch (err) {
-        console.error("Error saving language to Supabase:", err);
-      }
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      await fetch("/api/user/preferences", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ language: newLang }),
+      });
+    } catch (error) {
+      console.error("Error saving language to Supabase:", error);
     }
   };
 
   const handleSave = async () => {
     if (!hasChanges || isSaving || !user) return;
-    
+
     setIsSaving(true);
-    setSaveStatus('saving');
-    
+    setSaveStatus("saving");
+
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
+      const { error } = await supabase.from("profiles").upsert(
+        {
           id: user.id,
-          name: fullName,
-          username: username,
-          language: language,
+          name: fullName || null,
+          username: username || null,
+          language,
           voice_id: voiceId,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      );
 
       if (error) throw error;
 
-      setSaveStatus('saved');
+      setSaveStatus("saved");
       setHasChanges(false);
-      setInitialValues({ fullName, username, language });
-      showToast(t('profile.save_success'), "success");
-    } catch (err: any) {
-      console.error("Error saving profile:", err);
-      setSaveStatus('idle');
-      showToast(err.message || t('chat.error_message'), "error");
+      setInitialValues({ fullName, username, language, voiceId });
+      showToast(t("profile.save_success"), "success");
+    } catch (error: any) {
+      console.error("Error saving profile:", error);
+      setSaveStatus("idle");
+      showToast(error.message || t("chat.error_message"), "error");
     } finally {
       setIsSaving(false);
-      
+
       setTimeout(() => {
-        setSaveStatus((prev) => prev === 'saved' ? 'idle' : prev);
+        setSaveStatus((prev) => (prev === "saved" ? "idle" : prev));
       }, 2000);
     }
   };
@@ -237,18 +225,15 @@ export default function Profile() {
   return (
     <div className="flex flex-col h-full bg-background-dark text-slate-100 pb-24">
       <header className="sticky top-0 z-50 bg-background-dark/80 backdrop-blur-md pt-12 pb-4 px-6">
-        <h1 className="text-2xl font-bold tracking-tight">{t('profile.title')}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{t("profile.title")}</h1>
       </header>
 
       <main className="flex-1 overflow-y-auto px-6 py-4 space-y-8 no-scrollbar">
-        {/* BLOQUE A — Información del usuario */}
         <section className="space-y-6">
           <div className="flex flex-col items-center">
             <div className="relative">
               <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center border-4 border-white/10 shadow-2xl overflow-hidden">
-                <span className="text-4xl font-bold text-white">
-                  {fullName.charAt(0).toUpperCase()}
-                </span>
+                <span className="text-4xl font-bold text-white">{(fullName || user?.email || "M").charAt(0).toUpperCase()}</span>
               </div>
               <button className="absolute bottom-0 right-0 w-10 h-10 bg-primary rounded-full flex items-center justify-center border-4 border-background-dark text-white hover:bg-primary-dark transition-colors shadow-lg">
                 <Camera className="w-5 h-5" />
@@ -258,53 +243,48 @@ export default function Profile() {
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t('profile.full_name')}</label>
-              <input 
-                type="text" 
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t("profile.full_name")}</label>
+              <input
+                type="text"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(event) => setFullName(event.target.value)}
                 className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-primary transition-colors"
-                placeholder={t('profile.full_name')}
+                placeholder={t("profile.full_name")}
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t('profile.username')}</label>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t("profile.username")}</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-medium">@</span>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
+                  onChange={(event) => setUsername(event.target.value.replace(/\s/g, "").toLowerCase())}
                   className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 pl-8 text-white focus:outline-none focus:border-primary transition-colors"
-                  placeholder="username"
+                  placeholder={t("profile.username_placeholder")}
                 />
               </div>
             </div>
 
             <div className="space-y-1.5 opacity-60">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t('profile.email_readonly')}</label>
-              <input 
-                type="email" 
-                value={user?.email || ""} 
-                readOnly
-                className="w-full bg-surface-dark/50 border border-white/5 rounded-2xl p-4 text-slate-400 cursor-not-allowed"
-              />
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t("profile.email_readonly")}</label>
+              <input type="email" value={user?.email || ""} readOnly className="w-full bg-surface-dark/50 border border-white/5 rounded-2xl p-4 text-slate-400 cursor-not-allowed" />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t('profile.interface_language')}</label>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">{t("profile.interface_language")}</label>
               <div className="relative">
                 <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                <select 
+                <select
                   value={language}
-                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  onChange={(event) => handleLanguageChange(event.target.value)}
                   className="w-full bg-surface-dark border border-white/5 rounded-2xl p-4 pl-12 text-white appearance-none focus:outline-none focus:border-primary transition-colors"
                 >
-                  <option value="en">🇺🇸 English</option>
-                  <option value="es">🇪🇸 Español</option>
-                  <option value="fi">🇫🇮 Suomi</option>
-                  <option value="sv">🇸🇪 Svenska</option>
+                  <option value="en">{t("profile.language_option_en")}</option>
+                  <option value="es">{t("profile.language_option_es")}</option>
+                  <option value="fi">{t("profile.language_option_fi")}</option>
+                  <option value="sv">{t("profile.language_option_sv")}</option>
                 </select>
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
                   <Settings className="w-4 h-4" />
@@ -314,34 +294,29 @@ export default function Profile() {
           </div>
         </section>
 
-        {/* BLOQUE B — Personalización de Mima (Voz) */}
         <section className="space-y-4">
           <div className="px-1">
-            <h3 className="text-xl font-bold text-white">{t('profile.voice_title')}</h3>
-            <p className="text-sm text-slate-400">{t('profile.voice_subtitle')}</p>
+            <h3 className="text-xl font-bold text-white">{t("profile.voice_title")}</h3>
+            <p className="text-sm text-slate-400">{t("profile.voice_subtitle")}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            {voices.map((v) => {
-              const isSelected = voiceId === v.id;
-              const isLoading = previewLoadingId === v.id;
-              const isPlaying = previewPlayingId === v.id;
+            {voices.map((voice) => {
+              const isSelected = voiceId === voice.id;
+              const isLoading = previewLoadingId === voice.id;
+              const isPlaying = previewPlayingId === voice.id;
 
               return (
-                <div 
-                  key={v.id}
-                  onClick={() => handleVoiceSelect(v.id)}
+                <div
+                  key={voice.id}
+                  onClick={() => handleVoiceSelect(voice.id)}
                   className={`relative p-4 rounded-2xl border transition-all cursor-pointer group ${
-                    isSelected 
-                      ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(98,33,221,0.1)]' 
-                      : 'bg-surface-dark border-white/5 hover:border-white/10'
+                    isSelected ? "bg-primary/10 border-primary shadow-[0_0_20px_rgba(98,33,221,0.1)]" : "bg-surface-dark border-white/5 hover:border-white/10"
                   }`}
                 >
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center justify-between">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        isSelected ? 'bg-primary text-white' : 'bg-white/5 text-slate-400'
-                      }`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isSelected ? "bg-primary text-white" : "bg-white/5 text-slate-400"}`}>
                         <Volume2 className="w-4 h-4" />
                       </div>
                       {isSelected && (
@@ -350,32 +325,22 @@ export default function Profile() {
                         </div>
                       )}
                     </div>
-                    
+
                     <div>
-                      <p className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-slate-300'}`}>
-                        {v.name}
-                      </p>
+                      <p className={`font-bold text-sm ${isSelected ? "text-white" : "text-slate-300"}`}>{voice.name}</p>
                     </div>
 
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playVoicePreview(v.id);
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        playVoicePreview(voice.id);
                       }}
                       className={`w-full py-2 rounded-xl flex items-center justify-center gap-2 transition-colors ${
-                        isPlaying 
-                          ? 'bg-primary text-white' 
-                          : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
+                        isPlaying ? "bg-primary text-white" : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white"
                       }`}
                     >
-                      {isLoading ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : isPlaying ? (
-                        <Square className="w-4 h-4 fill-current" />
-                      ) : (
-                        <Play className="w-4 h-4 fill-current" />
-                      )}
-                      <span className="text-xs font-bold uppercase tracking-wider">{t('onboarding.voice_preview_btn')}</span>
+                      {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : isPlaying ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+                      <span className="text-xs font-bold uppercase tracking-wider">{t("onboarding.voice_preview_btn")}</span>
                     </button>
                   </div>
                 </div>
@@ -385,40 +350,40 @@ export default function Profile() {
         </section>
 
         <div className="pt-2">
-          <button 
+          <button
             onClick={handleSave}
             disabled={!hasChanges || isSaving}
             className={`w-full py-4 rounded-full font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${
               hasChanges && !isSaving
-                ? 'bg-primary text-white shadow-primary/20 hover:bg-primary-dark active:scale-95'
-                : saveStatus === 'saved'
-                ? 'bg-emerald-500 text-white'
-                : 'bg-white/5 text-slate-500 cursor-not-allowed'
+                ? "bg-primary text-white shadow-primary/20 hover:bg-primary-dark active:scale-95"
+                : saveStatus === "saved"
+                  ? "bg-emerald-500 text-white"
+                  : "bg-white/5 text-slate-500 cursor-not-allowed"
             }`}
           >
-            {saveStatus === 'saving' ? (
+            {saveStatus === "saving" ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                {t('profile.saving')}
+                {t("profile.saving")}
               </>
-            ) : saveStatus === 'saved' ? (
+            ) : saveStatus === "saved" ? (
               <>
                 <Check className="w-5 h-5" />
-                {t('profile.saved')}
+                {t("profile.saved")}
               </>
             ) : (
-              t('profile.save_btn')
+              t("profile.save_btn")
             )}
           </button>
         </div>
 
         <div className="pt-4 border-t border-white/5">
-          <button 
+          <button
             onClick={signOut}
             className="w-full flex items-center justify-center gap-2 p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl border border-red-500/20 transition-colors font-bold active:scale-95"
           >
             <LogOut className="w-5 h-5" />
-            {t('profile.logout')}
+            {t("profile.logout")}
           </button>
         </div>
       </main>

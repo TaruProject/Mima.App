@@ -1,5 +1,4 @@
--- Legacy manual migration
--- Mirrors supabase/migrations/20260323000000_create_app_data_tables.sql
+-- Create app data tables used by the production backend
 
 CREATE TABLE IF NOT EXISTS public.user_preferences (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,

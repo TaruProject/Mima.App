@@ -1,5 +1,5 @@
 <IfModule mod_passenger.c>
-    PassengerAppRoot /home/u482312211/domains/me.mima-app.com/public_html
+    PassengerAppRoot /home/u482312211/domains/me.mima-app.com
     PassengerBaseURI /
     PassengerAppType node
     PassengerStartupFile app.js
@@ -9,7 +9,7 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
-    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_URI} !^/api/
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule . /index.html [L]
