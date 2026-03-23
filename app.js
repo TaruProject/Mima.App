@@ -28,19 +28,12 @@
   const builtServer = resolveCandidate(path.join('dist-server', 'server.js'));
   const sourceServer = resolveCandidate('server.ts');
 
-  if (builtServer) {
-    console.log(`Starting compiled server from ${builtServer.absolutePath}`);
-    process.chdir(builtServer.root);
-    await import(url.pathToFileURL(builtServer.absolutePath).href);
-    return;
-  }
-
-  if (sourceServer) {
-    console.warn('Compiled server not found. Falling back to tsx server.ts.');
-    process.chdir(sourceServer.root);
+  const startSourceServer = (candidate) => {
+    console.warn('Starting source server with tsx fallback.');
+    process.chdir(candidate.root);
 
     const child = childProcess.spawn('npx', ['tsx', 'server.ts'], {
-      cwd: sourceServer.root,
+      cwd: candidate.root,
       stdio: 'inherit',
       shell: true,
       env: {
@@ -58,6 +51,28 @@
       console.log(`Server process exited with code ${code ?? 0}`);
       process.exit(code ?? 0);
     });
+  };
+
+  if (builtServer) {
+    console.log(`Starting compiled server from ${builtServer.absolutePath}`);
+
+    try {
+      process.chdir(builtServer.root);
+      await import(url.pathToFileURL(builtServer.absolutePath).href);
+      return;
+    } catch (error) {
+      console.error('Compiled server failed to start:', error);
+
+      if (!sourceServer) {
+        throw error;
+      }
+
+      console.warn('Compiled server failed. Falling back to server.ts.');
+    }
+  }
+
+  if (sourceServer) {
+    startSourceServer(sourceServer);
     return;
   }
 

@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "node dist-server/server.js",
+    "start": "node app.js",
     "dev": "tsx server.ts",
     "build": "npm run lint && npm run build:server && npm run build:client",
     "build:client": "vite build",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "tsc -p tsconfig.server.json && node scripts/write-server-package.cjs",
     "preview": "vite preview",
     "clean": "node -e \"const fs=require('node:fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('dist-server',{recursive:true,force:true});\"",
     "lint": "tsc --noEmit",
