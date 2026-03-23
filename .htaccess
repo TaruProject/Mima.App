@@ -6,11 +6,23 @@
     PassengerAppEnv production
 </IfModule>
 
+<IfModule mod_dir.c>
+    DirectoryIndex index.html
+</IfModule>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
-    RewriteCond %{REQUEST_URI} !^/api/
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule . /index.html [L]
+
+    # Serve existing files and directories directly
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Let backend API routes pass through untouched
+    RewriteCond %{REQUEST_URI} ^/api/
+    RewriteRule ^ - [L]
+
+    # Force the root URL and all SPA routes to resolve to index.html
+    RewriteRule ^ index.html [L]
 </IfModule>
