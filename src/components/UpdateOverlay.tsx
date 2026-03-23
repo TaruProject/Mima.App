@@ -1,7 +1,13 @@
 import { RefreshCw, Download } from "lucide-react";
 import { useTranslation } from 'react-i18next';
 
-export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
+export default function UpdateOverlay({
+  onUpdate,
+  isUpdating = false,
+}: {
+  onUpdate: () => void | Promise<void>;
+  isUpdating?: boolean;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -30,9 +36,10 @@ export default function UpdateOverlay({ onUpdate }: { onUpdate: () => void }) {
         <div className="p-6 pt-2 pb-8 flex flex-col gap-3">
           <button 
             onClick={onUpdate}
+            disabled={isUpdating}
             className="w-full flex items-center justify-center gap-2 h-14 rounded-full bg-primary hover:bg-primary/90 active:scale-[0.98] transition-all duration-200 shadow-lg shadow-primary/25 group cursor-pointer"
           >
-            <RefreshCw className="text-white w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
+            <RefreshCw className={`text-white w-5 h-5 transition-transform duration-500 ${isUpdating ? "animate-spin" : "group-hover:rotate-180"}`} />
             <span className="text-white text-base font-bold tracking-wide">{t('update.button')}</span>
           </button>
           

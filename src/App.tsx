@@ -34,9 +34,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
   
   const {
-    needRefresh: [needRefresh, setNeedRefresh],
+    needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegistered(r) {
@@ -87,13 +88,40 @@ function AppRoutes() {
     };
   }, []);
 
-  const handleUpdate = () => {
-    updateServiceWorker(true);
+  const handleUpdate = async () => {
+    if (isUpdating) return;
+
+    setIsUpdating(true);
+
+    let reloaded = false;
+    const forceReload = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
+
+    try {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener(
+          'controllerchange',
+          () => {
+            forceReload();
+          },
+          { once: true },
+        );
+      }
+
+      await updateServiceWorker(true);
+      window.setTimeout(forceReload, 1500);
+    } catch (error) {
+      console.error('Failed to apply service worker update:', error);
+      forceReload();
+    }
   };
 
   return (
     <>
-      {needRefresh && <UpdateOverlay onUpdate={handleUpdate} />}
+      {needRefresh && <UpdateOverlay onUpdate={handleUpdate} isUpdating={isUpdating} />}
       <InstallPWA />
       <Routes>
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />
