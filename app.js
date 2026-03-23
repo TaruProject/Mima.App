@@ -25,8 +25,62 @@
       }))
       .find((candidate) => fs.existsSync(candidate.absolutePath));
 
-  const builtServer = resolveCandidate(path.join('dist-server', 'server.js'));
-  const sourceServer = resolveCandidate('server.ts');
+  const getBuiltServer = () => resolveCandidate(path.join('dist-server', 'server.js'));
+  const getBuiltClient = () =>
+    resolveCandidate(path.join('dist', 'index.html')) ||
+    resolveCandidate(path.join('public_html', 'index.html'));
+  const getSourceServer = () => resolveCandidate('server.ts');
+  const getProjectRoot = () => resolveCandidate('package.json');
+  const getNodeModules = () => resolveCandidate('node_modules');
+
+  const runCommand = (command, args, cwd, label) =>
+    new Promise((resolve, reject) => {
+      console.log(`${label}: ${command} ${args.join(' ')}`);
+
+      const child = childProcess.spawn(command, args, {
+        cwd,
+        stdio: 'inherit',
+        shell: true,
+        env: {
+          ...process.env,
+          NODE_ENV: process.env.NODE_ENV || 'production',
+        },
+      });
+
+      child.on('error', (error) => {
+        reject(error);
+      });
+
+      child.on('exit', (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(`${label} failed with exit code ${code ?? 0}`));
+      });
+    });
+
+  const ensureRuntimeArtifacts = async () => {
+    const projectRoot = getProjectRoot();
+
+    if (!projectRoot) {
+      console.warn('package.json not found. Skipping dependency/build checks.');
+      return;
+    }
+
+    if (!getNodeModules()) {
+      console.warn('node_modules not found. Installing dependencies before startup.');
+      await runCommand('npm', ['install'], projectRoot.root, 'Dependency install');
+    }
+
+    if (getBuiltServer() && getBuiltClient()) {
+      return;
+    }
+
+    console.warn('Production artifacts are missing. Running npm run build before startup.');
+    await runCommand('npm', ['run', 'build'], projectRoot.root, 'Project build');
+  };
 
   const startSourceServer = (candidate) => {
     console.warn('Starting source server with tsx fallback.');
@@ -52,6 +106,11 @@
       process.exit(code ?? 0);
     });
   };
+
+  await ensureRuntimeArtifacts();
+
+  const builtServer = getBuiltServer();
+  const sourceServer = getSourceServer();
 
   if (builtServer) {
     console.log(`Starting compiled server from ${builtServer.absolutePath}`);

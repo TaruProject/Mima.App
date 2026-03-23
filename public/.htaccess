@@ -1,6 +1,10 @@
 # Apache configuration for React SPA on Hostinger
 # Place this file in the root of public_html (or public_html/dist)
 
+<IfModule mod_dir.c>
+  DirectoryIndex index.html
+</IfModule>
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   
@@ -13,7 +17,7 @@
   RewriteCond %{REQUEST_URI} ^/api/
   RewriteRule ^ - [L]
   
-  # For all other requests, serve index.html (SPA routing)
+  # Force the root URL and all SPA routes to serve index.html
   RewriteRule ^ index.html [L]
 </IfModule>
 
