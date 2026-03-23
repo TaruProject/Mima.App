@@ -150,7 +150,7 @@ export default function Profile() {
 
     try {
       setPreviewLoadingId(id);
-      await playAudio(`/api/tts/preview?voiceId=${id}`);
+      await playAudio(`/api/tts/preview?voiceId=${id}&text=${encodeURIComponent(t("onboarding.voice_preview_text"))}`);
       setPreviewPlayingId(id);
     } catch (error) {
       console.error("Error playing preview", error);
@@ -162,6 +162,7 @@ export default function Profile() {
 
   const handleLanguageChange = async (newLang: string) => {
     setLanguage(newLang);
+    localStorage.setItem("mima_language", newLang);
     i18n.changeLanguage(newLang);
 
     if (!user) return;

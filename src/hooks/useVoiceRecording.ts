@@ -7,12 +7,23 @@ export const useVoiceRecording = () => {
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+
+  const getOrCreateStream = useCallback(async () => {
+    if (streamRef.current && streamRef.current.active) {
+      return streamRef.current;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
+    return stream;
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
       setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await getOrCreateStream();
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
@@ -26,7 +37,6 @@ export const useVoiceRecording = () => {
       recorder.onstart = () => setIsRecording(true);
       recorder.onstop = () => {
         setIsRecording(false);
-        stream.getTracks().forEach(track => track.stop());
       };
 
       recorder.start();
@@ -34,7 +44,7 @@ export const useVoiceRecording = () => {
       console.error('Error starting recording:', err);
       setError(err.message || 'Could not access microphone');
     }
-  }, []);
+  }, [getOrCreateStream]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -75,8 +85,6 @@ export const useVoiceRecording = () => {
           resolve(null);
         } finally {
           setIsTranscribing(false);
-          // Stop all tracks in the stream if still active
-          mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop());
         }
       };
 

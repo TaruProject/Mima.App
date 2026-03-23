@@ -994,7 +994,7 @@ app.delete("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
 const ttsPreviewCache: Record<string, string> = {};
 
 app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
-  const { voiceId } = req.query;
+  const { voiceId, text } = req.query;
   if (!voiceId || typeof voiceId !== 'string') {
     return res.status(400).json({ error: "voiceId is required" });
   }
@@ -1004,7 +1004,6 @@ app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
   }
 
   try {
-    const text = "Hi, I am Mima. This is how I sound.";
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
@@ -1013,7 +1012,7 @@ app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        text,
+        text: typeof text === 'string' && text.trim() ? text : "Hi, I am Mima. This is how I sound.",
         model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.5,
@@ -1027,22 +1026,11 @@ app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
-    // Set headers for binary audio stream
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    if (response.body) {
-      // Use pipeline for more robust streaming
-      const reader = response.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      res.end();
-    } else {
-      throw new Error("Empty response body from ElevenLabs");
-    }
+    res.setHeader('Content-Length', String(audioBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(audioBuffer);
   } catch (error) {
     console.error("Preview TTS Error:", error);
     res.status(500).json({ error: "Failed to generate preview audio" });
@@ -1085,21 +1073,11 @@ app.post("/api/tts", authenticateSupabaseUser, async (req, res) => {
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
-    // Set headers for binary audio stream
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      res.end();
-    } else {
-      throw new Error("Empty response body from ElevenLabs");
-    }
+    res.setHeader('Content-Length', String(audioBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(audioBuffer);
   } catch (error) {
     console.error('TTS Error:', error);
     res.status(500).json({ error: "Failed to generate speech", details: error instanceof Error ? error.message : String(error) });
@@ -1386,6 +1364,126 @@ async function initializeGemini(): Promise<boolean> {
   return client !== null;
 }
 
+function normalizeLookupValue(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const timeZoneAliases: Record<string, { timeZone: string; note?: string }> = {
+  finland: { timeZone: 'Europe/Helsinki' },
+  helsinki: { timeZone: 'Europe/Helsinki' },
+  suomi: { timeZone: 'Europe/Helsinki' },
+  sweden: { timeZone: 'Europe/Stockholm' },
+  stockholm: { timeZone: 'Europe/Stockholm' },
+  sverige: { timeZone: 'Europe/Stockholm' },
+  spain: { timeZone: 'Europe/Madrid' },
+  espana: { timeZone: 'Europe/Madrid' },
+  madrid: { timeZone: 'Europe/Madrid' },
+  london: { timeZone: 'Europe/London' },
+  uk: { timeZone: 'Europe/London' },
+  'united kingdom': { timeZone: 'Europe/London' },
+  england: { timeZone: 'Europe/London' },
+  paris: { timeZone: 'Europe/Paris' },
+  france: { timeZone: 'Europe/Paris' },
+  berlin: { timeZone: 'Europe/Berlin' },
+  germany: { timeZone: 'Europe/Berlin' },
+  rome: { timeZone: 'Europe/Rome' },
+  italy: { timeZone: 'Europe/Rome' },
+  'new york': { timeZone: 'America/New_York' },
+  'united states': { timeZone: 'America/New_York', note: 'This uses Eastern Time.' },
+  usa: { timeZone: 'America/New_York', note: 'This uses Eastern Time.' },
+  chicago: { timeZone: 'America/Chicago' },
+  denver: { timeZone: 'America/Denver' },
+  'los angeles': { timeZone: 'America/Los_Angeles' },
+  tokyo: { timeZone: 'Asia/Tokyo' },
+  japan: { timeZone: 'Asia/Tokyo' },
+  seoul: { timeZone: 'Asia/Seoul' },
+  'south korea': { timeZone: 'Asia/Seoul' },
+  shanghai: { timeZone: 'Asia/Shanghai' },
+  china: { timeZone: 'Asia/Shanghai' },
+  kolkata: { timeZone: 'Asia/Kolkata' },
+  india: { timeZone: 'Asia/Kolkata' },
+  bangkok: { timeZone: 'Asia/Bangkok' },
+  thailand: { timeZone: 'Asia/Bangkok' },
+  sydney: { timeZone: 'Australia/Sydney' },
+  australia: { timeZone: 'Australia/Sydney', note: 'This uses Sydney time.' },
+};
+
+function resolveTimeZone(location: string): { timeZone: string; note?: string } | null {
+  const normalized = normalizeLookupValue(location);
+  if (!normalized) return null;
+
+  if (timeZoneAliases[normalized]) {
+    return timeZoneAliases[normalized];
+  }
+
+  const supportedTimeZones = Intl.supportedValuesOf('timeZone');
+  const matchedTimeZone = supportedTimeZones.find((timeZone) => {
+    const cityName = normalizeLookupValue(timeZone.split('/').pop() || '');
+    return cityName === normalized || cityName.includes(normalized) || normalized.includes(cityName);
+  });
+
+  return matchedTimeZone ? { timeZone: matchedTimeZone } : null;
+}
+
+function getLocalizedCurrentTimeResponse(location: string, langCode: string): string {
+  const resolved = resolveTimeZone(location);
+
+  if (!resolved) {
+    const messages: Record<string, string> = {
+      en: 'I can tell the current time if you give me a city or country I recognize, like Helsinki, Madrid, London, or Tokyo.',
+      es: 'Puedo decirte la hora actual si me das una ciudad o un pais que reconozca, como Helsinki, Madrid, Londres o Tokio.',
+      fi: 'Voin kertoa kellonajan, jos annat kaupungin tai maan jonka tunnistan, kuten Helsinki, Madrid, Lontoo tai Tokio.',
+      sv: 'Jag kan beratta aktuell tid om du ger mig en stad eller ett land som jag kanner igen, som Helsingfors, Madrid, London eller Tokyo.',
+    };
+
+    return messages[langCode] || messages.en;
+  }
+
+  const now = new Date();
+  const formatted = now.toLocaleString(langCode, {
+    timeZone: resolved.timeZone,
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const note = resolved.note ? ` ${resolved.note}` : '';
+  const templates: Record<string, string> = {
+    en: `The current time in ${location} is ${formatted}.${note}`,
+    es: `La hora actual en ${location} es ${formatted}.${note}`,
+    fi: `Kellonaika paikassa ${location} on nyt ${formatted}.${note}`,
+    sv: `Den aktuella tiden i ${location} ar ${formatted}.${note}`,
+  };
+
+  return templates[langCode] || templates.en;
+}
+
+function extractTimeLocation(message: string): string | null {
+  const patterns = [
+    /(?:what(?:'s| is) the time in|current time in|time in)\s+(.+)$/i,
+    /(?:que hora es en|hora en|hora actual en)\s+(.+)$/i,
+    /(?:paljonko kello on|mika aika on|kello\s+)\s*(?:on\s+)?(.+)$/i,
+    /(?:vad ar klockan i|tid i|aktuell tid i)\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.trim().match(pattern);
+    if (match?.[1]) {
+      return match[1].trim().replace(/[?.!]+$/, '');
+    }
+  }
+
+  return null;
+}
+
 const languageInstructions: Record<string, string> = {
   fi: 'Vastaa AINA suomeksi. Käytä luontevaa, ystävällistä suomea.',
   sv: 'Svara ALLTID på svenska. Använd naturlig, vänlig svenska.',
@@ -1495,6 +1593,13 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
   const requestStart = Date.now();
 
   try {
+    const currentTimeLocation = typeof message === 'string' ? extractTimeLocation(message) : null;
+    if (currentTimeLocation) {
+      return res.json({
+        text: getLocalizedCurrentTimeResponse(currentTimeLocation, language || 'en')
+      });
+    }
+
     if (!message || typeof message !== 'string') {
       console.error("❌ Invalid message provided");
       return res.status(400).json({
@@ -1623,6 +1728,13 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
       `3. If you use a tool (JSON format), that's the only thing you should return.\n` +
       `4. Maintain the persona: ${mode || 'Neutral'}.`;
 
+    const enhancedSystemInstruction = `${systemInstruction}\n` +
+      `5. You are multilingual and can communicate naturally in the user's requested language.\n` +
+      `6. If the user asks whether you can speak another language, the answer is yes.\n` +
+      `7. If the user asks for the current time in a city or country, return ONLY this JSON format: {"tool":"getCurrentTime","location":"City or Country"}.\n` +
+      `8. If the user asks to create, update, delete, search, or list calendar events, prefer the calendar tool JSON formats.\n` +
+      `9. Current server time (UTC) is ${new Date().toISOString()}.`;
+
     console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
     console.log("📝 Language instruction:", langInstruction);
     console.log("📝 Model to use:", modelSelection.model);
@@ -1638,11 +1750,26 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
       const primaryModel = modelSelection.model;
 
       console.log(`🔄 Attempting Gemini call with: ${primaryModel}`);
+      const contents = [
+        ...(Array.isArray(history)
+          ? history
+              .filter((entry: any) => entry?.content)
+              .map((entry: any) => ({
+                role: entry.role === 'model' ? 'model' : 'user',
+                parts: [{ text: entry.content }],
+              }))
+          : []),
+        {
+          role: 'user',
+          parts: [{ text: message }],
+        },
+      ];
+
       response = await ai.models.generateContent({
         model: primaryModel,
-        contents: message,
+        contents,
         config: {
-          systemInstruction,
+          systemInstruction: enhancedSystemInstruction,
           temperature: 0.7,
           maxOutputTokens: modelSelection.maxTokens,
         },
@@ -1681,12 +1808,23 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
           if (match) trimmedText = match[1].trim();
         }
 
+        const jsonMatch = trimmedText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
+        if (jsonMatch) {
+          trimmedText = jsonMatch[0].trim();
+        }
+
         if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
           console.log("🔧 Detected function call, parsing...");
           const functionCall = JSON.parse(trimmedText);
 
           if (functionCall.tool) {
             console.log("   Tool:", functionCall.tool);
+
+            if (functionCall.tool === 'getCurrentTime') {
+              responseText = getLocalizedCurrentTimeResponse(functionCall.location || '', langCode);
+              res.json({ text: responseText });
+              return;
+            }
 
             // Get user tokens from Supabase
             const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);

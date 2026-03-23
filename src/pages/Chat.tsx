@@ -55,6 +55,7 @@ export default function Chat() {
     }
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastPersistedMessageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -83,6 +84,7 @@ export default function Chat() {
         if (historyResponse.ok) {
           const history = await historyResponse.json();
           if (history.length > 0) {
+            lastPersistedMessageIdRef.current = history[history.length - 1]?.id?.toString() || null;
             setMessages(
               history.map((msg: any) => ({
                 id: msg.id,
@@ -101,7 +103,10 @@ export default function Chat() {
         if (prefsResponse.ok) {
           const prefs = await prefsResponse.json();
           if (prefs.voice_id) setVoiceId(prefs.voice_id);
-          if (prefs.language) i18n.changeLanguage(prefs.language);
+          if (prefs.language && (prefs.onboarding_done || !showOnboarding)) {
+            localStorage.setItem("mima_language", prefs.language);
+            i18n.changeLanguage(prefs.language);
+          }
           if (prefs.onboarding_done) {
             setShowOnboarding(false);
             localStorage.setItem("mima_onboarding_done", "true");
@@ -113,7 +118,7 @@ export default function Chat() {
     };
 
     loadData();
-  }, [user, i18n]);
+  }, [user, i18n, showOnboarding]);
 
   useEffect(() => {
     if (!user) return;
@@ -129,6 +134,11 @@ export default function Chat() {
         if (messagesToSave.length === 0) return;
 
         const lastMessage = messagesToSave[messagesToSave.length - 1];
+        const lastMessageId = lastMessage.id.toString();
+
+        if (lastPersistedMessageIdRef.current === lastMessageId) {
+          return;
+        }
 
         await fetch("/api/chat/message", {
           method: "POST",
@@ -144,6 +154,8 @@ export default function Chat() {
             audio_data: lastMessage.audio ?? null,
           }),
         });
+
+        lastPersistedMessageIdRef.current = lastMessageId;
       } catch (error) {
         console.error("Failed to save chat history:", error);
       }
@@ -264,6 +276,7 @@ export default function Chat() {
                 setVoiceId(selectedVoiceId);
                 localStorage.setItem("mima_voice_id", selectedVoiceId);
               }
+              localStorage.setItem("mima_language", i18n.language);
               localStorage.setItem("mima_onboarding_done", "true");
 
               if (user) {

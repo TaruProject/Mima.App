@@ -21,6 +21,12 @@ export const useAudioPlayback = () => {
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     }
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
+      audioRef.current.oncanplaythrough = null;
+      audioRef.current.src = '';
+    }
     audioRef.current = null;
   }, [stop]);
 
@@ -30,8 +36,9 @@ export const useAudioPlayback = () => {
       setError(null);
       setIsPlaying(true);
 
-      // Create audio element immediately to "unlock" it on some mobile browsers
       const audio = new Audio();
+      audio.preload = 'auto';
+      audio.setAttribute('playsinline', 'true');
       audioRef.current = audio;
 
       const headers: Record<string, string> = {};
@@ -53,30 +60,37 @@ export const useAudioPlayback = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Audio fetch failed: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Audio fetch failed: ${response.status} ${errorText}`.trim());
       }
 
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       objectUrlRef.current = objectUrl;
 
-      // Now set the src and play
-      audio.src = objectUrl;
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => {
+          setIsPlaying(false);
+        };
 
-      audio.onended = () => {
-        setIsPlaying(false);
-      };
+        audio.onerror = () => {
+          const playbackError = 'Error playing audio';
+          setError(playbackError);
+          setIsPlaying(false);
+          reject(new Error(playbackError));
+        };
 
-      audio.onerror = () => {
-        setError('Error playing audio');
-        setIsPlaying(false);
-      };
+        audio.oncanplaythrough = () => resolve();
+        audio.src = objectUrl;
+        audio.load();
+      });
 
       await audio.play();
     } catch (err: any) {
       console.error('Audio playback error:', err);
       setError(err.message || 'Failed to play audio');
       setIsPlaying(false);
+      throw err;
     }
   }, [cleanup]);
 

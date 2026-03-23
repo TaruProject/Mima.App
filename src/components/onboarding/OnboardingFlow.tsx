@@ -20,6 +20,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   const { t, i18n } = useTranslation();
   const [step, setStep] = useState(0);
   const [hasSelectedLanguage, setHasSelectedLanguage] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState(i18n.resolvedLanguage?.split("-")[0] || i18n.language || "en");
   const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
@@ -43,6 +44,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   };
 
   const changeLanguage = async (code: string) => {
+    setSelectedLanguage(code);
+    localStorage.setItem("mima_language", code);
     await i18n.changeLanguage(code);
     setHasSelectedLanguage(true);
 
@@ -62,7 +65,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
     try {
       setPreviewLoadingId(id);
-      await playAudio(`/api/tts/preview?voiceId=${id}`);
+      await playAudio(`/api/tts/preview?voiceId=${id}&text=${encodeURIComponent(t("onboarding.voice_preview_text"))}`);
       setPreviewPlayingId(id);
     } catch (error) {
       console.error("Onboarding playback error:", error);
@@ -107,7 +110,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                     key={language.code}
                     onClick={() => changeLanguage(language.code)}
                     className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${
-                      i18n.language === language.code ? "bg-primary/10 border-primary text-white" : "bg-white/5 border-white/5 text-slate-400"
+                      selectedLanguage === language.code ? "bg-primary/10 border-primary text-white" : "bg-white/5 border-white/5 text-slate-400"
                     }`}
                   >
                     <span className="font-bold text-center">{t(language.labelKey)}</span>
