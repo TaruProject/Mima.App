@@ -139,6 +139,7 @@
     "allow_popups": "Tillåt popup-fönster för den här webbplatsen för att ansluta ditt konto.",
     "error_boundary_title": "Oj! Något gick fel",
     "error_boundary_description": "Vi är ledsna, men ett oväntat fel inträffade. Försök ladda om sidan.",
-    "reload_page": "Ladda om sidan"
+    "reload_page": "Ladda om sidan",
+    "coming_soon": "Kommer snart..."
   }
 }

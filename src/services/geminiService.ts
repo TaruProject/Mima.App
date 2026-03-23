@@ -26,6 +26,7 @@ export async function generateChatResponse(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
       },
       body: JSON.stringify({
         message,

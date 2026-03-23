@@ -30,6 +30,10 @@ export const useAudioPlayback = () => {
       setError(null);
       setIsPlaying(true);
 
+      // Create audio element immediately to "unlock" it on some mobile browsers
+      const audio = new Audio();
+      audioRef.current = audio;
+
       const headers: Record<string, string> = {};
       
       if (useAuth) {
@@ -56,8 +60,8 @@ export const useAudioPlayback = () => {
       const objectUrl = URL.createObjectURL(blob);
       objectUrlRef.current = objectUrl;
 
-      const audio = new Audio(objectUrl);
-      audioRef.current = audio;
+      // Now set the src and play
+      audio.src = objectUrl;
 
       audio.onended = () => {
         setIsPlaying(false);

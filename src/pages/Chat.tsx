@@ -165,6 +165,12 @@ export default function Chat() {
       const { data: { session } } = await supabase.auth.getSession();
       const responseText = await generateChatResponse(userMsg, mode, i18n.language, history, session?.access_token);
       
+      if (responseText.includes("Unauthorized") || responseText.includes("auth")) {
+        // Fallback for session loss
+        console.warn("Potential auth issue in chat, refreshing session...");
+        await supabase.auth.refreshSession();
+      }
+
       setMessages((prev) => [
         ...prev,
         {
@@ -239,14 +245,18 @@ export default function Chat() {
     <div className="flex flex-col h-full relative">
       {showOnboarding && (
         <OnboardingFlow onComplete={async (selectedVoiceId) => {
-          setShowOnboarding(false);
-          if (selectedVoiceId) setVoiceId(selectedVoiceId);
-          
-          // Sync with Supabase if logged in
-          if (user) {
-            try {
+          try {
+            setShowOnboarding(false);
+            if (selectedVoiceId) {
+              setVoiceId(selectedVoiceId);
+              localStorage.setItem('mima_voice_id', selectedVoiceId);
+            }
+            localStorage.setItem('mima_onboarding_done', 'true');
+            
+            // Sync with Supabase if logged in
+            if (user) {
               const { data: { session } } = await supabase.auth.getSession();
-              await fetch('/api/user/preferences', {
+              const response = await fetch('/api/user/preferences', {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${session?.access_token}`,
@@ -258,9 +268,17 @@ export default function Chat() {
                   language: i18n.language
                 })
               });
-            } catch (e) {
-              console.error("❌ Failed to sync preferences on onboarding completion:", e);
+              
+              if (!response.ok) {
+                console.error('Failed to sync preferences to server:', await response.text());
+              } else {
+                console.log('✅ Preferences synced to server');
+              }
             }
+          } catch (e) {
+            console.error('Error in onComplete:', e);
+            setShowOnboarding(false);
+            localStorage.setItem('mima_onboarding_done', 'true');
           }
         }} />
       )}
@@ -292,8 +310,8 @@ export default function Chat() {
             setIsActionMenuOpen(false);
             setIsModeSheetOpen(true);
           }}
-          onAttachFile={() => console.log("Attach file")}
-          onTakeScreenshot={() => console.log("Take screenshot")}
+          onAttachFile={() => alert(t('common.coming_soon') || "Coming Soon...")}
+          onTakeScreenshot={() => alert(t('common.coming_soon') || "Coming Soon...")}
         />
         <ModeBottomSheet
           isOpen={isModeSheetOpen}

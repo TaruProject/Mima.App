@@ -139,6 +139,7 @@
     "allow_popups": "Salli ponnahdusikkunat tälle sivustolle yhdistääksesi tilisi.",
     "error_boundary_title": "Ups! Jotain meni pieleen",
     "error_boundary_description": "Olemme pahoillamme, mutta odottamaton virhe tapahtui. Yritä ladata sivu uudelleen.",
-    "reload_page": "Lataa sivu uudelleen"
+    "reload_page": "Lataa sivu uudelleen",
+    "coming_soon": "Tulossa pian..."
   }
 }

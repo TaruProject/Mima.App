@@ -146,6 +146,7 @@
     "allow_popups": "Por favor, permite las ventanas emergentes para este sitio para conectar tu cuenta.",
     "error_boundary_title": "¡Ups! Algo salió mal",
     "error_boundary_description": "Lo sentimos, pero ocurrió un error inesperado. Por favor, intenta recargar la página.",
-    "reload_page": "Recargar página"
+    "reload_page": "Recargar página",
+    "coming_soon": "Próximamente..."
   }
 }

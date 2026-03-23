@@ -887,14 +887,19 @@ app.get("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const preferences = await getUserPreferences(user.id);
+    
+    if (!preferences) {
+      console.warn(`⚠️ No preferences found for user ${user.id}, returning defaults`);
+      return res.json({
+        user_id: user.id,
+        onboarding_done: false,
+        voice_id: 'DODLEQrClDo8wCz460ld',
+        language: 'en'
+      });
+    }
 
-    // Si no hay datos, retornamos los defaults (esto es normal la primera vez)
-    res.json(preferences || {
-      user_id: user.id,
-      onboarding_done: false,
-      voice_id: 'DODLEQrClDo8wCz460ld',
-      language: 'en'
-    });
+    console.log(`✅ Preferences loaded for user ${user.id}:`, { onboarding_done: preferences.onboarding_done });
+    res.json(preferences);
   } catch (error: any) {
     console.error("❌ Error fetching user preferences:", error);
     res.status(500).json({ 
