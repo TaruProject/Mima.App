@@ -20,6 +20,12 @@ import {
   saveChatMessage,
   clearChatHistory
 } from "./src/services/userPreferencesService.js";
+import {
+  buildSystemPrompt,
+  getMimaStyle,
+  normalizeStyleId,
+  type MimaStyleId,
+} from "./src/config/mimaStyles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -574,8 +580,10 @@ app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
 
     const oauth2Client = getOAuth2Client(req);
     const scopes = [
-      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.compose',
+      'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.profile'
     ];
     const url = oauth2Client.generateAuthUrl({
@@ -1094,21 +1102,117 @@ interface CalendarEventData {
   isAllDay?: boolean;
 }
 
+function normalizeDateTextForParsing(dateText: string, language?: string): string {
+  let normalized = dateText.trim().toLowerCase();
+
+  const sharedReplacements: Array<[RegExp, string]> = [
+    [/\bpasado manana\b/g, 'day after tomorrow'],
+    [/\bpasado mañana\b/g, 'day after tomorrow'],
+    [/\bmanana\b/g, 'tomorrow'],
+    [/\bmañana\b/g, 'tomorrow'],
+    [/\bhoy\b/g, 'today'],
+    [/\beste fin de semana\b/g, 'this weekend'],
+    [/\bla proxima semana\b/g, 'next week'],
+    [/\bla próxima semana\b/g, 'next week'],
+    [/\besta semana\b/g, 'this week'],
+    [/\bproximo mes\b/g, 'next month'],
+    [/\bpróximo mes\b/g, 'next month'],
+    [/\ba las\b/g, 'at'],
+    [/\bidag\b/g, 'today'],
+    [/\bimorgon\b/g, 'tomorrow'],
+    [/\bi morgon\b/g, 'tomorrow'],
+    [/\bi overmorgon\b/g, 'day after tomorrow'],
+    [/\bnasta vecka\b/g, 'next week'],
+    [/\bnästa vecka\b/g, 'next week'],
+    [/\bden har veckan\b/g, 'this week'],
+    [/\bden här veckan\b/g, 'this week'],
+    [/\bpa\b/g, 'at'],
+    [/\bpå\b/g, 'at'],
+    [/\btanaan\b/g, 'today'],
+    [/\btänään\b/g, 'today'],
+    [/\bhuomenna\b/g, 'tomorrow'],
+    [/\bylihuomenna\b/g, 'day after tomorrow'],
+    [/\bensi viikko\b/g, 'next week'],
+    [/\btalla viikolla\b/g, 'this week'],
+    [/\btällä viikolla\b/g, 'this week'],
+    [/\bensi kuu\b/g, 'next month'],
+    [/\bklo\b/g, 'at'],
+    [/\bmaanantai\b/g, 'monday'],
+    [/\btiistai\b/g, 'tuesday'],
+    [/\bkeskiviikko\b/g, 'wednesday'],
+    [/\btorstai\b/g, 'thursday'],
+    [/\bperjantai\b/g, 'friday'],
+    [/\blauantai\b/g, 'saturday'],
+    [/\bsunnuntai\b/g, 'sunday'],
+    [/\blunes\b/g, 'monday'],
+    [/\bmartes\b/g, 'tuesday'],
+    [/\bmiercoles\b/g, 'wednesday'],
+    [/\bmiércoles\b/g, 'wednesday'],
+    [/\bjueves\b/g, 'thursday'],
+    [/\bviernes\b/g, 'friday'],
+    [/\bsabado\b/g, 'saturday'],
+    [/\bsábado\b/g, 'saturday'],
+    [/\bdomingo\b/g, 'sunday'],
+  ];
+
+  for (const [pattern, replacement] of sharedReplacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  if (language === 'fi') {
+    normalized = normalized.replace(/\bensi\b/g, 'next');
+  }
+
+  return normalized.replace(/\s+/g, ' ').trim();
+}
+
+function getChronoParsers(language?: string): Array<{ parse: typeof chrono.parse }> {
+  const englishParser = { parse: chrono.parse.bind(chrono) };
+  const spanishParser = { parse: chrono.es.parse.bind(chrono.es) };
+  const swedishParser = { parse: chrono.sv.parse.bind(chrono.sv) };
+
+  switch (language) {
+    case 'es':
+      return [spanishParser, englishParser, swedishParser];
+    case 'sv':
+      return [swedishParser, englishParser, spanishParser];
+    case 'fi':
+      return [englishParser, spanishParser, swedishParser];
+    default:
+      return [englishParser, spanishParser, swedishParser];
+  }
+}
+
 // Parse natural language date using chrono-node
-function parseNaturalDate(dateText: string, referenceDate?: Date): { start: Date; end?: Date; isAllDay: boolean } | null {
-  const refDate = referenceDate || new Date();
-  const results = chrono.parse(dateText, refDate, { forwardDate: true });
+function parseNaturalDate(
+  dateText: string,
+  options?: { referenceDate?: Date; language?: string }
+): { start: Date; end?: Date; isAllDay: boolean } | null {
+  const refDate = options?.referenceDate || new Date();
+  const candidates = Array.from(
+    new Set([dateText.trim(), normalizeDateTextForParsing(dateText, options?.language)].filter(Boolean))
+  );
 
-  if (results.length === 0) return null;
+  for (const parser of getChronoParsers(options?.language)) {
+    for (const candidate of candidates) {
+      const results = parser.parse(candidate, refDate, { forwardDate: true });
 
-  const result = results[0];
-  const start = result.start.date();
-  const end = result.end ? result.end.date() : undefined;
+      if (results.length === 0) {
+        continue;
+      }
 
-  // Check if it's an all-day event (no specific time mentioned)
-  const isAllDay = !result.start.isCertain('hour');
+      const result = results[0];
+      const start = result.start.date();
+      const end = result.end ? result.end.date() : undefined;
 
-  return { start, end, isAllDay };
+      // Check if it's an all-day event (no specific time mentioned)
+      const isAllDay = !result.start.isCertain('hour');
+
+      return { start, end, isAllDay };
+    }
+  }
+
+  return null;
 }
 
 // Create a calendar event
@@ -1289,6 +1393,120 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
   });
 
   return response.data;
+}
+
+function formatCalendarEventLine(event: any, langCode: string): string {
+  const start = event.start?.dateTime
+    ? new Date(event.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' })
+    : 'Todo el dia';
+
+  return `${start}: ${event.summary || 'Sin titulo'}`;
+}
+
+function formatCalendarListResponse(
+  styleId: MimaStyleId,
+  langCode: string,
+  dateLabel: string,
+  events: any[]
+): string {
+  if (events.length === 0) {
+    return langCode === 'es'
+      ? `No tienes eventos programados para ${dateLabel}.`
+      : `No events scheduled for ${dateLabel}.`;
+  }
+
+  const lines = events.map((event: any) => formatCalendarEventLine(event, langCode));
+
+  if (styleId === 'zen') {
+    return lines.join('\n');
+  }
+
+  if (styleId === 'profesional') {
+    return `Agenda para ${dateLabel}:\n\n${lines.map((line, index) => `${index + 1}. ${line}`).join('\n')}`;
+  }
+
+  if (styleId === 'creativo') {
+    return `Tu mapa del dia para ${dateLabel}:\n\n${lines.map((line) => `- ${line}`).join('\n')}`;
+  }
+
+  if (styleId === 'familiar') {
+    return `Para ${dateLabel} tienes esto:\n\n${lines.map((line) => `- ${line}`).join('\n')}`;
+  }
+
+  return `Eventos para ${dateLabel}:\n\n${lines.map((line) => `- ${line}`).join('\n')}`;
+}
+
+function formatCalendarCreationResponse(
+  styleId: MimaStyleId,
+  langCode: string,
+  summary: string,
+  startDate: Date
+): string {
+  const dateText = startDate.toLocaleString(langCode, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  if (styleId === 'zen') {
+    return `Creado: ${summary} - ${dateText}`;
+  }
+
+  if (styleId === 'profesional') {
+    return `Evento confirmado: "${summary}" - ${dateText}.`;
+  }
+
+  if (styleId === 'creativo') {
+    return `Listo, ya quedo agendado "${summary}" para ${dateText}.`;
+  }
+
+  if (styleId === 'familiar') {
+    return `Listo, ya te apunte "${summary}" para ${dateText}.`;
+  }
+
+  return `Evento creado: "${summary}" para ${dateText}.`;
+}
+
+function formatCalendarUpdateResponse(styleId: MimaStyleId, summary: string): string {
+  if (styleId === 'zen') {
+    return `Actualizado: ${summary}`;
+  }
+
+  if (styleId === 'familiar') {
+    return `Hecho, ya actualice "${summary}".`;
+  }
+
+  return `Evento actualizado: "${summary}".`;
+}
+
+function formatCalendarDeleteResponse(styleId: MimaStyleId): string {
+  if (styleId === 'zen') {
+    return 'Evento eliminado.';
+  }
+
+  if (styleId === 'familiar') {
+    return 'Listo, ese evento ya no esta en tu calendario.';
+  }
+
+  return 'Evento eliminado correctamente.';
+}
+
+function formatDraftCreatedResponse(styleId: MimaStyleId, to: string, subject: string): string {
+  if (styleId === 'zen') {
+    return `Borrador creado.\nPara: ${to}\nAsunto: ${subject}`;
+  }
+
+  if (styleId === 'profesional') {
+    return `Borrador preparado correctamente.\nPara: ${to}\nAsunto: ${subject}\n\nQueda pendiente tu aprobacion antes del envio.`;
+  }
+
+  if (styleId === 'familiar') {
+    return `Te deje listo este borrador:\nPara: ${to}\nAsunto: ${subject}\n\nLe echas un vistazo y, si quieres, luego lo enviamos.`;
+  }
+
+  return `Borrador creado correctamente.\nPara: ${to}\nAsunto: ${subject}\n\nRevisalo antes de enviarlo.`;
 }
 
 // ---- Gemini AI Chat Proxy ----
@@ -1507,7 +1725,7 @@ function resolveTimeZone(location: string): { timeZone: string; note?: string } 
     }
   }
 
-  return bestScore >= 0.62 ? bestMatch : null;
+  return bestScore >= 0.55 ? bestMatch : null;
 }
 
 function getLocalizedCurrentTimeResponse(location: string, langCode: string): string {
@@ -1564,6 +1782,156 @@ function extractTimeLocation(message: string): string | null {
   return null;
 }
 
+function extractToolPayload(text: string): string | null {
+  let trimmedText = text.trim();
+
+  if (trimmedText.includes('```json')) {
+    const match = trimmedText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match) trimmedText = match[1].trim();
+  } else if (trimmedText.includes('```')) {
+    const match = trimmedText.match(/```\s*([\s\S]*?)\s*```/);
+    if (match) trimmedText = match[1].trim();
+  }
+
+  const jsonMatch = trimmedText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
+  if (jsonMatch) {
+    trimmedText = jsonMatch[0].trim();
+  }
+
+  if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
+    return trimmedText;
+  }
+
+  return null;
+}
+
+function looksLikeCalendarIntent(message: string): boolean {
+  const normalized = normalizeLookupValue(message);
+  const calendarPhrases = [
+    'create event',
+    'add event',
+    'schedule',
+    'calendar',
+    'meeting',
+    'appointment',
+    'reminder',
+    'crea evento',
+    'crear evento',
+    'agenda',
+    'calendario',
+    'reunion',
+    'cita',
+    'recordatorio',
+    'luo tapahtuma',
+    'kalenteri',
+    'tapaaminen',
+    'muistutus',
+    'skapa handelse',
+    'kalender',
+    'mote',
+    'paminnelse',
+  ];
+
+  return calendarPhrases.some((phrase) => normalized.includes(normalizeLookupValue(phrase)));
+}
+
+async function extractToolCallFromMessage(
+  ai: GoogleGenAI,
+  message: string,
+  langCode: string,
+  userHasGoogleTools: boolean
+): Promise<string | null> {
+  if (!userHasGoogleTools || !looksLikeCalendarIntent(message)) {
+    return null;
+  }
+
+  try {
+    const extractorPrompt =
+      `Convert the user's latest request into a single JSON tool call when the intent is clearly about Google Calendar. ` +
+      `Available tools: createCalendarEvent, listCalendarEvents, searchCalendarEvents, deleteCalendarEvent, updateCalendarEvent. ` +
+      `Return ONLY valid JSON and nothing else. ` +
+      `If the request is not clearly a calendar action, return {"tool":"none"}. ` +
+      `For createCalendarEvent use keys summary, dateText, description. ` +
+      `For listCalendarEvents use keys dateText, maxResults. ` +
+      `For searchCalendarEvents use keys query, maxResults. ` +
+      `For deleteCalendarEvent use key eventId only if the id is explicitly known. ` +
+      `For updateCalendarEvent use keys eventId plus any of summary, description, dateText only if the id is explicitly known. ` +
+      `Preserve the original language wording inside summary, description, query, and dateText.`;
+
+    const extraction = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: `${extractorPrompt}\n\nLanguage: ${langCode}\nUser request: ${message}` },
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 300,
+      },
+    });
+
+    const payload = extractToolPayload(extraction.text || '');
+    if (!payload) {
+      return null;
+    }
+
+    if (payload.includes('"tool":"none"') || payload.includes('"tool": "none"')) {
+      return null;
+    }
+
+    return payload;
+  } catch (error: any) {
+    console.error('Tool extraction fallback failed:', error.message);
+    return null;
+  }
+}
+
+function getCalendarToolErrorMessage(error: any, langCode: string): string {
+  const message = String(error?.message || '');
+  const isPermissionError =
+    error?.status === 403 ||
+    error?.code === 403 ||
+    /insufficient permissions|insufficientpermission|forbidden|calendar usage limits/i.test(message);
+  const isTokenError =
+    error?.status === 401 ||
+    /invalid_grant|expired or revoked|refresh token/i.test(message);
+
+  if (isPermissionError) {
+    const messages: Record<string, string> = {
+      en: 'I need Google Calendar write permission to do that. Please reconnect Google from Calendar so I can create and edit events.',
+      es: 'Necesito permiso de escritura en Google Calendar para hacer eso. Vuelve a conectar Google desde Calendario para que pueda crear y editar eventos.',
+      fi: 'Tarvitsen Google-kalenterin kirjoitusoikeuden siihen. Yhdista Google uudelleen Kalenteri-nakymasta, jotta voin luoda ja muokata tapahtumia.',
+      sv: 'Jag behover skrivbehorighet till Google Kalender for det. Anslut Google pa nytt fran Kalender sa att jag kan skapa och redigera handelser.',
+    };
+
+    return messages[langCode] || messages.en;
+  }
+
+  if (isTokenError) {
+    const messages: Record<string, string> = {
+      en: 'Your Google Calendar connection expired. Please reconnect it and try again.',
+      es: 'La conexion con Google Calendar expiro. Vuelve a conectarla e intentalo de nuevo.',
+      fi: 'Google-kalenteriyhteytesi vanheni. Yhdista se uudelleen ja yrita sitten uudestaan.',
+      sv: 'Din Google Kalender-anslutning har gått ut. Anslut den igen och forsok sedan pa nytt.',
+    };
+
+    return messages[langCode] || messages.en;
+  }
+
+  const messages: Record<string, string> = {
+    en: 'I could not complete the calendar action right now. Please try again.',
+    es: 'No pude completar la accion de calendario en este momento. Intentalo de nuevo.',
+    fi: 'En voinut suorittaa kalenteritoimintoa juuri nyt. Yrita uudelleen.',
+    sv: 'Jag kunde inte slutföra kalenderatgarden just nu. Forsok igen.',
+  };
+
+  return messages[langCode] || messages.en;
+}
+
 const languageInstructions: Record<string, string> = {
   fi: 'Vastaa AINA suomeksi. Käytä luontevaa, ystävällistä suomea.',
   sv: 'Svara ALLTID på svenska. Använd naturlig, vänlig svenska.',
@@ -1574,6 +1942,7 @@ const languageInstructions: Record<string, string> = {
 // Model selection router - determines which Gemini model to use
 function selectModelForTask(message: string, mode?: string): { model: string; reason: string; maxTokens: number } {
   const lowerMsg = message.toLowerCase();
+  const activeStyleId = normalizeStyleId(mode);
 
   // Complex task indicators that need Pro model
   const complexIndicators = [
@@ -1592,7 +1961,7 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   // Check for complex task patterns
   const isComplexTask = complexIndicators.some(indicator => lowerMsg.includes(indicator));
   const isLongContext = message.length > 500;
-  const isBusinessMode = mode === 'Business Mode';
+  const isBusinessMode = activeStyleId === 'profesional';
 
   // Decision logic - Using Gemini 2.5 models (1.5 is deprecated)
   if (isBusinessMode && isComplexTask) {
@@ -1655,15 +2024,18 @@ app.get("/api/debug/env-status", (req, res) => {
 });
 
 app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
-  const { message, mode, language, history } = req.body;
+  const { message, mode, language, history, timezone } = req.body;
   const user = (req as any).user;
   const userId = user.id;
+  const activeStyle = getMimaStyle(mode);
+  const activeStyleId = activeStyle.id;
+  const clientTimeZone = typeof timezone === 'string' && timezone.trim() ? timezone.trim() : 'UTC';
 
   console.log("═══════════════════════════════════════════");
   console.log("🤖 CHAT API REQUEST");
   console.log("═══════════════════════════════════════════");
   console.log("   Message:", message?.substring(0, 100));
-  console.log("   Mode:", mode || 'Neutral');
+  console.log("   Mode:", activeStyleId);
   console.log("   Language:", language || 'en');
   console.log("   UserId:", userId);
   console.log("   GEMINI_API_KEY set:", !!process.env.GEMINI_API_KEY);
@@ -1721,8 +2093,48 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       });
     }
 
+    const resolvedLangCode = language || 'en';
+    const resolvedLangInstruction = languageInstructions[resolvedLangCode] || languageInstructions.en;
+    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+
+    let tokenData: { tokens: string } | null = null;
+    let userTokens: any | null = null;
+    let todayEventsSummary = resolvedLangCode === 'es' ? 'No disponible' : 'Not available';
+
+    if (userId) {
+      const tokenResult = await supabaseAdmin
+        .from('user_google_tokens')
+        .select('tokens')
+        .eq('user_id', userId)
+        .single();
+
+      tokenData = tokenResult.data || null;
+
+      if (tokenData?.tokens) {
+        try {
+          userTokens = JSON.parse(decrypt(tokenData.tokens));
+
+          const today = new Date();
+          const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+          const todayEvents = await listCalendarEvents(
+            userTokens,
+            today.toISOString().split('T')[0],
+            tomorrow.toISOString().split('T')[0],
+            5,
+          );
+
+          todayEventsSummary = todayEvents.length > 0
+            ? todayEvents.map((event: any) => formatCalendarEventLine(event, resolvedLangCode)).join(' | ')
+            : (resolvedLangCode === 'es' ? 'Sin eventos proximos hoy' : 'No upcoming events today');
+        } catch (tokenError: any) {
+          console.error("Could not prepare user context from Google tokens:", tokenError.message);
+          userTokens = null;
+        }
+      }
+    }
+
     // INTELLIGENT MODEL ROUTING
-    const modelSelection = selectModelForTask(message, mode);
+    const modelSelection = selectModelForTask(message, activeStyleId);
     console.log("🧠 Model selected:", modelSelection.model);
     console.log("   Reason:", modelSelection.reason);
 
@@ -1740,7 +2152,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
 
     // CALENDAR TOOLS INSTRUCTIONS for function calling
-    const calendarToolsInstruction = userId ? `
+    const calendarToolsInstruction = userTokens ? `
 
 CALENDAR TOOLS:
 Tienes acceso al calendario del usuario. Para crear eventos, responde EXACTAMENTE con este formato JSON:
@@ -1763,7 +2175,7 @@ Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO 
 Si NO es una petición de calendario, responde normalmente.` : '';
 
     // GMAIL TOOLS INSTRUCTIONS for function calling
-    const gmailToolsInstruction = userId ? `
+    const gmailToolsInstruction = userTokens ? `
 
 GMAIL TOOLS (BORRADORES SEGUROS):
 Tienes acceso a Gmail del usuario. IMPORTANTE: NUNCA envíes emails automáticamente. Siempre crea borradores que el usuario debe revisar y aprobar antes de enviar.
@@ -1820,6 +2232,43 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
     console.log("📝 Model to use:", modelSelection.model);
     console.log("📝 Max tokens:", modelSelection.maxTokens);
 
+    const capabilities = [
+      'Consultas de informacion general',
+      ...(userTokens
+        ? [
+            'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)',
+            'Redaccion y respuesta de correos via Gmail en modo borrador',
+          ]
+        : [
+            'Google Calendar no conectado actualmente',
+            'Gmail no conectado actualmente',
+          ]),
+    ];
+
+    const finalSystemInstruction = buildSystemPrompt(activeStyleId, {
+      currentDateTime: new Date().toLocaleString(langCode, {
+        timeZone: clientTimeZone,
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      userName: user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario',
+      timezone: clientTimeZone,
+      todayEvents: todayEventsSummary,
+      capabilities,
+      extraInstructions: [
+        `IDIOMA: ${langInstruction}`,
+        'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
+        'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
+        'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
+        ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
+        ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
+        `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
+      ],
+    });
+
     // Call Gemini API with selected model
     console.log("🔄 Calling Gemini API...");
     console.log("🔄 Model:", modelSelection.model);
@@ -1849,7 +2298,7 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
         model: primaryModel,
         contents,
         config: {
-          systemInstruction: enhancedSystemInstruction,
+          systemInstruction: finalSystemInstruction,
           temperature: 0.7,
           maxOutputTokens: modelSelection.maxTokens,
         },
@@ -1879,21 +2328,16 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
     if (userId) {
       try {
         // Try to parse as JSON function call - allow for markdown blocks
-        let trimmedText = responseText.trim();
-        if (trimmedText.includes('```json')) {
-          const match = trimmedText.match(/```json\s*([\s\S]*?)\s*```/);
-          if (match) trimmedText = match[1].trim();
-        } else if (trimmedText.includes('```')) {
-          const match = trimmedText.match(/```\s*([\s\S]*?)\s*```/);
-          if (match) trimmedText = match[1].trim();
+        let trimmedText = extractToolPayload(responseText) || '';
+        if (!trimmedText) {
+          const extractedToolCall = await extractToolCallFromMessage(ai, message, langCode, !!userTokens);
+          if (extractedToolCall) {
+            trimmedText = extractedToolCall;
+            console.log("Fallback extracted tool call:", trimmedText);
+          }
         }
 
-        const jsonMatch = trimmedText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
-        if (jsonMatch) {
-          trimmedText = jsonMatch[0].trim();
-        }
-
-        if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
+        if (trimmedText) {
           console.log("🔧 Detected function call, parsing...");
           const functionCall = JSON.parse(trimmedText);
 
@@ -1914,19 +2358,19 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
               .eq('user_id', userId)
               .single();
 
-            if (!tokenData) {
+            if (!userTokens) {
               responseText = "Necesitas conectar tu cuenta de Google primero para usar el calendario. Ve a la sección de Calendario para conectarla.";
             } else {
-              const userTokens = JSON.parse(decrypt(tokenData.tokens));
-
               // Execute the appropriate function
               if (functionCall.tool === 'createCalendarEvent') {
-                const dateInfo = parseNaturalDate(functionCall.dateText);
+                try {
+                const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
                 if (!dateInfo) {
                   responseText = "No pude entender la fecha. Por favor, sé más específico (ej: 'mañana a las 3pm' o 'el lunes que viene').";
                 } else {
-                  // Default duration: 1 hour for timed events
-                  const endDate = dateInfo.end || new Date(dateInfo.start.getTime() + 60 * 60 * 1000);
+                  const endDate =
+                    dateInfo.end ||
+                    new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
 
                   const eventData: CalendarEventData = {
                     summary: functionCall.summary,
@@ -1938,10 +2382,15 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
 
                   const createdEvent = await createCalendarEvent(userTokens, eventData);
                   responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
+                  responseText = formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start);
                   console.log("   Created event:", createdEvent.id);
                 }
+                } catch (calendarError: any) {
+                  console.error("   Error creating calendar event:", calendarError.message);
+                  responseText = getCalendarToolErrorMessage(calendarError, langCode);
+                }
               } else if (functionCall.tool === 'listCalendarEvents') {
-                const dateInfo = parseNaturalDate(functionCall.dateText);
+                const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
                 if (!dateInfo) {
                   // Default to today if date not understood
                   const today = new Date();
@@ -1982,25 +2431,36 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                   }).join('\n');
                 }
               } else if (functionCall.tool === 'deleteCalendarEvent') {
+                try {
                 await deleteCalendarEvent(userTokens, functionCall.eventId);
                 responseText = "✅ Evento eliminado correctamente.";
+                responseText = formatCalendarDeleteResponse(activeStyleId);
+                } catch (calendarError: any) {
+                  console.error("   Error deleting calendar event:", calendarError.message);
+                  responseText = getCalendarToolErrorMessage(calendarError, langCode);
+                }
               } else if (functionCall.tool === 'updateCalendarEvent') {
-                const updates: Partial<CalendarEventData> = {};
+                try {
+                  const updates: Partial<CalendarEventData> = {};
                 if (functionCall.summary) updates.summary = functionCall.summary;
                 if (functionCall.description) updates.description = functionCall.description;
                 if (functionCall.dateText) {
-                  const dateInfo = parseNaturalDate(functionCall.dateText);
+                  const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
                   if (dateInfo) {
                     updates.startDate = dateInfo.start;
-                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + 60 * 60 * 1000);
+                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
                     updates.isAllDay = dateInfo.isAllDay;
                   }
                 }
 
                 const updatedEvent = await updateCalendarEvent(userTokens, functionCall.eventId, updates);
+                responseText = formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary);
                 responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
+                } catch (calendarError: any) {
+                  console.error("   Error updating calendar event:", calendarError.message);
+                  responseText = getCalendarToolErrorMessage(calendarError, langCode);
+                }
               }
-
               // GMAIL TOOLS EXECUTION
               else if (functionCall.tool === 'readGmailMessage') {
                 try {
@@ -2051,6 +2511,7 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                   });
 
                   responseText = `📝 Borrador creado exitosamente.\nPara: ${functionCall.to}\nAsunto: ${functionCall.subject}\n\nEl borrador está guardado. ¿Quieres que lo envíe o prefieres revisarlo primero?`;
+                  responseText = formatDraftCreatedResponse(activeStyleId, functionCall.to, functionCall.subject);
                   console.log("   Draft created:", draft.data.id);
                 } catch (error: any) {
                   console.error("   Error creating draft:", error.message);

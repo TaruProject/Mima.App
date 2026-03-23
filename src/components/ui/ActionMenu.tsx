@@ -1,14 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Paperclip, Camera, Theater, ChevronRight } from 'lucide-react';
-import clsx from 'clsx';
+import { Paperclip, Camera, Theater, ChevronRight, MessageSquarePlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface ActionMenuProps {
   isOpen: boolean;
   onClose: () => void;
-  currentMode: string;
+  currentModeLabel: string;
   onSelectMode: () => void;
+  onNewConversation: () => void;
   onAttachFile: () => void;
   onTakeScreenshot: () => void;
 }
@@ -16,8 +16,9 @@ interface ActionMenuProps {
 export const ActionMenu: React.FC<ActionMenuProps> = ({
   isOpen,
   onClose,
-  currentMode,
+  currentModeLabel,
   onSelectMode,
+  onNewConversation,
   onAttachFile,
   onTakeScreenshot,
 }) => {
@@ -65,6 +66,19 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
             className="fixed bottom-24 left-4 right-4 max-w-3xl mx-auto bg-surface-dark/95 backdrop-blur-xl rounded-3xl border border-white/10 shadow-2xl z-[70] overflow-hidden"
           >
             <div className="flex flex-col py-2">
+              <button
+                onClick={() => {
+                  onNewConversation();
+                  onClose();
+                }}
+                className="flex items-center gap-[14px] px-5 min-h-[52px] w-full hover:bg-white/5 transition-colors text-left"
+              >
+                <MessageSquarePlus className="w-5 h-5 text-primary" />
+                <span className="text-base font-medium text-white">{t('action_menu.new_conversation')}</span>
+              </button>
+
+              <div className="h-[1px] bg-white/10 my-1 mx-5" />
+
               {/* Attach */}
               <button
                 onClick={() => {
@@ -104,7 +118,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/20 text-primary border border-primary/30">
-                    {currentMode}
+                    {currentModeLabel}
                   </span>
                   <ChevronRight className="w-4 h-4 text-white/40" />
                 </div>

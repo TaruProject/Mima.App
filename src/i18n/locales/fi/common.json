@@ -108,6 +108,7 @@
     "new_action": "Uusi toiminto"
   },
   "action_menu": {
+    "new_conversation": "Uusi keskustelu",
     "attach": "Lisää tiedostoja tai kuvia",
     "screenshot": "Ota kuvakaappaus",
     "select_mode": "Valitse tila"
@@ -116,12 +117,18 @@
     "title": "Valitse tila",
     "neutral": "Neutraali",
     "neutral_desc": "Tasapainoinen ja tehokas",
+    "profesional": "Ammattimainen",
+    "profesional_desc": "Muodollinen ja asiallinen",
     "business": "Ammattimainen",
     "business_desc": "Muodollinen ja asiallinen",
+    "creativo": "Luova",
+    "creativo_desc": "Inspiroiva ja ilmaisuvoimainen",
     "creative": "Luova",
     "creative_desc": "Inspiroiva ja ilmaisuvoimainen",
     "zen": "Zen",
     "zen_desc": "Tiivis ja rauhallinen",
+    "familiar": "Laheinen",
+    "familiar_desc": "Laheinen ja ystavallinen",
     "family": "Perhe",
     "family_desc": "Läheinen ja ystävällinen"
   },

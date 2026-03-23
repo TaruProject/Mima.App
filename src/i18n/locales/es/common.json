@@ -108,6 +108,7 @@
     "new_action": "Nueva acción"
   },
   "action_menu": {
+    "new_conversation": "Nueva conversacion",
     "attach": "Agregar archivos o fotos",
     "screenshot": "Tomar captura de pantalla",
     "select_mode": "Seleccionar modo"
@@ -116,12 +117,18 @@
     "title": "Seleccionar modo",
     "neutral": "Neutral",
     "neutral_desc": "Equilibrado y eficiente",
+    "profesional": "Profesional",
+    "profesional_desc": "Formal y ejecutivo",
     "business": "Profesional",
     "business_desc": "Formal y ejecutivo",
+    "creativo": "Creativo",
+    "creativo_desc": "Inspirador y expresivo",
     "creative": "Creativo",
     "creative_desc": "Inspirador y expresivo",
     "zen": "Zen",
     "zen_desc": "Conciso y tranquilo",
+    "familiar": "Familiar",
+    "familiar_desc": "Cercano y amable",
     "family": "Familiar",
     "family_desc": "Cercano y amable"
   },

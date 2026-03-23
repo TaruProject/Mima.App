@@ -33,6 +33,7 @@ export async function generateChatResponse(
         mode,
         language: language || 'en',
         history: history || [],
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
       signal: abortController.signal,
     });

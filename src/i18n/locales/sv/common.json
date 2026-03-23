@@ -108,6 +108,7 @@
     "new_action": "Ny åtgärd"
   },
   "action_menu": {
+    "new_conversation": "Ny konversation",
     "attach": "Lägg till filer eller foton",
     "screenshot": "Ta skärmbild",
     "select_mode": "Välj läge"
@@ -116,12 +117,18 @@
     "title": "Välj läge",
     "neutral": "Neutral",
     "neutral_desc": "Balanserad och effektiv",
+    "profesional": "Professionell",
+    "profesional_desc": "Formell och verkstallande",
     "business": "Professionell",
     "business_desc": "Formell och verkställande",
     "creative": "Kreativ",
     "creative_desc": "Inspirerande och uttrycksfull",
+    "creativo": "Kreativ",
+    "creativo_desc": "Inspirerande och uttrycksfull",
     "zen": "Zen",
     "zen_desc": "Koncis och lugn",
+    "familiar": "Familjar",
+    "familiar_desc": "Nara och vanlig",
     "family": "Familj",
     "family_desc": "Nära och vänlig"
   },

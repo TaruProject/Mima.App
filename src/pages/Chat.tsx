@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ActionMenu } from "../components/ui/ActionMenu";
 import { ModeBottomSheet } from "../components/ui/ModeBottomSheet";
 import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
+import { getMimaStyle, normalizeStyleId, type MimaStyleId } from "../config/mimaStyles";
 import { useAuth } from "../contexts/AuthContext";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
 import { useVoiceRecording } from "../hooks/useVoiceRecording";
@@ -23,6 +24,7 @@ interface ChatMessage {
 }
 
 const WELCOME_MESSAGE_ID = "welcome-message";
+const ACTIVE_STYLE_STORAGE_KEY = "mima_active_style";
 
 export default function Chat() {
   const { t, i18n } = useTranslation();
@@ -42,7 +44,13 @@ export default function Chat() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(() => [createWelcomeMessage()]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState("Neutral Mode");
+  const [mode, setMode] = useState<MimaStyleId>(() => {
+    try {
+      return normalizeStyleId(localStorage.getItem(ACTIVE_STYLE_STORAGE_KEY));
+    } catch {
+      return "neutral";
+    }
+  });
   const [voiceId, setVoiceId] = useState("DODLEQrClDo8wCz460ld");
   const [isLoading, setIsLoading] = useState(false);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
@@ -56,6 +64,7 @@ export default function Chat() {
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastPersistedMessageIdRef = useRef<string | null>(null);
+  const activeMode = getMimaStyle(mode);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -65,6 +74,14 @@ export default function Chat() {
       return prev;
     });
   }, [i18n.language]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_STYLE_STORAGE_KEY, mode);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [mode]);
 
   useEffect(() => {
     if (!user) return;
@@ -196,7 +213,13 @@ export default function Chat() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      const responseText = await generateChatResponse(userMsg, mode, i18n.language, history, session?.access_token);
+      const responseText = await generateChatResponse(
+        userMsg,
+        mode,
+        i18n.language,
+        history,
+        session?.access_token,
+      );
 
       if (responseText.includes("Unauthorized") || responseText.includes("auth")) {
         await supabase.auth.refreshSession();
@@ -237,6 +260,42 @@ export default function Chat() {
     }
 
     await startRecording();
+  };
+
+  const handleNewConversation = async () => {
+    stop();
+    setPlayingId(null);
+    setInput("");
+    setIsLoading(false);
+    setMessages([createWelcomeMessage()]);
+    lastPersistedMessageIdRef.current = null;
+
+    if (!user) {
+      return;
+    }
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        return;
+      }
+
+      const response = await fetch("/api/chat/history", {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        console.error("Failed to clear chat history:", await response.text());
+      }
+    } catch (error) {
+      console.error("Failed to start new conversation:", error);
+    }
   };
 
   const handlePlayAudio = async (msgId: number | string, text: string) => {
@@ -332,11 +391,12 @@ export default function Chat() {
         <ActionMenu
           isOpen={isActionMenuOpen}
           onClose={() => setIsActionMenuOpen(false)}
-          currentMode={mode}
+          currentModeLabel={t(activeMode.labelKey)}
           onSelectMode={() => {
             setIsActionMenuOpen(false);
             setIsModeSheetOpen(true);
           }}
+          onNewConversation={handleNewConversation}
           onAttachFile={() => alert(t("common.coming_soon"))}
           onTakeScreenshot={() => alert(t("common.coming_soon"))}
         />

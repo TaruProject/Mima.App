@@ -2,12 +2,13 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { MIMA_STYLE_OPTIONS, type MimaStyleId } from '../../config/mimaStyles';
 
 interface ModeBottomSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  currentMode: string;
-  onSelectMode: (mode: string) => void;
+  currentMode: MimaStyleId;
+  onSelectMode: (mode: MimaStyleId) => void;
 }
 
 export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
@@ -17,14 +18,6 @@ export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
   onSelectMode,
 }) => {
   const { t } = useTranslation();
-
-  const modes = [
-    { id: 'Neutral Mode', nameKey: 'modes.neutral', descKey: 'modes.neutral_desc' },
-    { id: 'Business Mode', nameKey: 'modes.business', descKey: 'modes.business_desc' },
-    { id: 'Creative Mode', nameKey: 'modes.creative', descKey: 'modes.creative_desc' },
-    { id: 'Zen Mode', nameKey: 'modes.zen', descKey: 'modes.zen_desc' },
-    { id: 'Family Mode', nameKey: 'modes.family', descKey: 'modes.family_desc' },
-  ];
 
   return (
     <AnimatePresence>
@@ -61,7 +54,7 @@ export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
             </div>
 
             <div className="space-y-3">
-              {modes.map((mode) => {
+              {MIMA_STYLE_OPTIONS.map((mode) => {
                 const isActive = currentMode === mode.id;
                 return (
                   <button
@@ -78,9 +71,9 @@ export const ModeBottomSheet: React.FC<ModeBottomSheetProps> = ({
                   >
                     <div className="text-left">
                       <p className={`font-bold ${isActive ? 'text-primary' : 'text-white'}`}>
-                        {t(mode.nameKey)}
+                        {t(mode.labelKey)}
                       </p>
-                      <p className="text-sm text-white/40">{t(mode.descKey)}</p>
+                      <p className="text-sm text-white/40">{t(mode.descriptionKey)}</p>
                     </div>
                     {isActive && (
                       <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
