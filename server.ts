@@ -1373,43 +1373,100 @@ function normalizeLookupValue(value: string): string {
     .trim();
 }
 
+function levenshteinDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const matrix = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) {
+    matrix[i][0] = i;
+  }
+
+  for (let j = 0; j < cols; j += 1) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+}
+
+function similarityScore(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) {
+    return Math.min(a.length, b.length) / Math.max(a.length, b.length);
+  }
+
+  const distance = levenshteinDistance(a, b);
+  return 1 - distance / Math.max(a.length, b.length);
+}
+
 const timeZoneAliases: Record<string, { timeZone: string; note?: string }> = {
   finland: { timeZone: 'Europe/Helsinki' },
   helsinki: { timeZone: 'Europe/Helsinki' },
+  helsingfors: { timeZone: 'Europe/Helsinki' },
   suomi: { timeZone: 'Europe/Helsinki' },
+  finlandia: { timeZone: 'Europe/Helsinki' },
   sweden: { timeZone: 'Europe/Stockholm' },
   stockholm: { timeZone: 'Europe/Stockholm' },
   sverige: { timeZone: 'Europe/Stockholm' },
+  suecia: { timeZone: 'Europe/Stockholm' },
+  estocolmo: { timeZone: 'Europe/Stockholm' },
   spain: { timeZone: 'Europe/Madrid' },
   espana: { timeZone: 'Europe/Madrid' },
   madrid: { timeZone: 'Europe/Madrid' },
   london: { timeZone: 'Europe/London' },
+  londres: { timeZone: 'Europe/London' },
   uk: { timeZone: 'Europe/London' },
   'united kingdom': { timeZone: 'Europe/London' },
   england: { timeZone: 'Europe/London' },
+  'reino unido': { timeZone: 'Europe/London' },
   paris: { timeZone: 'Europe/Paris' },
+  francia: { timeZone: 'Europe/Paris' },
   france: { timeZone: 'Europe/Paris' },
   berlin: { timeZone: 'Europe/Berlin' },
+  alemania: { timeZone: 'Europe/Berlin' },
   germany: { timeZone: 'Europe/Berlin' },
   rome: { timeZone: 'Europe/Rome' },
+  roma: { timeZone: 'Europe/Rome' },
+  italia: { timeZone: 'Europe/Rome' },
   italy: { timeZone: 'Europe/Rome' },
   'new york': { timeZone: 'America/New_York' },
+  'nueva york': { timeZone: 'America/New_York' },
   'united states': { timeZone: 'America/New_York', note: 'This uses Eastern Time.' },
   usa: { timeZone: 'America/New_York', note: 'This uses Eastern Time.' },
+  'estados unidos': { timeZone: 'America/New_York', note: 'This uses Eastern Time.' },
   chicago: { timeZone: 'America/Chicago' },
   denver: { timeZone: 'America/Denver' },
   'los angeles': { timeZone: 'America/Los_Angeles' },
   tokyo: { timeZone: 'Asia/Tokyo' },
+  tokio: { timeZone: 'Asia/Tokyo' },
   japan: { timeZone: 'Asia/Tokyo' },
+  japon: { timeZone: 'Asia/Tokyo' },
   seoul: { timeZone: 'Asia/Seoul' },
+  seul: { timeZone: 'Asia/Seoul' },
   'south korea': { timeZone: 'Asia/Seoul' },
+  'corea del sur': { timeZone: 'Asia/Seoul' },
   shanghai: { timeZone: 'Asia/Shanghai' },
   china: { timeZone: 'Asia/Shanghai' },
+  pekin: { timeZone: 'Asia/Shanghai' },
   kolkata: { timeZone: 'Asia/Kolkata' },
   india: { timeZone: 'Asia/Kolkata' },
   bangkok: { timeZone: 'Asia/Bangkok' },
   thailand: { timeZone: 'Asia/Bangkok' },
+  tailandia: { timeZone: 'Asia/Bangkok' },
   sydney: { timeZone: 'Australia/Sydney' },
+  sidney: { timeZone: 'Australia/Sydney' },
   australia: { timeZone: 'Australia/Sydney', note: 'This uses Sydney time.' },
 };
 
@@ -1427,7 +1484,30 @@ function resolveTimeZone(location: string): { timeZone: string; note?: string } 
     return cityName === normalized || cityName.includes(normalized) || normalized.includes(cityName);
   });
 
-  return matchedTimeZone ? { timeZone: matchedTimeZone } : null;
+  if (matchedTimeZone) {
+    return { timeZone: matchedTimeZone };
+  }
+
+  const candidates: Array<{ label: string; value: { timeZone: string; note?: string } }> = [
+    ...Object.entries(timeZoneAliases).map(([label, value]) => ({ label, value })),
+    ...supportedTimeZones.map((timeZone) => ({
+      label: normalizeLookupValue(timeZone.split('/').pop() || ''),
+      value: { timeZone },
+    })),
+  ];
+
+  let bestMatch: { timeZone: string; note?: string } | null = null;
+  let bestScore = 0;
+
+  for (const candidate of candidates) {
+    const score = similarityScore(normalized, candidate.label);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = candidate.value;
+    }
+  }
+
+  return bestScore >= 0.62 ? bestMatch : null;
 }
 
 function getLocalizedCurrentTimeResponse(location: string, langCode: string): string {
@@ -1469,9 +1549,9 @@ function getLocalizedCurrentTimeResponse(location: string, langCode: string): st
 function extractTimeLocation(message: string): string | null {
   const patterns = [
     /(?:what(?:'s| is) the time in|current time in|time in)\s+(.+)$/i,
-    /(?:que hora es en|hora en|hora actual en)\s+(.+)$/i,
+    /(?:qu[eé] hora es en|hora en|hora actual en)\s+(.+)$/i,
     /(?:paljonko kello on|mika aika on|kello\s+)\s*(?:on\s+)?(.+)$/i,
-    /(?:vad ar klockan i|tid i|aktuell tid i)\s+(.+)$/i,
+    /(?:vad ar klockan i|vad är klockan i|tid i|aktuell tid i)\s+(.+)$/i,
   ];
 
   for (const pattern of patterns) {
