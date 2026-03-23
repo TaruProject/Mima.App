@@ -1,0 +1,16 @@
+<IfModule mod_passenger.c>
+    PassengerAppRoot /home/u482312211/domains/me.mima-app.com/public_html
+    PassengerBaseURI /
+    PassengerAppType node
+    PassengerStartupFile server.ts
+    PassengerAppEnv production
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /index.html [L]
+</IfModule>
