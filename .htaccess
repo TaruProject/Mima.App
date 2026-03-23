@@ -2,7 +2,7 @@
     PassengerAppRoot /home/u482312211/domains/me.mima-app.com/public_html
     PassengerBaseURI /
     PassengerAppType node
-    PassengerStartupFile server.ts
+    PassengerStartupFile app.js
     PassengerAppEnv production
 </IfModule>
 
