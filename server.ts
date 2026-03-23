@@ -90,15 +90,18 @@ app.get("/api/ping", (req, res) => res.status(200).send("pong"));
 const PORT = process.env.PORT || 3000;
 
 // Determine environment explicitly
-const IS_HOSTINGER = !!process.env.HOSTINGER_ENV || !!process.env.HOSTINGER;
-const IS_PROD = process.env.NODE_ENV === 'production' || IS_HOSTINGER;
+const IS_HOSTINGER = !!process.env.HOSTINGER_ENV || !!process.env.HOSTINGER || process.env.USER === 'u482312211'; // Common Hostinger user pattern
+const IS_PROD = process.env.NODE_ENV === 'production' || IS_HOSTINGER || (!!process.env.PORT && process.env.PORT !== '3000');
 
-// Log environment detection
+// Log environment detection IMMEDIATELY
+console.log('═══════════════════════════════════════════');
+console.log('🚀 MIMA SERVER STARTING');
+console.log('═══════════════════════════════════════════');
 console.log('🔍 Environment detection:', {
   NODE_ENV: process.env.NODE_ENV || 'not set',
+  PORT: process.env.PORT || 'not set',
   IS_HOSTINGER,
-  IS_PROD,
-  HAS_PORT: !!process.env.PORT
+  IS_PROD
 });
 
 // Safe initialization of encryption key
@@ -2761,10 +2764,19 @@ async function startServer() {
   }
 
   // Simple listen: Express/Node will auto-detect if PORT is a string (socket) or number (TCP)
-  // Providing "0.0.0.0" can break Unix Sockets on some hosting providers
-  app.listen(PORT as any, () => {
-    console.log(`✅ Server running on ${PORT}`);
-  });
+  try {
+    const server = app.listen(PORT as any, () => {
+      console.log(`✅ Server successfully bound to ${PORT}`);
+      logToFile(`Server started on ${PORT}`);
+    });
+
+    server.on('error', (e: any) => {
+      console.error(`❌ SERVER LISTEN ERROR:`, e);
+      logToFile("LISTEN ERROR", { code: e.code, message: e.message });
+    });
+  } catch (listenError: any) {
+    console.error(`❌ CRITICAL: Failed to start listening:`, listenError);
+  }
 }
 
 // Global error handlers to prevent silent 503s
