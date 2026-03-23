@@ -888,7 +888,7 @@ app.get("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
     const user = (req as any).user;
     const preferences = await getUserPreferences(user.id);
 
-    // Fallback si no hay preferencias o la tabla no existe
+    // Si no hay datos, retornamos los defaults (esto es normal la primera vez)
     res.json(preferences || {
       user_id: user.id,
       onboarding_done: false,
@@ -896,14 +896,11 @@ app.get("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
       language: 'en'
     });
   } catch (error: any) {
-    console.error("Error fetching user preferences:", error);
-    // Fallback - retornar valores por defecto en lugar de error 500
-    res.status(200).json({
-      user_id: (req as any).user?.id || 'unknown',
-      onboarding_done: false,
-      voice_id: 'DODLEQrClDo8wCz460ld',
-      language: 'en',
-      note: 'Preferences service temporarily unavailable'
+    console.error("❌ Error fetching user preferences:", error);
+    res.status(500).json({ 
+      error: "Failed to fetch user preferences", 
+      details: error.message,
+      errorCode: "DB_PREFS_FETCH_FAILED"
     });
   }
 });
@@ -922,14 +919,12 @@ app.post("/api/user/preferences", authenticateSupabaseUser, async (req, res) => 
     if (success) {
       res.json({ success: true });
     } else {
-      // No fallar - solo loguear
-      console.warn("Failed to update preferences, but continuing");
-      res.status(200).json({ success: true, note: 'Preferences not saved (table may not exist)' });
+      console.error("❌ Failed to update user preferences in database");
+      res.status(500).json({ error: "Failed to save preferences to database" });
     }
   } catch (error: any) {
-    console.error("Error updating user preferences:", error);
-    // No fallar - retornar éxito aunque no se guarde
-    res.status(200).json({ success: true, note: 'Preferences update skipped (service unavailable)' });
+    console.error("❌ Error updating user preferences:", error);
+    res.status(500).json({ error: "Internal server error during preferences update", details: error.message });
   }
 });
 
@@ -941,9 +936,8 @@ app.get("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
     const messages = await getChatHistory(user.id, limit);
     res.json(messages);
   } catch (error: any) {
-    console.error("Error fetching chat history:", error);
-    // Fallback - retornar array vacío en lugar de error
-    res.status(200).json([]);
+    console.error("❌ Error fetching chat history:", error);
+    res.status(500).json({ error: "Failed to fetch chat history", details: error.message });
   }
 });
 
@@ -963,13 +957,12 @@ app.post("/api/chat/message", authenticateSupabaseUser, async (req, res) => {
     if (success) {
       res.json({ success: true });
     } else {
-      console.warn("Failed to save chat message, but continuing");
-      res.status(200).json({ success: true, note: 'Message not saved (table may not exist)' });
+      console.error("❌ Failed to save chat message to database");
+      res.status(500).json({ error: "Failed to save message to database" });
     }
   } catch (error: any) {
-    console.error("Error saving chat message:", error);
-    // No fallar - el chat debe seguir funcionando
-    res.status(200).json({ success: true, note: 'Message save skipped (service unavailable)' });
+    console.error("❌ Error saving chat message:", error);
+    res.status(500).json({ error: "Internal server error during message save", details: error.message });
   }
 });
 

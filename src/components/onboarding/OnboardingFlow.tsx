@@ -6,7 +6,7 @@ import { voices } from '../../constants/voices';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 
 interface OnboardingFlowProps {
-  onComplete: () => void;
+  onComplete: (voiceId?: string) => void;
 }
 
 const languages = [
@@ -49,7 +49,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       // Save preferences to Supabase if the user provided userId
       // Note: OnboardingFlow is often shown before the user is fully identified in the local state,
       // but if the parent component (Chat.tsx) has the user, it will also sync.
-      onComplete();
+      onComplete(selectedVoice);
     }
   };
 

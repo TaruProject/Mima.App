@@ -238,21 +238,28 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-full relative">
       {showOnboarding && (
-        <OnboardingFlow onComplete={async () => {
+        <OnboardingFlow onComplete={async (selectedVoiceId) => {
           setShowOnboarding(false);
+          if (selectedVoiceId) setVoiceId(selectedVoiceId);
+          
           // Sync with Supabase if logged in
           if (user) {
             try {
+              const { data: { session } } = await supabase.auth.getSession();
               await fetch('/api/user/preferences', {
                 method: 'POST',
                 headers: {
-                  'Authorization': `Bearer ${user.id}`,
+                  'Authorization': `Bearer ${session?.access_token}`,
                   'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ onboarding_done: true })
+                body: JSON.stringify({ 
+                  onboarding_done: true,
+                  voice_id: selectedVoiceId || voiceId,
+                  language: i18n.language
+                })
               });
             } catch (e) {
-              console.error("Failed to sync onboarding status:", e);
+              console.error("❌ Failed to sync preferences on onboarding completion:", e);
             }
           }
         }} />
@@ -314,7 +321,7 @@ export default function Chat() {
             )}
             <div className={`flex flex-col gap-1 ${msg.sender === t('common.you') ? "items-end" : ""}`}>
               {msg.sender === "Mima" && (
-                <span className="text-xs text-text-secondary ml-1">{msg.sender}</span>
+                <span className="text-xs text-text-secondary ml-1">{t('chat.sender_mima')}</span>
               )}
               <div
                 className={`p-4 rounded-2xl shadow-sm leading-relaxed text-[15px] ${
@@ -369,7 +376,7 @@ export default function Chat() {
               <img src="/assets/logo.jpg?v=4" alt="Mima" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary ml-1">Mima</span>
+              <span className="text-xs text-text-secondary ml-1">{t('chat.sender_mima')}</span>
               <div className="bg-surface-highlight text-slate-100 p-4 rounded-2xl rounded-tl-sm shadow-sm leading-relaxed text-[15px] flex items-center gap-1">
                 <div className="w-2 h-2 bg-text-secondary rounded-full animate-bounce"></div>
                 <div className="w-2 h-2 bg-text-secondary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
