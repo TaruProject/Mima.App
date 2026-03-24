@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Clock, ExternalLink } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO, type Locale } from "date-fns";
 import { fi } from 'date-fns/locale/fi';
@@ -41,8 +41,31 @@ export default function Calendar() {
 
   useEffect(() => {
     if (isConnected) {
-      fetchEvents();
+      void fetchEvents();
     }
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const intervalId = window.setInterval(() => {
+      void fetchEvents();
+    }, 60 * 1000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchEvents();
+      }
+    };
+
+    window.addEventListener("focus", fetchEvents);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", fetchEvents);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [isConnected]);
 
   const fetchEvents = async () => {
@@ -245,6 +268,15 @@ export default function Calendar() {
                             {event.location}
                           </span>
                         </div>
+                      )}
+                      {event.htmlLink && (
+                        <button
+                          onClick={() => window.open(event.htmlLink, "_blank", "noopener,noreferrer")}
+                          className="mt-3 flex items-center gap-2 text-xs text-primary hover:text-primary/80 transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          {t("calendar.open_google")}
+                        </button>
                       )}
                     </div>
                   </div>

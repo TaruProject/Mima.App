@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Paperclip, Camera, Theater, ChevronRight, MessageSquarePlus } from 'lucide-react';
+import { Paperclip, Theater, ChevronRight, MessageSquarePlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface ActionMenuProps {
@@ -10,7 +10,6 @@ interface ActionMenuProps {
   onSelectMode: () => void;
   onNewConversation: () => void;
   onAttachFile: () => void;
-  onTakeScreenshot: () => void;
 }
 
 export const ActionMenu: React.FC<ActionMenuProps> = ({
@@ -20,7 +19,6 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
   onSelectMode,
   onNewConversation,
   onAttachFile,
-  onTakeScreenshot,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
@@ -90,19 +88,6 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
                 <Paperclip className="w-5 h-5 text-white/80" />
                 <span className="text-base font-normal text-white">{t('action_menu.attach')}</span>
               </button>
-              
-              <button
-                onClick={() => {
-                  onTakeScreenshot();
-                  onClose();
-                }}
-                className="flex items-center gap-[14px] px-5 min-h-[52px] w-full hover:bg-white/5 transition-colors text-left"
-              >
-                <Camera className="w-5 h-5 text-white/80" />
-                <span className="text-base font-normal text-white">{t('action_menu.screenshot')}</span>
-              </button>
-
-              {/* Separator */}
               <div className="h-[1px] bg-white/10 my-1 mx-5" />
 
               {/* Mode selection */}

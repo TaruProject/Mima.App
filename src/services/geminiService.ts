@@ -11,12 +11,20 @@ export interface ChatResponse {
   details?: string;
 }
 
+interface ChatAttachmentPayload {
+  name: string;
+  mimeType: string;
+  data: string;
+  size: number;
+}
+
 export async function generateChatResponse(
   message: string,
   mode: string,
   language?: string,
   history?: Array<{ role: string; content: string }>,
-  authToken?: string
+  authToken?: string,
+  attachments?: ChatAttachmentPayload[],
 ): Promise<string> {
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), 30000); // 30s timeout
@@ -34,6 +42,7 @@ export async function generateChatResponse(
         language: language || 'en',
         history: history || [],
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        attachments: attachments || [],
       }),
       signal: abortController.signal,
     });

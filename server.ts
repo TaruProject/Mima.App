@@ -120,6 +120,8 @@ try {
   ENCRYPTION_KEY = Buffer.alloc(32, 'a'); // Last resort fallback
 }
 const IV_LENGTH = 16;
+const SERVER_STARTED_AT = new Date().toISOString();
+const SERVER_DEPLOY_ID = `${process.env.npm_package_version || "0.0.0"}-${Date.parse(SERVER_STARTED_AT)}`;
 
 function encrypt(text: string) {
   const iv = crypto.randomBytes(IV_LENGTH);
@@ -145,7 +147,7 @@ const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 // NOTE: Panic middleware removed - env validation now happens asynchronously
 // Errors are reported via /api/health and /api/health-detailed endpoints instead of 503
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
 // CSP headers - Unified for all environments
@@ -318,6 +320,15 @@ app.get("/api/health", (req, res) => {
       envValidationComplete,
       envValidation: envValidationComplete ? envValidationResult : 'pending'
     }
+  });
+});
+
+app.get("/api/version", (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    appVersion: process.env.npm_package_version || '0.0.0',
+    deployId: SERVER_DEPLOY_ID,
+    startedAt: SERVER_STARTED_AT,
   });
 });
 
@@ -1480,7 +1491,8 @@ function formatCalendarCreationResponse(
   styleId: MimaStyleId,
   langCode: string,
   summary: string,
-  startDate: Date
+  startDate: Date,
+  htmlLink?: string | null
 ): string {
   const dateText = startDate.toLocaleString(langCode, {
     year: 'numeric',
@@ -1491,22 +1503,22 @@ function formatCalendarCreationResponse(
   });
 
   if (styleId === 'zen') {
-    return `Creado: ${summary} - ${dateText}`;
+    return htmlLink ? `Creado: ${summary} - ${dateText}\n[Ver en Google Calendar](${htmlLink})` : `Creado: ${summary} - ${dateText}`;
   }
 
   if (styleId === 'profesional') {
-    return `Evento confirmado: "${summary}" - ${dateText}.`;
+    return htmlLink ? `Evento confirmado: "${summary}" - ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Evento confirmado: "${summary}" - ${dateText}.`;
   }
 
   if (styleId === 'creativo') {
-    return `Listo, ya quedo agendado "${summary}" para ${dateText}.`;
+    return htmlLink ? `Listo, ya quedo agendado "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Listo, ya quedo agendado "${summary}" para ${dateText}.`;
   }
 
   if (styleId === 'familiar') {
-    return `Listo, ya te apunte "${summary}" para ${dateText}.`;
+    return htmlLink ? `Listo, ya te apunte "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Listo, ya te apunte "${summary}" para ${dateText}.`;
   }
 
-  return `Evento creado: "${summary}" para ${dateText}.`;
+  return htmlLink ? `Evento creado: "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Evento creado: "${summary}" para ${dateText}.`;
 }
 
 function formatCalendarUpdateResponse(styleId: MimaStyleId, summary: string): string {
@@ -1845,6 +1857,39 @@ function extractToolPayload(text: string): string | null {
   return null;
 }
 
+function extractJsonPayload(text: string): string | null {
+  let trimmedText = text.trim();
+
+  if (trimmedText.includes('```json')) {
+    const match = trimmedText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match) trimmedText = match[1].trim();
+  } else if (trimmedText.includes('```')) {
+    const match = trimmedText.match(/```\s*([\s\S]*?)\s*```/);
+    if (match) trimmedText = match[1].trim();
+  }
+
+  const jsonMatch = trimmedText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return jsonMatch[0].trim();
+  }
+
+  return trimmedText.startsWith('{') ? trimmedText : null;
+}
+
+function extractEmailAddress(value: string): string {
+  const match = value.match(/<([^>]+)>/);
+  return (match?.[1] || value).trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function looksLikeCalendarIntent(message: string): boolean {
   const normalized = normalizeLookupValue(message);
   const calendarPhrases = [
@@ -2064,7 +2109,7 @@ app.get("/api/debug/env-status", (req, res) => {
 });
 
 app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
-  const { message, mode, language, history, timezone } = req.body;
+  const { message, mode, language, history, timezone, attachments } = req.body;
   const user = (req as any).user;
   const userId = user.id;
   const activeStyle = getMimaStyle(mode);
@@ -2319,6 +2364,20 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
       const primaryModel = modelSelection.model;
 
       console.log(`🔄 Attempting Gemini call with: ${primaryModel}`);
+      const normalizedAttachments = Array.isArray(attachments)
+        ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
+        : [];
+
+      const userParts: Array<any> = [{ text: message }];
+      for (const attachment of normalizedAttachments) {
+        userParts.push({
+          inlineData: {
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          },
+        });
+      }
+
       const contents = [
         ...(Array.isArray(history)
           ? history
@@ -2330,7 +2389,7 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
           : []),
         {
           role: 'user',
-          parts: [{ text: message }],
+          parts: userParts,
         },
       ];
 
@@ -2422,7 +2481,7 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
 
                   const createdEvent = await createCalendarEvent(userTokens, eventData);
                   responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
-                  responseText = formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start);
+                  responseText = formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink);
                   console.log("   Created event:", createdEvent.id);
                 }
                 } catch (calendarError: any) {
@@ -2835,10 +2894,11 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     // Decrypt and return tokens
     const tokens = JSON.parse(decrypt(tokenData.tokens));
+    let resolvedTokens = { ...tokens };
     console.log("✅ Successfully fetched tokens from Supabase fallback");
 
     // Save to session for future requests (cache)
-    req.session.tokens = tokens;
+    req.session.tokens = resolvedTokens;
     try {
       await saveSession(req);
     } catch (err: any) {
@@ -2847,12 +2907,13 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     // Set up auto-refresh listener if not already set
     const oauth2Client = getOAuth2Client(req);
-    oauth2Client.setCredentials(tokens);
+    oauth2Client.setCredentials(resolvedTokens);
 
     // This is the key part: listen for the 'tokens' event which fires when the client refreshes the access token
     oauth2Client.on('tokens', async (newTokens) => {
       console.log("🔄 Google tokens refreshed automatically");
-      const updatedTokens = { ...tokens, ...newTokens };
+      const updatedTokens = { ...resolvedTokens, ...newTokens };
+      resolvedTokens = updatedTokens;
 
       // Update local session
       req.session.tokens = updatedTokens;
@@ -2875,7 +2936,35 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
       console.log("✅ Refreshed tokens persisted to session and Supabase");
     });
 
-    return tokens;
+    const tokenExpiresSoon =
+      !resolvedTokens.access_token ||
+      !resolvedTokens.expiry_date ||
+      resolvedTokens.expiry_date <= Date.now() + 5 * 60 * 1000;
+
+    if (tokenExpiresSoon && resolvedTokens.refresh_token) {
+      try {
+        console.log("🔄 Access token missing or expiring soon, forcing refresh...");
+        await oauth2Client.getAccessToken();
+        resolvedTokens = { ...resolvedTokens, ...oauth2Client.credentials };
+        req.session.tokens = resolvedTokens;
+        await saveSession(req);
+
+        const encrypted = encrypt(JSON.stringify(resolvedTokens));
+        await supabaseAdmin
+          .from('user_google_tokens')
+          .upsert({
+            user_id: user.id,
+            tokens: encrypted,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+
+        console.log("✅ Tokens refreshed proactively before API call");
+      } catch (refreshError: any) {
+        console.error("❌ Failed to refresh access token proactively:", refreshError.message);
+      }
+    }
+
+    return resolvedTokens;
   } catch (error: any) {
     console.error("❌ Error fetching tokens from Supabase:", error.message);
     return null;
@@ -3066,6 +3155,105 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
 });
 
 // ---- Gmail Draft Endpoints ----
+
+app.post("/api/gmail/messages/:id/draft-reply-ai", authenticateSupabaseUser, async (req, res) => {
+  console.log("📝 Gmail AI draft reply request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const ai = getGenAI();
+    if (!ai) {
+      return res.status(503).json({
+        error: "AI service unavailable",
+        errorCode: "GEMINI_NOT_CONFIGURED"
+      });
+    }
+
+    const language = typeof req.body?.language === 'string' ? req.body.language : 'en';
+    const oauth2Client = getOAuth2Client(req);
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const messageResponse = await gmail.users.messages.get({
+      userId: 'me',
+      id: req.params.id,
+      format: 'full'
+    });
+
+    const headers = messageResponse.data.payload?.headers || [];
+    const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+    const fromHeader = headers.find(h => h.name === 'From')?.value || '';
+    const messageIdHeader = headers.find(h => h.name === 'Message-ID')?.value || '';
+    const threadId = messageResponse.data.threadId || '';
+    const recipientEmail = extractEmailAddress(fromHeader);
+    const sourceBody = extractBody(messageResponse.data.payload) || messageResponse.data.snippet || '';
+    const safeBodyExcerpt = sourceBody.slice(0, 4000);
+    const langInstruction = languageInstructions[language] || languageInstructions.en;
+
+    const draftResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Original sender: ${fromHeader}
+Original subject: ${subject}
+Original message:
+${safeBodyExcerpt}`,
+      config: {
+        systemInstruction: `${langInstruction}
+You write concise and helpful email replies.
+Return ONLY valid JSON with this shape: {"subject":"Re: ...","bodyHtml":"<p>...</p>"}.
+Do not include markdown fences or extra commentary.`,
+        temperature: 0.7,
+        maxOutputTokens: 800,
+      }
+    });
+
+    const payloadText = extractJsonPayload(draftResponse.text || '');
+    let draftSubject = `Re: ${subject}`;
+    let draftBodyHtml = `<p>${escapeHtml(sourceBody ? 'Gracias por tu mensaje. Te respondo en breve.' : 'Gracias por tu correo.')}</p>`;
+
+    if (payloadText) {
+      const parsedPayload = JSON.parse(payloadText);
+      if (typeof parsedPayload.subject === 'string' && parsedPayload.subject.trim()) {
+        draftSubject = parsedPayload.subject.trim();
+      }
+      if (typeof parsedPayload.bodyHtml === 'string' && parsedPayload.bodyHtml.trim()) {
+        draftBodyHtml = parsedPayload.bodyHtml.trim();
+      }
+    }
+
+    const raw = createEmailMessage(recipientEmail, draftSubject, draftBodyHtml, messageIdHeader, threadId);
+    const draft = await gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: {
+          raw
+        }
+      }
+    });
+
+    return res.json({
+      draftId: draft.data.id,
+      messageId: draft.data.message?.id,
+      threadId: draft.data.message?.threadId,
+      to: recipientEmail,
+      subject: draftSubject,
+      bodyHtml: draftBodyHtml,
+    });
+  } catch (error: any) {
+    console.error("❌ Error creating AI draft reply:", error.message);
+    return res.status(500).json({
+      error: "Failed to create AI draft reply",
+      errorCode: "GMAIL_AI_DRAFT_FAILED",
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+});
 
 // Create a draft (SAFE - does not send)
 app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {

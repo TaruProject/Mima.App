@@ -37,6 +37,10 @@
     "history_restored": "Conversation restored",
     "history_clear_error": "I couldn't fully clear the previous chat. Please try again.",
     "new_conversation_started": "New conversation started",
+    "attachment_analysis_default": "Please analyze the attached files.",
+    "attachment_unsupported": "Some files are not supported yet. Use images, PDF, TXT, CSV, JSON, or Markdown.",
+    "attachments_added": "{{count}} attachment added",
+    "remove_attachment": "Remove attachment",
     "stop_audio": "Stop audio",
     "play_audio": "Play audio",
     "action_menu": "Action menu",
@@ -89,7 +93,10 @@
     "draft_reply": "Draft Reply with Mima",
     "error_loading": "Error loading emails",
     "token_expired": "Google connection expired. Please reconnect your account.",
-    "permission_denied": "Insufficient permissions. Please verify Gmail API is enabled."
+    "permission_denied": "Insufficient permissions. Please verify Gmail API is enabled.",
+    "draft_creating": "Creating draft...",
+    "draft_created": "Draft reply created in Gmail",
+    "draft_error": "I couldn't create the Gmail draft right now."
   },
   "calendar": {
     "title": "Calendar",
@@ -98,6 +105,7 @@
     "empty": "No upcoming events found.",
     "all_day": "All Day",
     "today": "Today",
+    "open_google": "Open in Google Calendar",
     "error_loading": "Error loading events",
     "token_expired": "Google connection expired. Please reconnect your account.",
     "permission_denied": "Insufficient permissions. Please verify Calendar API is enabled."

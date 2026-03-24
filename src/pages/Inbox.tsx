@@ -1,16 +1,18 @@
 import { ArrowLeft, Settings, Mail as MailIcon, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import { useGoogleConnection } from "../hooks/useGoogleConnection";
+import { useToast } from "../hooks/useToast";
 
 export default function Inbox() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { showToast } = useToast();
   const { isConnected, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
 
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftingEmailId, setDraftingEmailId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isConnected) {
@@ -44,6 +46,36 @@ export default function Inbox() {
       setError(t('common.network_error'));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDraftReply = async (emailId: string) => {
+    try {
+      setDraftingEmailId(emailId);
+
+      const response = await fetch(`/api/gmail/messages/${emailId}/draft-reply-ai`, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          language: i18n.language,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create draft");
+      }
+
+      showToast(t("inbox.draft_created"), "success");
+    } catch (draftError) {
+      console.error("Failed to create Gmail draft reply", draftError);
+      showToast(t("inbox.draft_error"), "error");
+    } finally {
+      setDraftingEmailId(null);
     }
   };
 
@@ -153,9 +185,13 @@ export default function Inbox() {
                       {email.snippet}
                     </p>
                   </div>
-                  <button className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-sm font-semibold transition-colors w-full sm:w-auto justify-center sm:justify-start border border-white/5">
+                  <button
+                    onClick={() => handleDraftReply(email.id)}
+                    disabled={draftingEmailId === email.id}
+                    className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-sm font-semibold transition-colors w-full sm:w-auto justify-center sm:justify-start border border-white/5 disabled:opacity-60"
+                  >
                     <Zap className="w-4 h-4 text-primary" />
-                    {t('inbox.draft_reply')}
+                    {draftingEmailId === email.id ? t('inbox.draft_creating') : t('inbox.draft_reply')}
                   </button>
                 </div>
               </div>

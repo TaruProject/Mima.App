@@ -37,6 +37,10 @@
     "history_restored": "Keskustelu palautettu",
     "history_clear_error": "Edellisen chatin tyhjentaminen ei onnistunut kokonaan. Yrita uudelleen.",
     "new_conversation_started": "Uusi keskustelu aloitettu",
+    "attachment_analysis_default": "Analysoi liitetyt tiedostot, kiitos.",
+    "attachment_unsupported": "Osa tiedostoista ei ole viela tuettu. Kayta kuvia, PDF, TXT, CSV, JSON tai Markdown.",
+    "attachments_added": "{{count}} liite lisatty",
+    "remove_attachment": "Poista liite",
     "stop_audio": "Pysayta aani",
     "play_audio": "Toista aani",
     "action_menu": "Toimintovalikko",
@@ -89,7 +93,10 @@
     "draft_reply": "Luonnostele vastaus Mimalla",
     "error_loading": "Sahkopostien lataus epaonnistui",
     "token_expired": "Google-yhteys vanheni. Yhdista tilisi uudelleen.",
-    "permission_denied": "Oikeudet eivat riita. Tarkista, etta Gmail API on kaytossa."
+    "permission_denied": "Oikeudet eivat riita. Tarkista, etta Gmail API on kaytossa.",
+    "draft_creating": "Luodaan luonnosta...",
+    "draft_created": "Vastausluonnos luotu Gmailiin",
+    "draft_error": "Gmail-luonnoksen luonti ei onnistunut juuri nyt."
   },
   "calendar": {
     "title": "Kalenteri",
@@ -98,6 +105,7 @@
     "empty": "Tulevia tapahtumia ei loytynyt.",
     "all_day": "Koko paiva",
     "today": "Tanaan",
+    "open_google": "Avaa Google Calendarissa",
     "error_loading": "Tapahtumien lataus epaonnistui",
     "token_expired": "Google-yhteys vanheni. Yhdista tilisi uudelleen.",
     "permission_denied": "Oikeudet eivat riita. Tarkista, etta Calendar API on kaytossa."

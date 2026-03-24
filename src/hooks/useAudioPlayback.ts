@@ -6,6 +6,7 @@ export const useAudioPlayback = () => {
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const mountedAudioRef = useRef(false);
 
   const stop = useCallback(() => {
     if (audioRef.current) {
@@ -25,6 +26,10 @@ export const useAudioPlayback = () => {
       audioRef.current.onended = null;
       audioRef.current.onerror = null;
       audioRef.current.oncanplaythrough = null;
+      if (mountedAudioRef.current && audioRef.current.parentElement) {
+        audioRef.current.parentElement.removeChild(audioRef.current);
+      }
+      mountedAudioRef.current = false;
       audioRef.current.src = '';
     }
     audioRef.current = null;
@@ -68,10 +73,13 @@ export const useAudioPlayback = () => {
       setError(null);
       setIsPlaying(true);
 
-      const audio = new Audio();
+      const audio = document.createElement('audio');
       audio.preload = 'auto';
       audio.setAttribute('playsinline', 'true');
       audio.setAttribute('webkit-playsinline', 'true');
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+      mountedAudioRef.current = true;
       audioRef.current = audio;
 
       const headers: Record<string, string> = {};
@@ -115,7 +123,12 @@ export const useAudioPlayback = () => {
       audio.load();
       await waitForReady(audio);
 
-      await audio.play();
+      try {
+        await audio.play();
+      } catch (playError) {
+        await new Promise((resolve) => window.setTimeout(resolve, 100));
+        await audio.play();
+      }
     } catch (err: any) {
       console.error('Audio playback error:', err);
       setError(err.message || 'Failed to play audio');

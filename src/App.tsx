@@ -34,7 +34,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const deployIdRef = useRef<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [forceUpdateRequired, setForceUpdateRequired] = useState(false);
+  const [versionLabel, setVersionLabel] = useState<string | null>(null);
   
   const {
     needRefresh: [needRefresh],
@@ -44,7 +47,7 @@ function AppRoutes() {
       if (r) {
         intervalRef.current = setInterval(() => {
           r.update();
-        }, 15 * 60 * 1000); // Check every 15 minutes
+        }, 60 * 1000);
       }
     },
     onRegisterError(error) {
@@ -63,6 +66,29 @@ function AppRoutes() {
 
   const { user } = useAuth();
 
+  const checkServerVersion = async () => {
+    try {
+      const response = await fetch(`/api/version?ts=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (!data?.deployId) return;
+
+      setVersionLabel(data.appVersion || null);
+
+      if (!deployIdRef.current) {
+        deployIdRef.current = data.deployId;
+        return;
+      }
+
+      if (deployIdRef.current !== data.deployId) {
+        setForceUpdateRequired(true);
+      }
+    } catch (error) {
+      console.error("Failed to check deployed version:", error);
+    }
+  };
+
   useEffect(() => {
     // Check for updates when the app comes back to focus
     const handleFocus = () => {
@@ -71,6 +97,7 @@ function AppRoutes() {
           registration.update();
         });
       }
+      void checkServerVersion();
     };
     
     const handleVisibilityChange = () => {
@@ -81,6 +108,7 @@ function AppRoutes() {
 
     window.addEventListener('focus', handleFocus);
     window.addEventListener('visibilitychange', handleVisibilityChange);
+    void checkServerVersion();
     
     return () => {
       window.removeEventListener('focus', handleFocus);
@@ -97,11 +125,20 @@ function AppRoutes() {
     const forceReload = () => {
       if (reloaded) return;
       reloaded = true;
-      window.location.reload();
+      const url = new URL(window.location.href);
+      url.searchParams.set("update", `${Date.now()}`);
+      window.location.replace(url.toString());
     };
 
     try {
+      if ("caches" in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+      }
+
       if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.update()));
         navigator.serviceWorker.addEventListener(
           'controllerchange',
           () => {
@@ -112,6 +149,7 @@ function AppRoutes() {
       }
 
       await updateServiceWorker(true);
+      setForceUpdateRequired(false);
       window.setTimeout(forceReload, 1500);
     } catch (error) {
       console.error('Failed to apply service worker update:', error);
@@ -121,7 +159,7 @@ function AppRoutes() {
 
   return (
     <>
-      {needRefresh && <UpdateOverlay onUpdate={handleUpdate} isUpdating={isUpdating} />}
+      {(needRefresh || forceUpdateRequired) && <UpdateOverlay onUpdate={handleUpdate} isUpdating={isUpdating} versionLabel={versionLabel} />}
       <InstallPWA />
       <Routes>
         <Route path="/auth" element={user ? <Navigate to="/" replace /> : <Auth />} />

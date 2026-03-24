@@ -4,9 +4,11 @@ import { useTranslation } from 'react-i18next';
 export default function UpdateOverlay({
   onUpdate,
   isUpdating = false,
+  versionLabel,
 }: {
   onUpdate: () => void | Promise<void>;
   isUpdating?: boolean;
+  versionLabel?: string | null;
 }) {
   const { t } = useTranslation();
 
@@ -43,9 +45,7 @@ export default function UpdateOverlay({
             <span className="text-white text-base font-bold tracking-wide">{t('update.button')}</span>
           </button>
           
-          <p className="text-center text-xs text-slate-600 font-medium">
-            v2.4.0 • 45MB
-          </p>
+          {versionLabel ? <p className="text-center text-xs text-slate-500 font-medium">v{versionLabel}</p> : null}
         </div>
       </div>
     </div>

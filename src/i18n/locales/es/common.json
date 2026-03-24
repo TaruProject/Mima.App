@@ -37,6 +37,10 @@
     "history_restored": "Conversacion restaurada",
     "history_clear_error": "No pude limpiar por completo el chat anterior. Intentalo de nuevo.",
     "new_conversation_started": "Nueva conversacion iniciada",
+    "attachment_analysis_default": "Analiza los archivos adjuntos, por favor.",
+    "attachment_unsupported": "Algunos archivos aun no son compatibles. Usa imagenes, PDF, TXT, CSV, JSON o Markdown.",
+    "attachments_added": "Se agrego {{count}} archivo",
+    "remove_attachment": "Quitar archivo",
     "stop_audio": "Detener audio",
     "play_audio": "Reproducir audio",
     "action_menu": "Menu de acciones",
@@ -89,7 +93,10 @@
     "draft_reply": "Redactar respuesta con Mima",
     "error_loading": "Error al cargar correos",
     "token_expired": "La conexion con Google expiro. Reconecta tu cuenta.",
-    "permission_denied": "Permisos insuficientes. Verifica que Gmail API este habilitado."
+    "permission_denied": "Permisos insuficientes. Verifica que Gmail API este habilitado.",
+    "draft_creating": "Creando borrador...",
+    "draft_created": "Borrador de respuesta creado en Gmail",
+    "draft_error": "No pude crear el borrador de Gmail ahora mismo."
   },
   "calendar": {
     "title": "Calendario",
@@ -98,6 +105,7 @@
     "empty": "No se encontraron eventos proximos.",
     "all_day": "Todo el dia",
     "today": "Hoy",
+    "open_google": "Abrir en Google Calendar",
     "error_loading": "Error al cargar eventos",
     "token_expired": "La conexion con Google expiro. Reconecta tu cuenta.",
     "permission_denied": "Permisos insuficientes. Verifica que Calendar API este habilitado."

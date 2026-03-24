@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X } from "lucide-react";
 import Markdown from "react-markdown";
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,16 @@ interface ArchivedConversation {
   messages: ChatMessage[];
 }
 
+interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  data: string;
+  size: number;
+}
+
+const CURRENT_CHAT_SNAPSHOT_STORAGE_KEY = "mima_current_chat_snapshot";
+
 export default function Chat() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
@@ -68,6 +78,7 @@ export default function Chat() {
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
+  const [selectedAttachments, setSelectedAttachments] = useState<ChatAttachment[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<ArchivedConversation[]>(() => {
     try {
       const raw = localStorage.getItem(ARCHIVED_CONVERSATIONS_STORAGE_KEY);
@@ -84,7 +95,10 @@ export default function Chat() {
     }
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const lastPersistedMessageIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const persistedMessageIdsRef = useRef<Set<string>>(new Set());
+  const isPersistingRef = useRef(false);
   const activeMode = getMimaStyle(mode);
 
   useEffect(() => {
@@ -113,6 +127,21 @@ export default function Chat() {
   }, [archivedConversations]);
 
   useEffect(() => {
+    messagesRef.current = messages;
+    const snapshot = messages.filter((message) => !message.isWelcome);
+
+    try {
+      if (snapshot.length > 0) {
+        localStorage.setItem(CURRENT_CHAT_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+      } else {
+        localStorage.removeItem(CURRENT_CHAT_SNAPSHOT_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [messages]);
+
+  useEffect(() => {
     if (!user) return;
 
     const loadData = async () => {
@@ -126,6 +155,15 @@ export default function Chat() {
           Authorization: `Bearer ${session.access_token}`,
         };
 
+        const localSnapshot = (() => {
+          try {
+            const raw = localStorage.getItem(CURRENT_CHAT_SNAPSHOT_STORAGE_KEY);
+            return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+          } catch {
+            return [];
+          }
+        })();
+
         const historyResponse = await fetch("/api/chat/history", { headers });
         if (historyResponse.ok) {
           const history = await historyResponse.json();
@@ -134,18 +172,29 @@ export default function Chat() {
             ? history.filter((msg: any) => new Date(msg.created_at).getTime() > new Date(resetAt).getTime())
             : history;
 
-          if (visibleHistory.length > 0) {
-            lastPersistedMessageIdRef.current = visibleHistory[visibleHistory.length - 1]?.id?.toString() || null;
+          const serverMessages = visibleHistory.map((msg: any) => ({
+            id: msg.id,
+            role: msg.role === "user" ? "user" : "assistant",
+            text: msg.content,
+            time: new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            audio: msg.audio_data,
+          }));
+
+          const mergedMessages = localSnapshot.length > serverMessages.length ? localSnapshot : serverMessages;
+
+          if (mergedMessages.length > 0) {
+            persistedMessageIdsRef.current = new Set(serverMessages.map((message) => message.id.toString()));
             setMessages(
-              visibleHistory.map((msg: any) => ({
+              mergedMessages.map((msg: any) => ({
                 id: msg.id,
-                role: msg.role === "user" ? "user" : "assistant",
-                text: msg.content,
-                time: new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                audio: msg.audio_data,
+                role: msg.role,
+                text: msg.text,
+                time: msg.time,
+                audio: msg.audio ?? null,
               })),
             );
           } else {
+            persistedMessageIdsRef.current = new Set();
             setMessages([createWelcomeMessage()]);
           }
         }
@@ -174,60 +223,136 @@ export default function Chat() {
   useEffect(() => {
     if (!user) return;
 
-    const saveHistory = async () => {
+    const saveHistory = async (messagesToPersist: ChatMessage[]) => {
+      if (isPersistingRef.current) return;
+
       try {
+        isPersistingRef.current = true;
         const {
           data: { session },
         } = await supabase.auth.getSession();
         if (!session) return;
 
-        const messagesToSave = messages.filter((message) => !message.isWelcome);
-        if (messagesToSave.length === 0) return;
-
-        const lastMessage = messagesToSave[messagesToSave.length - 1];
-        const lastMessageId = lastMessage.id.toString();
-
-        if (lastPersistedMessageIdRef.current === lastMessageId) {
+        const pendingMessages = messagesToPersist.filter(
+          (message) => !message.isWelcome && !persistedMessageIdsRef.current.has(message.id.toString()),
+        );
+        if (pendingMessages.length === 0) {
           return;
         }
 
-        await fetch("/api/chat/message", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            user_id: user.id,
-            role: lastMessage.role,
-            content: lastMessage.text,
-            mode,
-            audio_data: lastMessage.audio ?? null,
-          }),
-        });
+        for (const pendingMessage of pendingMessages) {
+          const response = await fetch("/api/chat/message", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_id: user.id,
+              role: pendingMessage.role,
+              content: pendingMessage.text,
+              mode,
+              audio_data: pendingMessage.audio ?? null,
+            }),
+          });
 
-        lastPersistedMessageIdRef.current = lastMessageId;
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+
+          persistedMessageIdsRef.current.add(pendingMessage.id.toString());
+        }
       } catch (error) {
         console.error("Failed to save chat history:", error);
+      } finally {
+        isPersistingRef.current = false;
       }
     };
 
-    const timeoutId = setTimeout(saveHistory, 1000);
+    const timeoutId = setTimeout(() => saveHistory(messages), 400);
     return () => clearTimeout(timeoutId);
   }, [messages, mode, user]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const flushPendingMessages = () => {
+      void (async () => {
+        if (isPersistingRef.current) {
+          return;
+        }
+
+        const pendingMessages = messagesRef.current.filter(
+          (message) => !message.isWelcome && !persistedMessageIdsRef.current.has(message.id.toString()),
+        );
+
+        if (pendingMessages.length === 0) {
+          return;
+        }
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) return;
+
+        for (const pendingMessage of pendingMessages) {
+          const response = await fetch("/api/chat/message", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_id: user.id,
+              role: pendingMessage.role,
+              content: pendingMessage.text,
+              mode,
+              audio_data: pendingMessage.audio ?? null,
+            }),
+            keepalive: true,
+          });
+
+          if (response.ok) {
+            persistedMessageIdsRef.current.add(pendingMessage.id.toString());
+          }
+        }
+      })();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushPendingMessages();
+      }
+    };
+
+    window.addEventListener("beforeunload", flushPendingMessages);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      flushPendingMessages();
+      window.removeEventListener("beforeunload", flushPendingMessages);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [mode, user]);
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && selectedAttachments.length === 0) || isLoading) return;
 
     const userMsg = input;
+    const pendingAttachments = selectedAttachments;
+    const messageForAI = userMsg.trim() || t("chat.attachment_analysis_default");
+    const displayMessage =
+      userMsg.trim() ||
+      `${t("chat.attachment_analysis_default")}\n\n${pendingAttachments.map((attachment) => `- ${attachment.name}`).join("\n")}`;
     setInput("");
+    setSelectedAttachments([]);
 
     setMessages((prev) => [
       ...prev,
       {
         id: Date.now(),
         role: "user",
-        text: userMsg,
+        text: displayMessage,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         audio: null,
       },
@@ -248,11 +373,12 @@ export default function Chat() {
       } = await supabase.auth.getSession();
 
       const responseText = await generateChatResponse(
-        userMsg,
+        messageForAI,
         mode,
         i18n.language,
         history,
         session?.access_token,
+        pendingAttachments,
       );
 
       if (responseText.includes("Unauthorized") || responseText.includes("auth")) {
@@ -320,8 +446,10 @@ export default function Chat() {
     setIsLoading(false);
     setMessages([createWelcomeMessage()]);
     setIsHistoryOpen(false);
-    lastPersistedMessageIdRef.current = null;
+    persistedMessageIdsRef.current = new Set();
     localStorage.setItem(CHAT_RESET_AT_STORAGE_KEY, new Date().toISOString());
+    localStorage.removeItem(CURRENT_CHAT_SNAPSHOT_STORAGE_KEY);
+    setSelectedAttachments([]);
 
     if (!user) {
       return;
@@ -361,10 +489,60 @@ export default function Chat() {
     setPlayingId(null);
     setInput("");
     setIsLoading(false);
-    lastPersistedMessageIdRef.current = conversation.messages[conversation.messages.length - 1]?.id?.toString() || null;
+    persistedMessageIdsRef.current = new Set(conversation.messages.map((message) => message.id.toString()));
     setMessages(conversation.messages);
     setIsHistoryOpen(false);
     showToast(t("chat.history_restored"), "success");
+  };
+
+  const handleAttachFileClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleAttachmentChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    const supportedFiles = files.filter((file) => {
+      const type = file.type;
+      return type.startsWith("image/") || ["application/pdf", "text/plain", "text/csv", "application/json", "text/markdown"].includes(type);
+    });
+
+    if (supportedFiles.length !== files.length) {
+      showToast(t("chat.attachment_unsupported"), "error");
+    }
+
+    const nextAttachments = await Promise.all(
+      supportedFiles.slice(0, 5).map(
+        (file) =>
+          new Promise<ChatAttachment>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = typeof reader.result === "string" ? reader.result : "";
+              const base64Data = result.includes(",") ? result.split(",")[1] : result;
+              resolve({
+                id: `${file.name}-${file.size}-${Date.now()}`,
+                name: file.name,
+                mimeType: file.type || "application/octet-stream",
+                data: base64Data,
+                size: file.size,
+              });
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          }),
+      ),
+    );
+
+    setSelectedAttachments((prev) => [...prev, ...nextAttachments].slice(0, 5));
+    if (nextAttachments.length > 0) {
+      showToast(t("chat.attachments_added", { count: nextAttachments.length }), "success");
+    }
+    event.target.value = "";
+  };
+
+  const removeAttachment = (attachmentId: string) => {
+    setSelectedAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId));
   };
 
   const handlePlayAudio = async (msgId: number | string, text: string) => {
@@ -533,8 +711,7 @@ export default function Chat() {
             setIsModeSheetOpen(true);
           }}
           onNewConversation={handleNewConversation}
-          onAttachFile={() => alert(t("common.coming_soon"))}
-          onTakeScreenshot={() => alert(t("common.coming_soon"))}
+          onAttachFile={handleAttachFileClick}
         />
 
         <ModeBottomSheet
@@ -613,6 +790,7 @@ export default function Chat() {
       <footer className="p-4 bg-background-dark pb-8 shrink-0 relative">
         <div className="absolute bottom-1/2 left-1/2 -translate-x-1/2 translate-y-1/2 w-full h-32 bg-primary/10 blur-[60px] rounded-full pointer-events-none"></div>
         <div className="relative flex items-end gap-3 max-w-3xl mx-auto">
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.csv,.json,.md" multiple className="hidden" onChange={handleAttachmentChange} />
           <button
             onClick={() => setIsActionMenuOpen(true)}
             className="flex-shrink-0 w-10 h-10 mb-1 flex items-center justify-center rounded-full bg-surface-highlight text-text-secondary hover:text-primary transition-colors active:scale-95"
@@ -621,7 +799,21 @@ export default function Chat() {
             <Plus className="w-5 h-5" />
           </button>
 
-          <div className="flex-1 bg-surface-dark rounded-[24px] border border-surface-highlight focus-within:border-primary transition-colors flex items-center shadow-sm">
+          <div className="flex-1 bg-surface-dark rounded-[24px] border border-surface-highlight focus-within:border-primary transition-colors flex flex-col shadow-sm">
+            {selectedAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
+                {selectedAttachments.map((attachment) => (
+                  <button
+                    key={attachment.id}
+                    onClick={() => removeAttachment(attachment.id)}
+                    className="max-w-full px-3 py-1.5 rounded-full bg-white/8 text-xs text-slate-200 hover:bg-white/12 truncate"
+                    title={t("chat.remove_attachment")}
+                  >
+                    {attachment.name}
+                  </button>
+                ))}
+              </div>
+            )}
             <input
               className="w-full bg-transparent border-none focus:ring-0 text-white placeholder:text-text-secondary h-12 px-4 py-3 rounded-[24px] outline-none"
               placeholder={t("chat.input_placeholder")}

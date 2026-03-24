@@ -37,6 +37,10 @@
     "history_restored": "Konversation aterstalld",
     "history_clear_error": "Jag kunde inte rensa den tidigare chatten helt. Forsok igen.",
     "new_conversation_started": "Ny konversation startad",
+    "attachment_analysis_default": "Analysera de bifogade filerna, tack.",
+    "attachment_unsupported": "Vissa filer stods inte annu. Anvand bilder, PDF, TXT, CSV, JSON eller Markdown.",
+    "attachments_added": "{{count}} bilaga tillagd",
+    "remove_attachment": "Ta bort bilaga",
     "stop_audio": "Stoppa ljud",
     "play_audio": "Spela upp ljud",
     "action_menu": "Atgardsmeny",
@@ -89,7 +93,10 @@
     "draft_reply": "Skriv utkast till svar med Mima",
     "error_loading": "Det gick inte att ladda e-post",
     "token_expired": "Google-anslutningen har gatt ut. Anslut kontot igen.",
-    "permission_denied": "Otillrackliga behorigheter. Kontrollera att Gmail API ar aktiverat."
+    "permission_denied": "Otillrackliga behorigheter. Kontrollera att Gmail API ar aktiverat.",
+    "draft_creating": "Skapar utkast...",
+    "draft_created": "Svarsutkast skapat i Gmail",
+    "draft_error": "Jag kunde inte skapa Gmail-utkastet just nu."
   },
   "calendar": {
     "title": "Kalender",
@@ -98,6 +105,7 @@
     "empty": "Inga kommande handelser hittades.",
     "all_day": "Hela dagen",
     "today": "Idag",
+    "open_google": "Oppna i Google Calendar",
     "error_loading": "Det gick inte att ladda handelser",
     "token_expired": "Google-anslutningen har gatt ut. Anslut kontot igen.",
     "permission_denied": "Otillrackliga behorigheter. Kontrollera att Calendar API ar aktiverat."
