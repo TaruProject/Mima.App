@@ -86,6 +86,73 @@ export const useAudioPlayback = () => {
     }
   }, []);
 
+  const blobToDataUrl = useCallback((blob: Blob) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+          return;
+        }
+        reject(new Error('Failed to convert audio blob'));
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read audio blob'));
+      reader.readAsDataURL(blob);
+    });
+  }, []);
+
+  const fetchAudio = useCallback(async (url: string, body?: any, useAuth = true) => {
+    const makeRequest = async () => {
+      const headers: Record<string, string> = {};
+
+      if (useAuth) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      return fetch(url, {
+        method: body ? 'POST' : 'GET',
+        headers: {
+          ...headers,
+          ...(body && { 'Content-Type': 'application/json' }),
+        },
+        credentials: 'include',
+        cache: 'no-store',
+        ...(body && { body: JSON.stringify(body) }),
+      });
+    };
+
+    let response = await makeRequest();
+
+    if (response.status === 401 && useAuth) {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (!error && data.session?.access_token) {
+        response = await makeRequest();
+      }
+    }
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      const errorPayload = contentType.includes('application/json')
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => '');
+      const message =
+        typeof errorPayload === 'string'
+          ? errorPayload
+          : errorPayload?.details || errorPayload?.error || `Audio request failed with ${response.status}`;
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    if (!blob.size) {
+      throw new Error('Audio response was empty');
+    }
+
+    return blob;
+  }, []);
+
   const play = useCallback(async (url: string, body?: any, useAuth = true) => {
     try {
       cleanup();
@@ -102,35 +169,9 @@ export const useAudioPlayback = () => {
       mountedAudioRef.current = true;
       audioRef.current = audio;
       await unlockAudioElement(audio);
-
-      const headers: Record<string, string> = {};
-      
-      if (useAuth) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-      }
-
-      const response = await fetch(url, {
-        method: body ? 'POST' : 'GET',
-        headers: {
-          ...headers,
-          ...(body && { 'Content-Type': 'application/json' }),
-        },
-        credentials: 'include',
-        cache: 'no-store',
-        ...(body && { body: JSON.stringify(body) }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Audio fetch failed: ${response.status} ${errorText}`.trim());
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: response.headers.get('content-type') || 'audio/mpeg' });
-      const objectUrl = URL.createObjectURL(blob);
+      const blob = await fetchAudio(url, body, useAuth);
+      const normalizedBlob = blob.type ? blob : new Blob([await blob.arrayBuffer()], { type: 'audio/mpeg' });
+      const objectUrl = URL.createObjectURL(normalizedBlob);
       objectUrlRef.current = objectUrl;
 
       audio.onended = () => {
@@ -146,11 +187,17 @@ export const useAudioPlayback = () => {
       audio.src = objectUrl;
       audio.load();
       await waitForReady(audio);
+      audio.currentTime = 0;
 
       try {
         await audio.play();
       } catch (playError) {
-        await new Promise((resolve) => window.setTimeout(resolve, 100));
+        console.warn('Primary audio playback attempt failed, retrying with data URL fallback.', playError);
+        const fallbackDataUrl = await blobToDataUrl(normalizedBlob);
+        audio.src = fallbackDataUrl;
+        audio.load();
+        await waitForReady(audio);
+        await new Promise((resolve) => window.setTimeout(resolve, 120));
         await audio.play();
       }
     } catch (err: any) {
@@ -159,7 +206,7 @@ export const useAudioPlayback = () => {
       setIsPlaying(false);
       throw err;
     }
-  }, [cleanup, waitForReady]);
+  }, [blobToDataUrl, cleanup, fetchAudio, unlockAudioElement, waitForReady]);
 
   return { play, stop, isPlaying, error, cleanup };
 };

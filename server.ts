@@ -176,6 +176,7 @@ app.use((req, res, next) => {
     "font-src 'self' https://fonts.gstatic.com data:",
     "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
     "img-src 'self' data: https: blob:",
+    "media-src 'self' data: blob:",
     "worker-src 'self' blob:",
     "frame-src 'self' https://accounts.google.com https://*.google.com"
   ];
