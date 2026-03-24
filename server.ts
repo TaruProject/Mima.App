@@ -891,6 +891,42 @@ app.get("/api/auth/status", async (req, res) => {
   }
 });
 
+app.delete("/api/auth/google", authenticateSupabaseUser, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    req.session.tokens = undefined;
+
+    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { error } = await supabaseAdmin
+      .from('user_google_tokens')
+      .delete()
+      .eq('user_id', user.id);
+
+    if (error) {
+      console.error("Failed to disconnect Google tokens:", error.message);
+      return res.status(500).json({
+        error: "Failed to disconnect Google",
+        errorCode: "GOOGLE_DISCONNECT_FAILED",
+      });
+    }
+
+    try {
+      await saveSession(req);
+    } catch (sessionError) {
+      console.warn("Failed to persist cleared Google session:", sessionError);
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Error disconnecting Google:", error);
+    return res.status(500).json({
+      error: "Failed to disconnect Google",
+      details: error.message,
+      errorCode: "GOOGLE_DISCONNECT_FAILED",
+    });
+  }
+});
+
 // ---- User Preferences Endpoints ----
 
 // Get user preferences
@@ -991,11 +1027,11 @@ app.delete("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
       res.json({ success: true });
     } else {
       console.warn("Failed to clear chat history");
-      res.status(200).json({ success: true, note: 'Clear skipped (service unavailable)' });
+      res.status(500).json({ success: false, error: 'Failed to clear chat history' });
     }
   } catch (error: any) {
     console.error("Error clearing chat history:", error);
-    res.status(200).json({ success: true, note: 'Clear skipped (service unavailable)' });
+    res.status(500).json({ success: false, error: 'Failed to clear chat history', details: error.message });
   }
 });
 
@@ -1038,6 +1074,8 @@ app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', String(audioBuffer.length));
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', 'inline; filename="mima-preview.mp3"');
     res.send(audioBuffer);
   } catch (error) {
     console.error("Preview TTS Error:", error);
@@ -1085,6 +1123,8 @@ app.post("/api/tts", authenticateSupabaseUser, async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', String(audioBuffer.length));
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', 'inline; filename="mima-response.mp3"');
     res.send(audioBuffer);
   } catch (error) {
     console.error('TTS Error:', error);
@@ -2713,10 +2753,17 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
 
   // Handle other API errors
   if (error.status === 403) {
+    const message = String(error.message || '');
+    const needsReconnect =
+      serviceName === 'calendar' &&
+      /insufficient|forbidden|scope|permission/i.test(message);
+
     return res.status(403).json({
       error: `${serviceName}_permission_denied`,
-      message: `Permission denied for ${serviceName}. Please check API is enabled in Google Cloud Console.`,
-      errorCode: 'PERMISSION_DENIED'
+      message: needsReconnect
+        ? 'Google Calendar needs write permission. Reconnect Google to grant calendar access again.'
+        : `Permission denied for ${serviceName}. Please check API is enabled in Google Cloud Console.`,
+      errorCode: needsReconnect ? 'RECONNECT_REQUIRED' : 'PERMISSION_DENIED'
     });
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Menu, Settings, Mic, ArrowUp, Plus, Square, Play } from "lucide-react";
+import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X } from "lucide-react";
 import Markdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import { ActionMenu } from "../components/ui/ActionMenu";
@@ -8,6 +8,7 @@ import { OnboardingFlow } from "../components/onboarding/OnboardingFlow";
 import { getMimaStyle, normalizeStyleId, type MimaStyleId } from "../config/mimaStyles";
 import { useAuth } from "../contexts/AuthContext";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
+import { useToast } from "../hooks/useToast";
 import { useVoiceRecording } from "../hooks/useVoiceRecording";
 import { supabase } from "../lib/supabase";
 import { generateChatResponse } from "../services/geminiService";
@@ -25,10 +26,21 @@ interface ChatMessage {
 
 const WELCOME_MESSAGE_ID = "welcome-message";
 const ACTIVE_STYLE_STORAGE_KEY = "mima_active_style";
+const CHAT_RESET_AT_STORAGE_KEY = "mima_chat_reset_at";
+const ARCHIVED_CONVERSATIONS_STORAGE_KEY = "mima_archived_conversations";
+const MAX_ARCHIVED_CONVERSATIONS = 8;
+
+interface ArchivedConversation {
+  id: string;
+  createdAt: string;
+  title: string;
+  messages: ChatMessage[];
+}
 
 export default function Chat() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { play, stop, isPlaying: isAudioPlaying } = useAudioPlayback();
   const { isRecording, isTranscribing, startRecording, stopRecording } = useVoiceRecording();
 
@@ -54,7 +66,16 @@ export default function Chat() {
   const [voiceId, setVoiceId] = useState("DODLEQrClDo8wCz460ld");
   const [isLoading, setIsLoading] = useState(false);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
+  const [archivedConversations, setArchivedConversations] = useState<ArchivedConversation[]>(() => {
+    try {
+      const raw = localStorage.getItem(ARCHIVED_CONVERSATIONS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try {
       return localStorage.getItem("mima_onboarding_done") !== "true";
@@ -84,6 +105,14 @@ export default function Chat() {
   }, [mode]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(ARCHIVED_CONVERSATIONS_STORAGE_KEY, JSON.stringify(archivedConversations));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [archivedConversations]);
+
+  useEffect(() => {
     if (!user) return;
 
     const loadData = async () => {
@@ -100,10 +129,15 @@ export default function Chat() {
         const historyResponse = await fetch("/api/chat/history", { headers });
         if (historyResponse.ok) {
           const history = await historyResponse.json();
-          if (history.length > 0) {
-            lastPersistedMessageIdRef.current = history[history.length - 1]?.id?.toString() || null;
+          const resetAt = localStorage.getItem(CHAT_RESET_AT_STORAGE_KEY);
+          const visibleHistory = resetAt
+            ? history.filter((msg: any) => new Date(msg.created_at).getTime() > new Date(resetAt).getTime())
+            : history;
+
+          if (visibleHistory.length > 0) {
+            lastPersistedMessageIdRef.current = visibleHistory[visibleHistory.length - 1]?.id?.toString() || null;
             setMessages(
-              history.map((msg: any) => ({
+              visibleHistory.map((msg: any) => ({
                 id: msg.id,
                 role: msg.role === "user" ? "user" : "assistant",
                 text: msg.content,
@@ -263,12 +297,31 @@ export default function Chat() {
   };
 
   const handleNewConversation = async () => {
+    const messagesToArchive = messages.filter((message) => !message.isWelcome);
+    if (messagesToArchive.length > 0) {
+      const firstUserMessage = messagesToArchive.find((message) => message.role === "user");
+      const titleSource = firstUserMessage?.text || messagesToArchive[0]?.text || t("chat.sender_mima");
+      const title = titleSource.length > 42 ? `${titleSource.slice(0, 42).trim()}...` : titleSource;
+
+      setArchivedConversations((prev) => [
+        {
+          id: `${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          title,
+          messages: messagesToArchive,
+        },
+        ...prev,
+      ].slice(0, MAX_ARCHIVED_CONVERSATIONS));
+    }
+
     stop();
     setPlayingId(null);
     setInput("");
     setIsLoading(false);
     setMessages([createWelcomeMessage()]);
+    setIsHistoryOpen(false);
     lastPersistedMessageIdRef.current = null;
+    localStorage.setItem(CHAT_RESET_AT_STORAGE_KEY, new Date().toISOString());
 
     if (!user) {
       return;
@@ -292,10 +345,26 @@ export default function Chat() {
 
       if (!response.ok) {
         console.error("Failed to clear chat history:", await response.text());
+        showToast(t("chat.history_clear_error"), "error");
+        return;
       }
+
+      showToast(t("chat.new_conversation_started"), "success");
     } catch (error) {
       console.error("Failed to start new conversation:", error);
+      showToast(t("chat.history_clear_error"), "error");
     }
+  };
+
+  const handleRestoreConversation = (conversation: ArchivedConversation) => {
+    stop();
+    setPlayingId(null);
+    setInput("");
+    setIsLoading(false);
+    lastPersistedMessageIdRef.current = conversation.messages[conversation.messages.length - 1]?.id?.toString() || null;
+    setMessages(conversation.messages);
+    setIsHistoryOpen(false);
+    showToast(t("chat.history_restored"), "success");
   };
 
   const handlePlayAudio = async (msgId: number | string, text: string) => {
@@ -370,7 +439,11 @@ export default function Chat() {
 
       <header className="flex items-center justify-between p-4 pt-6 shrink-0 z-10 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md sticky top-0">
         <div className="flex items-center gap-3">
-          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-slate-100">
+          <button
+            onClick={() => setIsHistoryOpen(true)}
+            className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-slate-100"
+            aria-label={t("chat.history_title")}
+          >
             <Menu className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-2">
@@ -381,11 +454,74 @@ export default function Chat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary" aria-label={t("common.settings")}>
-            <Settings className="w-6 h-6" />
+          <button
+            onClick={handleNewConversation}
+            className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-highlight transition-colors text-text-secondary"
+            aria-label={t("action_menu.new_conversation")}
+          >
+            <MessageSquarePlus className="w-6 h-6" />
           </button>
         </div>
       </header>
+
+      {isHistoryOpen && (
+        <>
+          <button
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-[80]"
+            onClick={() => setIsHistoryOpen(false)}
+            aria-label={t("common.close")}
+          />
+          <aside className="fixed left-0 top-0 bottom-0 w-[85%] max-w-sm bg-background-dark border-r border-white/10 z-[90] p-5 flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold text-white">{t("chat.history_title")}</h2>
+                <p className="text-sm text-slate-400">{t("chat.history_subtitle")}</p>
+              </div>
+              <button
+                onClick={() => setIsHistoryOpen(false)}
+                className="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center text-slate-300"
+                aria-label={t("common.close")}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <button
+              onClick={handleNewConversation}
+              className="w-full py-3 px-4 rounded-2xl bg-primary text-white font-semibold flex items-center justify-center gap-2 mb-4"
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+              {t("action_menu.new_conversation")}
+            </button>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {archivedConversations.length === 0 ? (
+                <div className="rounded-2xl border border-white/5 bg-surface-dark p-4 text-sm text-slate-400">
+                  {t("chat.history_empty")}
+                </div>
+              ) : (
+                archivedConversations.map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    onClick={() => handleRestoreConversation(conversation)}
+                    className="w-full text-left rounded-2xl border border-white/5 bg-surface-dark p-4 hover:bg-surface-highlight transition-colors"
+                  >
+                    <div className="text-sm font-semibold text-white mb-1">{conversation.title}</div>
+                    <div className="text-xs text-slate-400">
+                      {new Date(conversation.createdAt).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </aside>
+        </>
+      )}
 
       <main className="flex-1 overflow-y-auto px-4 py-2 space-y-6 scroll-smooth">
         <ActionMenu

@@ -21,7 +21,8 @@ export function useGoogleConnection() {
   const checkStatus = useCallback(async () => {
     try {
       const response = await fetch('/api/auth/status', {
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
       
       if (response.ok) {
@@ -45,7 +46,8 @@ export function useGoogleConnection() {
       setErrorCode(null);
 
       const response = await fetch('/api/auth/url', {
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) {
@@ -64,9 +66,26 @@ export function useGoogleConnection() {
   };
 
   const disconnect = async () => {
-    // Optional: Implement selective disconnect if needed
-    // For now, we'll just set local state and maybe call an endpoint to clear tokens
-    setIsConnected(false);
+    try {
+      setError(null);
+      setErrorCode(null);
+
+      const response = await fetch('/api/auth/google', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect Google');
+      }
+
+      setIsConnected(false);
+    } catch (err) {
+      console.error("Google disconnect error:", err);
+      setError(t('common.auth_failed'));
+      setErrorCode('DISCONNECT_FAILED');
+    }
   };
 
   // Handle URL params after redirect

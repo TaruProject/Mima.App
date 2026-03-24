@@ -30,6 +30,38 @@ export const useAudioPlayback = () => {
     audioRef.current = null;
   }, [stop]);
 
+  const waitForReady = useCallback((audio: HTMLAudioElement) => {
+    if (audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      const finalize = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        audio.removeEventListener('loadedmetadata', handleReady);
+        audio.removeEventListener('loadeddata', handleReady);
+        audio.removeEventListener('canplay', handleReady);
+        audio.removeEventListener('canplaythrough', handleReady);
+        audio.removeEventListener('error', handleError);
+        window.clearTimeout(timeoutId);
+        callback();
+      };
+
+      const handleReady = () => finalize(resolve);
+      const handleError = () => finalize(() => reject(new Error('Error loading audio')));
+      const timeoutId = window.setTimeout(() => finalize(resolve), 2000);
+
+      audio.addEventListener('loadedmetadata', handleReady, { once: true });
+      audio.addEventListener('loadeddata', handleReady, { once: true });
+      audio.addEventListener('canplay', handleReady, { once: true });
+      audio.addEventListener('canplaythrough', handleReady, { once: true });
+      audio.addEventListener('error', handleError, { once: true });
+    });
+  }, []);
+
   const play = useCallback(async (url: string, body?: any, useAuth = true) => {
     try {
       cleanup();
@@ -39,6 +71,7 @@ export const useAudioPlayback = () => {
       const audio = new Audio();
       audio.preload = 'auto';
       audio.setAttribute('playsinline', 'true');
+      audio.setAttribute('webkit-playsinline', 'true');
       audioRef.current = audio;
 
       const headers: Record<string, string> = {};
@@ -68,22 +101,19 @@ export const useAudioPlayback = () => {
       const objectUrl = URL.createObjectURL(blob);
       objectUrlRef.current = objectUrl;
 
-      await new Promise<void>((resolve, reject) => {
-        audio.onended = () => {
-          setIsPlaying(false);
-        };
+      audio.onended = () => {
+        setIsPlaying(false);
+      };
 
-        audio.onerror = () => {
-          const playbackError = 'Error playing audio';
-          setError(playbackError);
-          setIsPlaying(false);
-          reject(new Error(playbackError));
-        };
+      audio.onerror = () => {
+        const playbackError = 'Error playing audio';
+        setError(playbackError);
+        setIsPlaying(false);
+      };
 
-        audio.oncanplaythrough = () => resolve();
-        audio.src = objectUrl;
-        audio.load();
-      });
+      audio.src = objectUrl;
+      audio.load();
+      await waitForReady(audio);
 
       await audio.play();
     } catch (err: any) {
@@ -92,7 +122,7 @@ export const useAudioPlayback = () => {
       setIsPlaying(false);
       throw err;
     }
-  }, [cleanup]);
+  }, [cleanup, waitForReady]);
 
   return { play, stop, isPlaying, error, cleanup };
 };
