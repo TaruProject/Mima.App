@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase";
 import { voices } from "../constants/voices";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
 import { useGoogleConnection } from "../hooks/useGoogleConnection";
+import { ProductivitySnapshot } from "../components/ProductivitySnapshot";
 
 const PROFILE_AVATAR_STORAGE_KEY = "mima_profile_avatar_data_url";
 
@@ -326,6 +327,8 @@ export default function Profile() {
       </header>
 
       <main className="flex-1 overflow-y-auto px-6 py-4 space-y-8 no-scrollbar">
+        <ProductivitySnapshot />
+
         <section className="space-y-6">
           <div className="flex flex-col items-center">
             <div className="relative">

@@ -27,6 +27,12 @@ import {
   saveUserMemory,
 } from "./src/services/userMemoryService.js";
 import {
+  completeUserTasks,
+  formatUserTasksSummary,
+  getUserTasks,
+  saveUserTask,
+} from "./src/services/userTaskService.js";
+import {
   buildSystemPrompt,
   getMimaStyle,
   normalizeStyleId,
@@ -620,6 +626,232 @@ function getMemoryForgetMessage(langCode: string, deletedCount: number): string 
 
 function isDailyBriefingIntent(message: string): boolean {
   return /\b(dame mi resumen del dia|dame mi resumen del día|resumen del dia|resumen del día|briefing del dia|briefing del día|summary of my day|daily briefing|what do i have today|que tengo hoy|qué tengo hoy|mita minulla on tanaan|vad har jag idag)\b/i.test(message);
+}
+
+function isGreetingIntent(message: string): boolean {
+  return /^\s*(hola|hello|hi|hey|good morning|good afternoon|good evening|buenos dias|buenas tardes|buenas noches|hei|moi|huomenta|god morgon|hej|hejsan)\s*[.!?]*\s*$/i.test(message);
+}
+
+function isSameDayInTimeZone(dateA: Date, dateB: Date, timeZone: string): boolean {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(dateA) === formatter.format(dateB);
+}
+
+function shouldSendAutomaticBriefing(message: string, lastDailyBriefingAt: string | null | undefined, timeZone: string): boolean {
+  if (!isGreetingIntent(message)) {
+    return false;
+  }
+
+  if (!lastDailyBriefingAt) {
+    return true;
+  }
+
+  const lastBriefingDate = new Date(lastDailyBriefingAt);
+  if (Number.isNaN(lastBriefingDate.getTime())) {
+    return true;
+  }
+
+  return !isSameDayInTimeZone(lastBriefingDate, new Date(), timeZone);
+}
+
+function extractTaskCompletionQuery(message: string): string | null {
+  const patterns = [
+    /\bmark\s+(.+?)\s+as done$/i,
+    /\bmark\s+(.+?)\s+done$/i,
+    /\bcomplete\s+(.+)$/i,
+    /\bi finished\s+(.+)$/i,
+    /\bi already did\s+(.+)$/i,
+    /\bmarca\s+(.+?)\s+como hecha$/i,
+    /\bmarca\s+(.+?)\s+como hecho$/i,
+    /\bcompleta\s+(.+)$/i,
+    /\bya hice\s+(.+)$/i,
+    /\bmerkitse\s+(.+?)\s+tehdyksi$/i,
+    /\bsuoritin\s+(.+)$/i,
+    /\bmarkera\s+(.+?)\s+som klar$/i,
+    /\bjag gjorde redan\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.trim().match(pattern);
+    if (match?.[1]) {
+      return match[1].trim().replace(/[.!?]+$/, "");
+    }
+  }
+
+  return null;
+}
+
+function isTaskListIntent(message: string): boolean {
+  return /\b(my tasks|my to-?dos|what are my tasks|what do i need to do|mis tareas|mis pendientes|que tareas tengo|quÃ© tareas tengo|que pendientes tengo|mis recordatorios|tehtavani|avoimet tehtavat|mina tehtavia|mina tehtavat|mina uppgifter|mina att gora|mina att-gora)\b/i.test(message);
+}
+
+function extractTaskCreationPayload(message: string): { title: string; dueAt: string | null } | null {
+  const trimmedMessage = message.trim();
+  const patterns = [
+    /\bremember to\s+(.+)$/i,
+    /\bremind me to\s+(.+)$/i,
+    /\badd a task to\s+(.+)$/i,
+    /\badd to my to-?do(?: list)?\s+(.+)$/i,
+    /\brecu[eÃ©]rdame\s+(?:que\s+)?(.+)$/i,
+    /\bagrega(?:r)? una tarea para\s+(.+)$/i,
+    /\ba[nÃ±]ade(?:me)? una tarea para\s+(.+)$/i,
+    /\banota(?:me)? que tengo que\s+(.+)$/i,
+    /\bmuistuta minua\s+(.+)$/i,
+    /\blisaa tehtava\s+(.+)$/i,
+    /\bkom ihag att jag ska\s+(.+)$/i,
+    /\blagg till en uppgift att\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmedMessage.match(pattern);
+    if (!match?.[1]) continue;
+
+    const rawTaskText = match[1].trim().replace(/[.!?]+$/, "");
+    const parsed = chrono.parse(rawTaskText, new Date(), { forwardDate: true });
+    const firstMatch = parsed[0];
+    const dueAt = firstMatch?.start?.date()?.toISOString() || null;
+    const matchedDateText = firstMatch?.text || "";
+
+    let title = matchedDateText
+      ? rawTaskText.replace(matchedDateText, " ").replace(/\s+/g, " ").trim()
+      : rawTaskText;
+
+    title = title
+      .replace(/^(to|que|att|que tengo que|jag ska)\s+/i, "")
+      .replace(/\b(on|at|para|for)\s*$/i, "")
+      .trim();
+
+    if (!title) {
+      title = rawTaskText.trim();
+    }
+
+    return { title, dueAt };
+  }
+
+  return null;
+}
+
+function getTaskSavedMessage(langCode: string, title: string, dueAt: string | null): string {
+  const dueText = dueAt
+    ? new Date(dueAt).toLocaleString(langCode === "es" ? "es-ES" : langCode === "fi" ? "fi-FI" : langCode === "sv" ? "sv-SE" : "en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  if (langCode === "es") {
+    return dueText ? `Listo. Guardare esta tarea: ${title} (${dueText}).` : `Listo. Guardare esta tarea: ${title}.`;
+  }
+  if (langCode === "fi") {
+    return dueText ? `Selva. Tallensin tehtavan: ${title} (${dueText}).` : `Selva. Tallensin tehtavan: ${title}.`;
+  }
+  if (langCode === "sv") {
+    return dueText ? `Klart. Jag sparade uppgiften: ${title} (${dueText}).` : `Klart. Jag sparade uppgiften: ${title}.`;
+  }
+  return dueText ? `Done. I saved this task: ${title} (${dueText}).` : `Done. I saved this task: ${title}.`;
+}
+
+function getTaskCompletedMessage(langCode: string, completedCount: number): string {
+  if (completedCount === 0) {
+    if (langCode === "es") return "No encontre una tarea abierta que coincida con eso.";
+    if (langCode === "fi") return "En loytanyt siihen sopivaa avointa tehtavaa.";
+    if (langCode === "sv") return "Jag hittade ingen oppen uppgift som matchar det.";
+    return "I couldn't find an open task matching that.";
+  }
+
+  if (langCode === "es") return `He marcado ${completedCount} tarea(s) como hechas.`;
+  if (langCode === "fi") return `Merkitsin ${completedCount} tehtavaa valmiiksi.`;
+  if (langCode === "sv") return `Jag markerade ${completedCount} uppgift(er) som klara.`;
+  return `I marked ${completedCount} task(s) as done.`;
+}
+
+async function buildDailyBriefingText({
+  langCode,
+  userTokens,
+  userMemories,
+  userTasks,
+  req,
+}: {
+  langCode: string;
+  userTokens: any;
+  userMemories: any[];
+  userTasks: any[];
+  req: express.Request;
+}): Promise<string> {
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const todayEvents = await listCalendarEvents(
+    userTokens,
+    today.toISOString().split("T")[0],
+    tomorrow.toISOString().split("T")[0],
+    10,
+  );
+
+  const oauth2Client = getOAuth2Client(req);
+  oauth2Client.setCredentials(userTokens);
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const unreadResponse = await gmail.users.messages.list({
+    userId: "me",
+    maxResults: 3,
+    q: "is:unread",
+  });
+
+  const unreadSummaries: string[] = [];
+  for (const unreadMessage of unreadResponse.data.messages || []) {
+    const messageData = await gmail.users.messages.get({
+      userId: "me",
+      id: unreadMessage.id as string,
+      format: "metadata",
+      metadataHeaders: ["Subject", "From", "Date"],
+    });
+    const headers = messageData.data.payload?.headers || [];
+    const subject = headers.find((header) => header.name === "Subject")?.value || "No Subject";
+    const from = headers.find((header) => header.name === "From")?.value || "Unknown sender";
+    unreadSummaries.push(`- ${from} - ${subject}`);
+  }
+
+  const greeting = langCode === "es"
+    ? `Buenos ${today.getHours() < 12 ? "dias" : today.getHours() < 20 ? "dias" : "dias"}.`
+    : langCode === "fi"
+      ? "Huomenta."
+      : langCode === "sv"
+        ? "God morgon."
+        : "Good morning.";
+
+  const eventSection = todayEvents.length > 0
+    ? todayEvents.map((event: any) => `- ${formatCalendarEventLine(event, langCode)}`).join("\n")
+    : (langCode === "es" ? "No tienes eventos hoy." : langCode === "fi" ? "Sinulla ei ole tapahtumia tanaan." : langCode === "sv" ? "Du har inga handelser idag." : "You have no events today.");
+
+  const unreadSection = unreadSummaries.length > 0
+    ? unreadSummaries.join("\n")
+    : (langCode === "es" ? "No veo correos urgentes o no leidos importantes." : langCode === "fi" ? "En nae juuri nyt tarkeita lukemattomia sahkoposteja." : langCode === "sv" ? "Jag ser inga viktiga olasta e-postmeddelanden just nu." : "I do not see important unread emails right now.");
+
+  const memorySection = userMemories.length > 0
+    ? formatUserMemoriesSummary(userMemories.slice(0, 3), langCode)
+    : (langCode === "es" ? "Sin recuerdos persistentes destacados." : langCode === "fi" ? "Ei korostettuja pysyvia muistoja." : langCode === "sv" ? "Inga viktiga sparade minnen just nu." : "No highlighted persistent memories.");
+
+  const taskSection = userTasks.length > 0
+    ? formatUserTasksSummary(userTasks.slice(0, 5), langCode)
+    : (langCode === "es" ? "No tienes tareas abiertas." : langCode === "fi" ? "Avoimia tehtavia ei ole." : langCode === "sv" ? "Du har inga oppna uppgifter." : "You have no open tasks.");
+
+  if (langCode === "es") {
+    return `${greeting}\n\nResumen de tu dia:\n\nAgenda de hoy:\n${eventSection}\n\nTareas abiertas:\n${taskSection}\n\nCorreos por revisar:\n${unreadSection}\n\nLo que recuerdo:\n${memorySection}`;
+  }
+  if (langCode === "fi") {
+    return `${greeting}\n\nPaivan yhteenveto:\n\nTaman paivan aikataulu:\n${eventSection}\n\nAvoimet tehtavat:\n${taskSection}\n\nSahkopostit tarkistettavaksi:\n${unreadSection}\n\nMita muistan:\n${memorySection}`;
+  }
+  if (langCode === "sv") {
+    return `${greeting}\n\nHar ar din dagsoversikt:\n\nDagens schema:\n${eventSection}\n\nOppna uppgifter:\n${taskSection}\n\nE-post att granska:\n${unreadSection}\n\nDet jag minns:\n${memorySection}`;
+  }
+  return `${greeting}\n\nHere is your day briefing:\n\nToday's schedule:\n${eventSection}\n\nOpen tasks:\n${taskSection}\n\nEmails to review:\n${unreadSection}\n\nWhat I remember:\n${memorySection}`;
 }
 
 // API routes FIRST
@@ -1366,6 +1598,19 @@ app.delete("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
   }
 });
 
+app.get("/api/user/tasks", authenticateSupabaseUser, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const status = req.query.status === "completed" ? "completed" : "open";
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
+    const tasks = await getUserTasks(user.id, { status, limit });
+    res.json(tasks);
+  } catch (error: any) {
+    console.error("Error fetching user tasks:", error);
+    res.status(500).json({ error: "Failed to fetch tasks", details: error.message });
+  }
+});
+
 const ttsPreviewCache: Record<string, string> = {};
 
 app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
@@ -1884,6 +2129,266 @@ function formatDraftCreatedResponse(styleId: MimaStyleId, to: string, subject: s
   return `Borrador creado correctamente.\nPara: ${to}\nAsunto: ${subject}\n\nRevisalo antes de enviarlo.`;
 }
 
+type GoogleToolExecutionContext = {
+  userTokens: any | null;
+  langCode: string;
+  activeStyleId: MimaStyleId;
+  activeStyle: {
+    calendarRules: {
+      defaultEventDuration: number;
+    };
+  };
+};
+
+function getMissingGoogleConnectionMessage(langCode: string): string {
+  if (langCode === 'es') {
+    return 'Necesitas conectar tu cuenta de Google primero para usar estas acciones. Ve a Calendario o Gmail para conectarla.';
+  }
+  if (langCode === 'fi') {
+    return 'Sinun taytyy ensin yhdistaa Google-tilisi nayttaaksesi tai kayttaaksesi nita toimintoja. Mene Kalenteriin tai Gmailiin yhdistamaan se.';
+  }
+  if (langCode === 'sv') {
+    return 'Du behover ansluta ditt Google-konto forst for att anvanda de har atgarderna. Ga till Kalender eller Gmail for att ansluta det.';
+  }
+  return 'You need to connect your Google account first to use these actions. Go to Calendar or Gmail to connect it.';
+}
+
+function getUnsupportedGoogleToolMessage(langCode: string, toolName: string): string {
+  if (langCode === 'es') {
+    return `Aun no puedo ejecutar la accion "${toolName}" por este camino.`;
+  }
+  return `I cannot execute the action "${toolName}" yet through this path.`;
+}
+
+async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecutionContext): Promise<string> {
+  const { userTokens, langCode, activeStyleId, activeStyle } = context;
+  const toolName = String(toolCall?.tool || '');
+
+  if (toolName === 'getCurrentTime') {
+    return getLocalizedCurrentTimeResponse(toolCall.location || '', langCode);
+  }
+
+  if (!userTokens) {
+    return getMissingGoogleConnectionMessage(langCode);
+  }
+
+  switch (toolName) {
+    case 'createCalendarEvent': {
+      const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+      if (!dateInfo) {
+        return langCode === 'es'
+          ? `No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`
+          : `I could not create "${toolCall.summary || 'event'}" because I did not understand the date or time.`;
+      }
+
+      const endDate =
+        dateInfo.end ||
+        new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+
+      const eventData: CalendarEventData = {
+        summary: toolCall.summary,
+        description: toolCall.description,
+        startDate: dateInfo.start,
+        endDate,
+        isAllDay: dateInfo.isAllDay,
+      };
+
+      let createdEvent: any = null;
+      let lastError: any = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          createdEvent = await createCalendarEvent(userTokens, eventData);
+          lastError = null;
+          break;
+        } catch (error: any) {
+          lastError = error;
+        }
+      }
+
+      if (lastError || !createdEvent) {
+        throw lastError || new Error('Unable to create calendar event');
+      }
+
+      return formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink);
+    }
+
+    case 'listCalendarEvents': {
+      const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+      const startStr = (dateInfo?.start || new Date()).toISOString().split('T')[0];
+      const endStr = (dateInfo?.end || dateInfo?.start || new Date()).toISOString().split('T')[0];
+      const events = await listCalendarEvents(userTokens, startStr, endStr, toolCall.maxResults || 10);
+      return formatCalendarListResponse(activeStyleId, langCode, toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'), events);
+    }
+
+    case 'searchCalendarEvents': {
+      const events = await searchCalendarEvents(userTokens, toolCall.query, toolCall.maxResults || 10);
+      if (events.length === 0) {
+        return langCode === 'es'
+          ? `No encontre eventos que coincidan con "${toolCall.query}".`
+          : `I could not find events matching "${toolCall.query}".`;
+      }
+
+      return events
+        .map((event: any, resultIndex: number) => {
+          const start = event.start?.dateTime
+            ? new Date(event.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : (langCode === 'es' ? 'Todo el dia' : 'All day');
+          return `${resultIndex + 1}. ${start}: ${event.summary} (ID: ${event.id})`;
+        })
+        .join('\n');
+    }
+
+    case 'deleteCalendarEvent': {
+      await deleteCalendarEvent(userTokens, toolCall.eventId);
+      return formatCalendarDeleteResponse(activeStyleId);
+    }
+
+    case 'updateCalendarEvent': {
+      const updates: Partial<CalendarEventData> = {};
+      if (toolCall.summary) updates.summary = toolCall.summary;
+      if (toolCall.description) updates.description = toolCall.description;
+      if (toolCall.dateText) {
+        const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+        if (!dateInfo) {
+          return langCode === 'es'
+            ? 'No pude actualizar el evento porque no entendi la nueva fecha u hora.'
+            : 'I could not update the event because I did not understand the new date or time.';
+        }
+        updates.startDate = dateInfo.start;
+        updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+        updates.isAllDay = dateInfo.isAllDay;
+      }
+
+      const updatedEvent = await updateCalendarEvent(userTokens, toolCall.eventId, updates);
+      return formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary);
+    }
+
+    case 'readGmailMessage': {
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(userTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      const message = await gmail.users.messages.get({
+        userId: 'me',
+        id: toolCall.messageId,
+        format: 'full',
+      });
+
+      const headers = message.data.payload?.headers || [];
+      const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+      const from = headers.find((header) => header.name === 'From')?.value || 'Unknown';
+      const date = headers.find((header) => header.name === 'Date')?.value || '';
+      const bodyText = extractBody(message.data.payload) || message.data.snippet || '';
+
+      return formatGmailReadResponse(langCode, { from, subject, date, bodyText });
+    }
+
+    case 'createGmailDraft': {
+      const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(writableTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      const raw = createEmailMessage(
+        toolCall.to,
+        toolCall.subject,
+        toolCall.body,
+        toolCall.inReplyTo,
+        toolCall.threadId
+      );
+
+      await gmail.users.drafts.create({
+        userId: 'me',
+        requestBody: {
+          message: { raw },
+        },
+      });
+
+      return formatDraftCreatedResponse(activeStyleId, toolCall.to, toolCall.subject);
+    }
+
+    case 'listGmailDrafts': {
+      const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(writableTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      const response = await gmail.users.drafts.list({
+        userId: 'me',
+        maxResults: toolCall.maxResults || 10,
+      });
+
+      const drafts = await Promise.all((response.data.drafts || []).slice(0, toolCall.maxResults || 10).map(async (draft: any) => {
+        const draftData = await gmail.users.drafts.get({
+          userId: 'me',
+          id: draft.id!,
+        });
+        const headers = draftData.data.message?.payload?.headers || [];
+        return {
+          id: draft.id,
+          subject: headers.find((header) => header.name === 'Subject')?.value || 'No Subject',
+        };
+      }));
+
+      return formatGmailDraftListResponse(langCode, drafts);
+    }
+
+    case 'deleteGmailDraft': {
+      const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(writableTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      await gmail.users.drafts.delete({
+        userId: 'me',
+        id: toolCall.draftId,
+      });
+
+      if (langCode === 'es') return 'Borrador eliminado correctamente.';
+      if (langCode === 'fi') return 'Luonnos poistettiin onnistuneesti.';
+      if (langCode === 'sv') return 'Utkastet raderades.';
+      return 'Draft deleted successfully.';
+    }
+
+    case 'sendGmailDraft': {
+      if (!toolCall.confirmSend) {
+        return langCode === 'es'
+          ? 'Necesito confirmacion explicita para enviar ese borrador.'
+          : langCode === 'fi'
+            ? 'Tarvitsen nimenomaisen vahvistuksen luonnoksen lahettamiseen.'
+            : langCode === 'sv'
+              ? 'Jag behover en uttrycklig bekraftelse for att skicka utkastet.'
+              : 'I need explicit confirmation to send that draft.';
+      }
+
+      const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(writableTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      await gmail.users.drafts.send({
+        userId: 'me',
+        requestBody: {
+          id: toolCall.draftId,
+        },
+      });
+
+      await gmail.users.drafts.delete({
+        userId: 'me',
+        id: toolCall.draftId,
+      }).catch(() => {});
+
+      if (langCode === 'es') return 'Email enviado correctamente.';
+      if (langCode === 'fi') return 'Sahkoposti lahetettiin onnistuneesti.';
+      if (langCode === 'sv') return 'E-postmeddelandet skickades.';
+      return 'Email sent successfully.';
+    }
+
+    default:
+      return getUnsupportedGoogleToolMessage(langCode, toolName);
+  }
+}
+
 // ---- Gemini AI Chat Proxy ----
 let genAI: GoogleGenAI | null = null;
 let geminiInitialized = false;
@@ -2262,6 +2767,22 @@ function looksLikeCalendarIntent(message: string): boolean {
     'kalender',
     'mote',
     'paminnelse',
+    'email',
+    'gmail',
+    'draft',
+    'reply',
+    'send draft',
+    'read email',
+    'correo',
+    'borrador',
+    'leer correo',
+    'responde este email',
+    'sahkoposti',
+    'luonnos',
+    'lue sahkoposti',
+    'e-post',
+    'utkast',
+    'las e-post',
   ];
 
   return calendarPhrases.some((phrase) => normalized.includes(normalizeLookupValue(phrase)));
@@ -2279,16 +2800,21 @@ async function extractToolCallFromMessage(
 
   try {
     const extractorPrompt =
-      `Convert the user's latest request into JSON tool calls when the intent is clearly about Google Calendar. ` +
-      `Available tools: createCalendarEvent, listCalendarEvents, searchCalendarEvents, deleteCalendarEvent, updateCalendarEvent. ` +
+      `Convert the user's latest request into JSON tool calls when the intent is clearly about Google Calendar or Gmail. ` +
+      `Available tools: createCalendarEvent, listCalendarEvents, searchCalendarEvents, deleteCalendarEvent, updateCalendarEvent, readGmailMessage, createGmailDraft, listGmailDrafts, deleteGmailDraft, sendGmailDraft. ` +
       `Return ONLY valid JSON and nothing else. ` +
-      `If the request is not clearly a calendar action, return {"tool":"none"}. ` +
-      `If the user asks for multiple calendar actions or multiple events, return {"tasks":[...]} with the actions in user order. ` +
+      `If the request is not clearly a Google tool action, return {"tool":"none"}. ` +
+      `If the user asks for multiple Google actions, return {"tasks":[...]} with the actions in user order. ` +
       `For createCalendarEvent use keys summary, dateText, description. ` +
       `For listCalendarEvents use keys dateText, maxResults. ` +
       `For searchCalendarEvents use keys query, maxResults. ` +
       `For deleteCalendarEvent use key eventId only if the id is explicitly known. ` +
       `For updateCalendarEvent use keys eventId plus any of summary, description, dateText only if the id is explicitly known. ` +
+      `For readGmailMessage use key messageId only if the id is explicitly known. ` +
+      `For createGmailDraft use keys to, subject, body, and optionally inReplyTo and threadId. ` +
+      `For listGmailDrafts no extra keys are required. ` +
+      `For deleteGmailDraft use key draftId only if the id is explicitly known. ` +
+      `For sendGmailDraft use keys draftId and confirmSend. ` +
       `Preserve the original language wording inside summary, description, query, and dateText.`;
 
     const extraction = await ai.models.generateContent({
@@ -2364,6 +2890,111 @@ function getCalendarToolErrorMessage(error: any, langCode: string): string {
   };
 
   return messages[langCode] || messages.en;
+}
+
+function getGmailToolErrorMessage(error: any, langCode: string, action: 'read' | 'create' | 'delete' | 'send' | 'list' = 'read'): string {
+  const message = String(error?.message || '');
+  const isPermissionError =
+    error?.status === 403 ||
+    error?.code === 403 ||
+    isGoogleScopeError(error) ||
+    /insufficient|forbidden|scope|permission/i.test(message);
+  const isTokenError =
+    error?.status === 401 ||
+    /invalid_grant|expired or revoked|refresh token/i.test(message);
+
+  const actionLabels: Record<string, Record<typeof action, string>> = {
+    en: {
+      read: 'read that email',
+      create: 'create that draft',
+      delete: 'delete that draft',
+      send: 'send that draft',
+      list: 'list your drafts',
+    },
+    es: {
+      read: 'leer ese email',
+      create: 'crear ese borrador',
+      delete: 'eliminar ese borrador',
+      send: 'enviar ese borrador',
+      list: 'listar tus borradores',
+    },
+    fi: {
+      read: 'lukea sen sahkopostin',
+      create: 'luoda sen luonnoksen',
+      delete: 'poistaa sen luonnoksen',
+      send: 'lahettaa sen luonnoksen',
+      list: 'listata luonnokset',
+    },
+    sv: {
+      read: 'lasa det e-postmeddelandet',
+      create: 'skapa det utkastet',
+      delete: 'radera det utkastet',
+      send: 'skicka det utkastet',
+      list: 'lista dina utkast',
+    },
+  };
+
+  if (isPermissionError) {
+    const messages: Record<string, string> = {
+      en: `I need Gmail write permission to ${actionLabels.en[action]}. Please reconnect Google from Profile and try again.`,
+      es: `Necesito permiso de escritura en Gmail para ${actionLabels.es[action]}. Reconecta Google desde Perfil e intentalo de nuevo.`,
+      fi: `Tarvitsen Gmailin kirjoitusoikeuden voidakseni ${actionLabels.fi[action]}. Yhdista Google uudelleen Profiilista ja yrita uudestaan.`,
+      sv: `Jag behover skrivbehorighet i Gmail for att ${actionLabels.sv[action]}. Anslut Google pa nytt fran Profil och forsok igen.`,
+    };
+
+    return messages[langCode] || messages.en;
+  }
+
+  if (isTokenError) {
+    const messages: Record<string, string> = {
+      en: 'Your Gmail connection expired. Please reconnect it and try again.',
+      es: 'La conexion con Gmail expiro. Vuelve a conectarla e intentalo de nuevo.',
+      fi: 'Gmail-yhteytesi vanheni. Yhdista se uudelleen ja yrita sitten uudestaan.',
+      sv: 'Din Gmail-anslutning har gatt ut. Anslut den igen och forsok sedan pa nytt.',
+    };
+
+    return messages[langCode] || messages.en;
+  }
+
+  const messages: Record<string, string> = {
+    en: 'I could not complete the Gmail action right now. Please try again.',
+    es: 'No pude completar la accion de Gmail en este momento. Intentalo de nuevo.',
+    fi: 'En voinut suorittaa Gmail-toimintoa juuri nyt. Yrita uudelleen.',
+    sv: 'Jag kunde inte slutfÃ¶ra Gmail-atgarden just nu. Forsok igen.',
+  };
+
+  return messages[langCode] || messages.en;
+}
+
+function formatGmailReadResponse(langCode: string, email: { from: string; subject: string; date: string; bodyText: string }): string {
+  const safeBody = email.bodyText.trim().slice(0, 1200);
+
+  if (langCode === 'es') {
+    return `Email de: ${email.from}\nAsunto: ${email.subject}\nFecha: ${email.date}\n\n${safeBody}`;
+  }
+  if (langCode === 'fi') {
+    return `Sahkoposti lahettajalta: ${email.from}\nAihe: ${email.subject}\nPvm: ${email.date}\n\n${safeBody}`;
+  }
+  if (langCode === 'sv') {
+    return `E-post fran: ${email.from}\nAmne: ${email.subject}\nDatum: ${email.date}\n\n${safeBody}`;
+  }
+  return `Email from: ${email.from}\nSubject: ${email.subject}\nDate: ${email.date}\n\n${safeBody}`;
+}
+
+function formatGmailDraftListResponse(langCode: string, drafts: Array<{ id?: string | null; subject: string }>): string {
+  if (drafts.length === 0) {
+    if (langCode === 'es') return 'No tienes borradores guardados.';
+    if (langCode === 'fi') return 'Sinulla ei ole tallennettuja luonnoksia.';
+    if (langCode === 'sv') return 'Du har inga sparade utkast.';
+    return 'You do not have any saved drafts.';
+  }
+
+  const lines = drafts.map((draft, index) => `${index + 1}. ${draft.subject} (ID: ${draft.id || 'n/a'})`).join('\n');
+
+  if (langCode === 'es') return `Borradores existentes:\n${lines}`;
+  if (langCode === 'fi') return `Nykyiset luonnokset:\n${lines}`;
+  if (langCode === 'sv') return `Befintliga utkast:\n${lines}`;
+  return `Existing drafts:\n${lines}`;
 }
 
 const languageInstructions: Record<string, string> = {
@@ -2551,6 +3182,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
     const resolvedLangCode = language || 'en';
     const resolvedLangInstruction = languageInstructions[resolvedLangCode] || languageInstructions.en;
     const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const userPreferences = userId ? await getUserPreferences(userId) : null;
 
     const normalizedAttachments = Array.isArray(attachments)
       ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
@@ -2559,6 +3191,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
     let tokenData: { tokens: string } | null = null;
     let userTokens: any | null = null;
     let userMemories = userId ? await getUserMemories(userId, 12) : [];
+    let userTasks = userId ? await getUserTasks(userId, { status: 'open', limit: 8 }) : [];
     let googleAccessState = {
       hasCalendarWrite: false,
       hasGmailWrite: false,
@@ -2632,7 +3265,67 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       }
     }
 
+    const taskCompletionQuery = extractTaskCompletionQuery(message);
+    if (userId && taskCompletionQuery) {
+      const completedCount = await completeUserTasks(userId, taskCompletionQuery);
+      return res.json({
+        text: getTaskCompletedMessage(resolvedLangCode, completedCount),
+      });
+    }
+
+    if (userId && isTaskListIntent(message)) {
+      return res.json({
+        text: formatUserTasksSummary(userTasks, resolvedLangCode),
+      });
+    }
+
+    const taskCreationPayload = extractTaskCreationPayload(message);
+    if (userId && taskCreationPayload) {
+      await saveUserTask(userId, taskCreationPayload.title, {
+        dueAt: taskCreationPayload.dueAt,
+        sourceText: message,
+      });
+      userTasks = await getUserTasks(userId, { status: 'open', limit: 8 });
+      return res.json({
+        text: getTaskSavedMessage(resolvedLangCode, taskCreationPayload.title, taskCreationPayload.dueAt),
+      });
+    }
+
+    if (userId && userTokens && shouldSendAutomaticBriefing(message, userPreferences?.last_daily_briefing_at, clientTimeZone)) {
+      try {
+        const briefingText = await buildDailyBriefingText({
+          langCode: resolvedLangCode,
+          userTokens,
+          userMemories,
+          userTasks,
+          req,
+        });
+        await updateUserPreferences(userId, { last_daily_briefing_at: new Date().toISOString() });
+        return res.json({ text: briefingText });
+      } catch (briefingError: any) {
+        console.error("Failed to build automatic daily briefing:", briefingError.message);
+      }
+    }
+
     if (userTokens && isDailyBriefingIntent(message)) {
+      try {
+        const briefingText = await buildDailyBriefingText({
+          langCode: resolvedLangCode,
+          userTokens,
+          userMemories,
+          userTasks,
+          req,
+        });
+        if (userId) {
+          await updateUserPreferences(userId, { last_daily_briefing_at: new Date().toISOString() });
+        }
+        return res.json({ text: briefingText });
+      } catch (briefingError: any) {
+        console.error("Failed to build daily briefing:", briefingError.message);
+      }
+    }
+
+    if (false && userTokens && isDailyBriefingIntent(message)) {
       try {
         const today = new Date();
         const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
@@ -2830,6 +3523,7 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         ? [`Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`]
         : []),
       ...(userMemories.length > 0 ? ['Memoria persistente del usuario para preferencias y contexto frecuente'] : []),
+      ...(userTasks.length > 0 ? ['Gestion ligera de tareas abiertas y pendientes del usuario'] : []),
       ...(userTokens
         ? [
             googleAccessState.hasCalendarWrite
@@ -2866,11 +3560,18 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
               formatUserMemoriesSummary(userMemories, resolvedLangCode),
             ]
           : []),
+        ...(userTasks.length > 0
+          ? [
+              'TAREAS ABIERTAS DEL USUARIO:',
+              formatUserTasksSummary(userTasks, resolvedLangCode),
+            ]
+          : []),
         'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
         'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
         'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
         'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
         'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
+        'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.',
         ...(normalizedAttachments.length > 0
           ? [
               `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
@@ -2895,6 +3596,17 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
 
       console.log(`🔄 Attempting Gemini call with: ${primaryModel}`);
       const userParts: Array<any> = [{ text: message }];
+      if (normalizedAttachments.length > 0) {
+        userParts.push({
+          text: [
+            'ATTACHMENT MANIFEST:',
+            ...normalizedAttachments.map((attachment: any, index: number) =>
+              `${index + 1}. ${attachment.name || `attachment-${index + 1}`} | ${attachment.mimeType} | ${attachment.size || 0} bytes`
+            ),
+            'Analyze every attachment mentioned above before answering.',
+          ].join('\n'),
+        });
+      }
       for (const attachment of normalizedAttachments) {
         userParts.push({
           inlineData: {
@@ -2967,7 +3679,57 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
           const functionCall = JSON.parse(trimmedText);
           const toolCalls = normalizeToolCalls(functionCall);
 
-          if (toolCalls.length > 1) {
+          if (toolCalls.length > 0) {
+            console.log(`?? Executing tool plan with ${toolCalls.length} task(s)`);
+
+            const taskResults: string[] = [];
+
+            for (let index = 0; index < toolCalls.length; index += 1) {
+              const toolCall = toolCalls[index];
+              const stepPrefix = toolCalls.length > 1 ? `${index + 1}. ` : '';
+
+              try {
+                const result = await executeGoogleToolCall(toolCall, {
+                  userTokens,
+                  langCode: resolvedLangCode,
+                  activeStyleId,
+                  activeStyle,
+                });
+
+                taskResults.push(`${stepPrefix}${result}`);
+              } catch (error: any) {
+                const toolName = String(toolCall?.tool || '');
+                const normalizedToolName = toolName.toLowerCase();
+                const errorMessage = normalizedToolName.includes('calendar')
+                  ? getCalendarToolErrorMessage(error, resolvedLangCode)
+                  : normalizedToolName.includes('gmail') || normalizedToolName.includes('draft') || toolName === 'readGmailMessage'
+                    ? getGmailToolErrorMessage(
+                        error,
+                        resolvedLangCode,
+                        toolName === 'createGmailDraft'
+                          ? 'create'
+                          : toolName === 'deleteGmailDraft'
+                            ? 'delete'
+                            : toolName === 'sendGmailDraft'
+                              ? 'send'
+                              : toolName === 'listGmailDrafts'
+                                ? 'list'
+                                : 'read'
+                      )
+                    : resolvedLangCode === 'es'
+                      ? `La accion "${toolName}" fallo y continue con las demas.`
+                      : `The action "${toolName}" failed and I continued with the rest.`;
+
+                taskResults.push(`${stepPrefix}${errorMessage}`);
+              }
+            }
+
+            responseText = taskResults.join(toolCalls.length > 1 ? '\n\n' : '');
+            res.json({ text: responseText });
+            return;
+          }
+
+          if (false && toolCalls.length > 1) {
             console.log(`🔁 Executing sequential tool plan with ${toolCalls.length} tasks`);
 
             if (!userTokens) {
@@ -3073,12 +3835,141 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   continue;
                 }
 
+                if (toolCall.tool === 'readGmailMessage') {
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(userTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const message = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: toolCall.messageId,
+                    format: 'full'
+                  });
+
+                  const headers = message.data.payload?.headers || [];
+                  const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+                  const from = headers.find((header) => header.name === 'From')?.value || 'Unknown';
+                  const date = headers.find((header) => header.name === 'Date')?.value || '';
+                  const bodyText = extractBody(message.data.payload) || message.data.snippet || '';
+
+                  taskResults.push(`${stepPrefix}${formatGmailReadResponse(langCode, { from, subject, date, bodyText })}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'createGmailDraft') {
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(writableTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const raw = createEmailMessage(
+                    toolCall.to,
+                    toolCall.subject,
+                    toolCall.body,
+                    toolCall.inReplyTo,
+                    toolCall.threadId
+                  );
+
+                  await gmail.users.drafts.create({
+                    userId: 'me',
+                    requestBody: {
+                      message: { raw }
+                    }
+                  });
+
+                  taskResults.push(`${stepPrefix}${formatDraftCreatedResponse(activeStyleId, toolCall.to, toolCall.subject)}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'listGmailDrafts') {
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(writableTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  const response = await gmail.users.drafts.list({
+                    userId: 'me',
+                    maxResults: toolCall.maxResults || 10
+                  });
+
+                  const drafts = await Promise.all((response.data.drafts || []).slice(0, toolCall.maxResults || 10).map(async (draft: any) => {
+                    const draftData = await gmail.users.drafts.get({
+                      userId: 'me',
+                      id: draft.id!,
+                    });
+                    const headers = draftData.data.message?.payload?.headers || [];
+                    return {
+                      id: draft.id,
+                      subject: headers.find((header) => header.name === 'Subject')?.value || 'No Subject',
+                    };
+                  }));
+
+                  taskResults.push(`${stepPrefix}${formatGmailDraftListResponse(langCode, drafts)}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'deleteGmailDraft') {
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(writableTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  await gmail.users.drafts.delete({
+                    userId: 'me',
+                    id: toolCall.draftId
+                  });
+
+                  taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Borrador eliminado correctamente.' : langCode === 'fi' ? 'Luonnos poistettiin onnistuneesti.' : langCode === 'sv' ? 'Utkastet raderades.' : 'Draft deleted successfully.'}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'sendGmailDraft') {
+                  if (!toolCall.confirmSend) {
+                    taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Necesito confirmacion explicita para enviar ese borrador.' : langCode === 'fi' ? 'Tarvitsen nimenomaisen vahvistuksen luonnoksen lahettamiseen.' : langCode === 'sv' ? 'Jag behover en uttrycklig bekraftelse for att skicka utkastet.' : 'I need explicit confirmation to send that draft.'}`);
+                    continue;
+                  }
+
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
+                  const oauth2Client = getOAuth2Client();
+                  oauth2Client.setCredentials(writableTokens);
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                  await gmail.users.drafts.send({
+                    userId: 'me',
+                    requestBody: {
+                      id: toolCall.draftId
+                    }
+                  });
+
+                  await gmail.users.drafts.delete({
+                    userId: 'me',
+                    id: toolCall.draftId
+                  }).catch(() => {});
+
+                  taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Email enviado correctamente.' : langCode === 'fi' ? 'Sahkoposti lahetettiin onnistuneesti.' : langCode === 'sv' ? 'E-postmeddelandet skickades.' : 'Email sent successfully.'}`);
+                  continue;
+                }
+
                 taskResults.push(`${stepPrefix}${langCode === 'es' ? `Aun no puedo ejecutar en cadena la accion "${toolCall.tool}".` : `I cannot execute the chained action "${toolCall.tool}" yet.`}`);
               } catch (error: any) {
                 taskResults.push(
                   `${stepPrefix}${
                     toolCall.tool?.toLowerCase().includes('calendar')
                       ? getCalendarToolErrorMessage(error, langCode)
+                      : toolCall.tool?.toLowerCase().includes('gmail') || toolCall.tool?.toLowerCase().includes('draft') || toolCall.tool === 'readGmailMessage'
+                        ? getGmailToolErrorMessage(
+                            error,
+                            langCode,
+                            toolCall.tool === 'createGmailDraft'
+                              ? 'create'
+                              : toolCall.tool === 'deleteGmailDraft'
+                                ? 'delete'
+                                : toolCall.tool === 'sendGmailDraft'
+                                  ? 'send'
+                                  : toolCall.tool === 'listGmailDrafts'
+                                    ? 'list'
+                                    : 'read'
+                          )
                       : langCode === 'es'
                         ? `La accion "${toolCall.tool}" fallo y continue con las demas.`
                         : `The action "${toolCall.tool}" failed and I continued with the rest.`
@@ -3092,7 +3983,7 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
             return;
           }
 
-          if (functionCall.tool) {
+          if (false && functionCall.tool) {
             console.log("   Tool:", functionCall.tool);
 
             if (functionCall.tool === 'getCurrentTime') {
@@ -3921,12 +4812,7 @@ app.get("/api/gmail/messages/:messageId/attachments/:attachmentId", authenticate
     }
 
     const ai = getGenAI();
-    const supportedAnalysis =
-      mimeType.startsWith('image/') ||
-      mimeType === 'application/pdf' ||
-      mimeType.startsWith('text/') ||
-      mimeType === 'application/json' ||
-      mimeType === 'text/csv';
+    const supportedAnalysis = isSupportedAttachmentAnalysisMimeType(mimeType);
 
     if (!supportedAnalysis) {
       return res.status(400).json({
@@ -3938,12 +4824,12 @@ app.get("/api/gmail/messages/:messageId/attachments/:attachmentId", authenticate
       });
     }
 
-    const prompt = language === 'es'
-      ? 'Analiza este adjunto. Devuelve un resumen claro, hallazgos clave, datos importantes y riesgos o dudas si existen.'
-      : 'Analyze this attachment. Return a clear summary, key findings, important details, and any risks or open questions.';
+    const prompt = buildAttachmentAnalysisPrompt(language, filename, mimeType);
 
     const analysisResponse = await ai.models.generateContent({
-      model: mimeType === 'application/pdf' ? 'gemini-2.5-pro' : 'gemini-2.5-flash',
+      model: mimeType === 'application/pdf' || mimeType.includes('officedocument') || mimeType.startsWith('application/vnd.ms-')
+        ? 'gemini-2.5-pro'
+        : 'gemini-2.5-flash',
       contents: [
         {
           role: 'user',
@@ -4457,6 +5343,38 @@ function extractHtmlBody(payload: any): string {
   return '';
 }
 
+function isSupportedAttachmentAnalysisMimeType(mimeType: string): boolean {
+  return (
+    mimeType.startsWith('image/') ||
+    mimeType === 'application/pdf' ||
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    mimeType === 'text/csv' ||
+    mimeType === 'application/xml' ||
+    mimeType === 'text/xml' ||
+    mimeType === 'application/rtf' ||
+    mimeType === 'application/msword' ||
+    mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    mimeType === 'application/vnd.ms-excel' ||
+    mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    mimeType === 'application/vnd.ms-powerpoint' ||
+    mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  );
+}
+
+function buildAttachmentAnalysisPrompt(language: string, filename: string, mimeType: string): string {
+  if (language === 'es') {
+    return `Analiza el archivo "${filename}" (${mimeType}). Devuelve: 1. resumen ejecutivo, 2. hallazgos clave, 3. detalles importantes o datos relevantes, 4. riesgos, dudas o informacion faltante, 5. siguientes pasos utiles. Si el archivo no se puede leer bien, dilo claramente.`;
+  }
+  if (language === 'fi') {
+    return `Analysoi tiedosto "${filename}" (${mimeType}). Palauta: 1. tiivis yhteenveto, 2. keskeiset havainnot, 3. tarkeat tiedot tai data, 4. riskit, avoimet kysymykset tai puuttuva tieto, 5. hyodylliset seuraavat vaiheet. Jos tiedostoa ei voi lukea kunnolla, sano se selkeasti.`;
+  }
+  if (language === 'sv') {
+    return `Analysera filen "${filename}" (${mimeType}). Returnera: 1. kort sammanfattning, 2. viktigaste fynd, 3. viktiga detaljer eller data, 4. risker, oklarheter eller saknad information, 5. rekommenderade nasta steg. Om filen inte gar att lasa ordentligt ska du saga det tydligt.`;
+  }
+  return `Analyze the file "${filename}" (${mimeType}). Return: 1. executive summary, 2. key findings, 3. important details or data, 4. risks, open questions or missing information, 5. useful next steps. If the file cannot be read well, say that clearly.`;
+}
+
 // Helper function to extract body from message payload
 function extractBody(payload: any): string {
   if (!payload) return '';
@@ -4651,3 +5569,4 @@ startServer().catch(err => {
   console.error("🔥 CRITICAL SERVER STARTUP FAILURE:", err);
   logToFile("CRITICAL STARTUP ERROR", { message: err.message, stack: err.stack });
 });
+

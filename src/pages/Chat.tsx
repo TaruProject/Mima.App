@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X, Trash2, ListTodo, RefreshCw, Sparkles } from "lucide-react";
 import Markdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import { ActionMenu } from "../components/ui/ActionMenu";
@@ -45,6 +45,45 @@ interface ChatAttachment {
   size: number;
 }
 
+interface UserTask {
+  id?: string;
+  title: string;
+  due_at?: string | null;
+  status: "open" | "completed";
+}
+
+const SUPPORTED_ATTACHMENT_EXTENSIONS = [".pdf", ".txt", ".csv", ".json", ".md", ".markdown", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".rtf", ".html", ".xml"];
+const SUPPORTED_ATTACHMENT_MIME_TYPES = [
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "application/json",
+  "text/markdown",
+  "text/html",
+  "application/xml",
+  "text/xml",
+  "application/rtf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+
+function isSupportedAttachmentFile(file: File): boolean {
+  if (file.type.startsWith("image/")) {
+    return true;
+  }
+
+  if (SUPPORTED_ATTACHMENT_MIME_TYPES.includes(file.type)) {
+    return true;
+  }
+
+  const fileName = file.name.toLowerCase();
+  return SUPPORTED_ATTACHMENT_EXTENSIONS.some((extension) => fileName.endsWith(extension));
+}
+
 const CURRENT_CHAT_SNAPSHOT_STORAGE_KEY = "mima_current_chat_snapshot";
 
 export default function Chat() {
@@ -79,6 +118,8 @@ export default function Chat() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
   const [selectedAttachments, setSelectedAttachments] = useState<ChatAttachment[]>([]);
+  const [openTasks, setOpenTasks] = useState<UserTask[]>([]);
+  const [isTasksLoading, setIsTasksLoading] = useState(false);
   const [archivedConversations, setArchivedConversations] = useState<ArchivedConversation[]>(() => {
     try {
       const raw = localStorage.getItem(ARCHIVED_CONVERSATIONS_STORAGE_KEY);
@@ -220,6 +261,46 @@ export default function Chat() {
     loadData();
   }, [user, i18n, showOnboarding]);
 
+  const fetchOpenTasks = useCallback(async () => {
+    if (!user) {
+      setOpenTasks([]);
+      return;
+    }
+
+    try {
+      setIsTasksLoading(true);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setOpenTasks([]);
+        return;
+      }
+
+      const response = await fetch("/api/user/tasks?status=open&limit=6", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const tasks = await response.json();
+      setOpenTasks(Array.isArray(tasks) ? tasks : []);
+    } catch (error) {
+      console.error("Failed to fetch open tasks:", error);
+    } finally {
+      setIsTasksLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void fetchOpenTasks();
+  }, [fetchOpenTasks]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -335,81 +416,115 @@ export default function Chat() {
     };
   }, [mode, user]);
 
-  const handleSend = async () => {
-    if ((!input.trim() && selectedAttachments.length === 0) || isLoading) return;
+  const sendMessage = useCallback(
+    async ({
+      text,
+      displayText,
+      attachments: attachmentsOverride,
+    }: {
+      text: string;
+      displayText?: string;
+      attachments?: ChatAttachment[];
+    }) => {
+      if (isLoading) return;
 
-    const userMsg = input;
-    const pendingAttachments = selectedAttachments;
-    const messageForAI = userMsg.trim() || t("chat.attachment_analysis_default");
-    const displayMessage =
-      userMsg.trim() ||
-      `${t("chat.attachment_analysis_default")}\n\n${pendingAttachments.map((attachment) => `- ${attachment.name}`).join("\n")}`;
-    setInput("");
-    setSelectedAttachments([]);
+      const trimmedText = text.trim();
+      const pendingAttachments = attachmentsOverride ?? selectedAttachments;
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        role: "user",
-        text: displayMessage,
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        audio: null,
-      },
-    ]);
-
-    setIsLoading(true);
-
-    try {
-      const history = messages
-        .filter((message) => !message.isWelcome)
-        .map((message) => ({
-          role: message.role === "user" ? "user" : "model",
-          content: message.text,
-        }));
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const responseText = await generateChatResponse(
-        messageForAI,
-        mode,
-        i18n.language,
-        history,
-        session?.access_token,
-        pendingAttachments,
-      );
-
-      if (responseText.includes("Unauthorized") || responseText.includes("auth")) {
-        await supabase.auth.refreshSession();
+      if (!trimmedText && pendingAttachments.length === 0) {
+        return;
       }
 
+      const messageForAI = trimmedText || t("chat.attachment_analysis_default");
+      const userDisplayText =
+        displayText ||
+        trimmedText ||
+        `${t("chat.attachment_analysis_default")}\n\n${pendingAttachments.map((attachment) => `- ${attachment.name}`).join("\n")}`;
+
+      setInput("");
+      setSelectedAttachments([]);
+
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now() + 1,
-          role: "assistant",
-          text: responseText,
+          id: Date.now(),
+          role: "user",
+          text: userDisplayText,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           audio: null,
         },
       ]);
-    } catch (error) {
-      console.error("Chat Error:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: "assistant",
-          text: t("chat.error_message"),
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          audio: null,
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
+
+      setIsLoading(true);
+
+      try {
+        const history = messages
+          .filter((message) => !message.isWelcome)
+          .map((message) => ({
+            role: message.role === "user" ? "user" : "model",
+            content: message.text,
+          }));
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const responseText = await generateChatResponse(
+          messageForAI,
+          mode,
+          i18n.language,
+          history,
+          session?.access_token,
+          pendingAttachments,
+        );
+
+        if (responseText.includes("Unauthorized") || responseText.includes("auth")) {
+          await supabase.auth.refreshSession();
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            text: responseText,
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            audio: null,
+          },
+        ]);
+      } catch (error) {
+        console.error("Chat Error:", error);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            text: t("chat.error_message"),
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            audio: null,
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+        void fetchOpenTasks();
+      }
+    },
+    [fetchOpenTasks, i18n.language, isLoading, messages, mode, selectedAttachments, t],
+  );
+
+  const handleSend = async () => {
+    await sendMessage({
+      text: input,
+      attachments: selectedAttachments,
+    });
+  };
+
+  const handleDailyBriefing = async () => {
+    await sendMessage({
+      text: t("chat.daily_briefing_prompt"),
+      displayText: t("chat.daily_briefing_label"),
+      attachments: [],
+    });
   };
 
   const handleMicClick = async () => {
@@ -509,8 +624,7 @@ export default function Chat() {
     if (files.length === 0) return;
 
     const supportedFiles = files.filter((file) => {
-      const type = file.type;
-      return type.startsWith("image/") || ["application/pdf", "text/plain", "text/csv", "application/json", "text/markdown"].includes(type);
+      return isSupportedAttachmentFile(file);
     });
 
     if (supportedFiles.length !== files.length) {
@@ -677,6 +791,61 @@ export default function Chat() {
               {t("action_menu.new_conversation")}
             </button>
 
+            <button
+              onClick={() => {
+                void handleDailyBriefing();
+                setIsHistoryOpen(false);
+              }}
+              className="w-full py-3 px-4 rounded-2xl bg-white/5 border border-white/10 text-white font-semibold flex items-center justify-center gap-2 mb-4"
+            >
+              <Sparkles className="w-4 h-4 text-primary" />
+              {t("chat.daily_briefing_label")}
+            </button>
+
+            <div className="rounded-2xl border border-white/5 bg-surface-dark p-4 mb-4">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <ListTodo className="w-4 h-4 text-primary" />
+                    {t("chat.tasks_title")}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">{t("chat.tasks_subtitle")}</p>
+                </div>
+                <button
+                  onClick={() => void fetchOpenTasks()}
+                  className="w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-slate-300"
+                  aria-label={t("chat.refresh_tasks")}
+                  title={t("chat.refresh_tasks")}
+                >
+                  <RefreshCw className={`w-4 h-4 ${isTasksLoading ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+
+              {isTasksLoading ? (
+                <div className="text-sm text-slate-400">{t("chat.tasks_loading")}</div>
+              ) : openTasks.length === 0 ? (
+                <div className="text-sm text-slate-400">{t("chat.tasks_empty")}</div>
+              ) : (
+                <div className="space-y-2">
+                  {openTasks.map((task) => (
+                    <div key={task.id || task.title} className="rounded-xl bg-background-dark/60 border border-white/5 px-3 py-2">
+                      <div className="text-sm text-white">{task.title}</div>
+                      {task.due_at && (
+                        <div className="text-xs text-slate-400 mt-1">
+                          {new Date(task.due_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {archivedConversations.length === 0 ? (
                 <div className="rounded-2xl border border-white/5 bg-surface-dark p-4 text-sm text-slate-400">
@@ -738,7 +907,16 @@ export default function Chat() {
         />
 
         <div className="flex justify-center my-4">
-          <span className="text-xs font-medium text-text-secondary bg-surface-highlight px-3 py-1 rounded-full">{t("chat.today")}</span>
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <span className="text-xs font-medium text-text-secondary bg-surface-highlight px-3 py-1 rounded-full">{t("chat.today")}</span>
+            <button
+              onClick={() => void handleDailyBriefing()}
+              disabled={isLoading}
+              className="text-xs font-medium text-white bg-white/5 border border-white/10 px-3 py-1 rounded-full hover:bg-white/10 disabled:opacity-50"
+            >
+              {t("chat.daily_briefing_label")}
+            </button>
+          </div>
         </div>
 
         {messages.map((msg) => {
@@ -806,7 +984,7 @@ export default function Chat() {
       <footer className="p-4 bg-background-dark pb-8 shrink-0 relative">
         <div className="absolute bottom-1/2 left-1/2 -translate-x-1/2 translate-y-1/2 w-full h-32 bg-primary/10 blur-[60px] rounded-full pointer-events-none"></div>
         <div className="relative flex items-end gap-3 max-w-3xl mx-auto">
-          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.csv,.json,.md" multiple className="hidden" onChange={handleAttachmentChange} />
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.csv,.json,.md,.markdown,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rtf,.html,.xml" multiple className="hidden" onChange={handleAttachmentChange} />
           <button
             onClick={() => setIsActionMenuOpen(true)}
             className="flex-shrink-0 w-10 h-10 mb-1 flex items-center justify-center rounded-full bg-surface-highlight text-text-secondary hover:text-primary transition-colors active:scale-95"

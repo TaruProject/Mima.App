@@ -18,6 +18,7 @@ export interface UserPreferences {
   onboarding_done: boolean;
   voice_id: string;
   language: string;
+  last_daily_briefing_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useGoogleConnection } from "../hooks/useGoogleConnection";
 import { useToast } from "../hooks/useToast";
+import { ProductivitySnapshot } from "../components/ProductivitySnapshot";
 
 type InboxFilter = "all" | "urgent" | "newsletters" | "updates";
 type EmailCategory = "general" | "newsletters" | "updates";
@@ -384,11 +385,13 @@ export default function Inbox() {
                       : "bg-surface-dark border border-white/5 text-slate-400 hover:text-white hover:bg-surface-highlight transition-colors"
                   }`}
                 >
-                  {label}
-                </button>
-              );
-            })}
+                {label}
+              </button>
+            );
+          })}
           </div>
+
+          <ProductivitySnapshot compact maxTasks={2} maxDrafts={2} />
         </div>
       )}
 
