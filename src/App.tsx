@@ -13,6 +13,7 @@ import InstallPWA from "./components/InstallPWA";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./contexts/ToastContext";
+import { BUILD_ID, BUILD_VERSION } from "./generated/buildInfo";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -34,7 +35,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const deployIdRef = useRef<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [forceUpdateRequired, setForceUpdateRequired] = useState(false);
   const [versionLabel, setVersionLabel] = useState<string | null>(null);
@@ -74,16 +74,14 @@ function AppRoutes() {
       const data = await response.json();
       if (!data?.deployId) return;
 
-      setVersionLabel(data.appVersion || null);
+      setVersionLabel(data.appVersion || BUILD_VERSION || null);
 
-      if (!deployIdRef.current) {
-        deployIdRef.current = data.deployId;
+      if (data.deployId !== BUILD_ID) {
+        setForceUpdateRequired(true);
         return;
       }
 
-      if (deployIdRef.current !== data.deployId) {
-        setForceUpdateRequired(true);
-      }
+      setForceUpdateRequired(false);
     } catch (error) {
       console.error("Failed to check deployed version:", error);
     }

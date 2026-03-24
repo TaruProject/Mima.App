@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "tsx server.ts",
-    "build": "npm run lint && npm run build:server && npm run build:client",
+    "build": "node scripts/write-build-info.cjs && npm run lint && npm run build:server && npm run build:client",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json && node scripts/write-server-package.cjs",
     "preview": "vite preview",

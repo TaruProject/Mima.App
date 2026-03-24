@@ -26,6 +26,11 @@ import {
   normalizeStyleId,
   type MimaStyleId,
 } from "./src/config/mimaStyles.js";
+import {
+  BUILD_ID,
+  BUILD_TIMESTAMP,
+  BUILD_VERSION,
+} from "./src/generated/buildInfo.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -120,8 +125,8 @@ try {
   ENCRYPTION_KEY = Buffer.alloc(32, 'a'); // Last resort fallback
 }
 const IV_LENGTH = 16;
-const SERVER_STARTED_AT = new Date().toISOString();
-const SERVER_DEPLOY_ID = `${process.env.npm_package_version || "0.0.0"}-${Date.parse(SERVER_STARTED_AT)}`;
+const SERVER_STARTED_AT = BUILD_TIMESTAMP;
+const SERVER_DEPLOY_ID = BUILD_ID;
 
 function encrypt(text: string) {
   const iv = crypto.randomBytes(IV_LENGTH);
@@ -326,7 +331,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/version", (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({
-    appVersion: process.env.npm_package_version || '0.0.0',
+    appVersion: BUILD_VERSION,
     deployId: SERVER_DEPLOY_ID,
     startedAt: SERVER_STARTED_AT,
   });
