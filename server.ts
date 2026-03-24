@@ -21,6 +21,12 @@ import {
   clearChatHistory
 } from "./src/services/userPreferencesService.js";
 import {
+  formatUserMemoriesSummary,
+  forgetUserMemories,
+  getUserMemories,
+  saveUserMemory,
+} from "./src/services/userMemoryService.js";
+import {
   buildSystemPrompt,
   getMimaStyle,
   normalizeStyleId,
@@ -521,6 +527,99 @@ function getPermissionStatusFollowUpMessage(
   if (stillMissingCalendar) return selected.calendar;
   if (stillMissingGmail) return selected.gmail;
   return selected.ok;
+}
+
+function isMemoryRecallIntent(message: string): boolean {
+  return /\b(what do you remember about me|what do you remember|que recuerdas de mi|que recuerdas de mí|recuerdas de mi|recuerdas de mí|mita muistat minusta|vad minns du om mig)\b/i.test(message);
+}
+
+function extractForgetMemoryQuery(message: string): string | null {
+  const patterns = [
+    /\bforget that\s+(.+)$/i,
+    /\bforget\s+(.+)$/i,
+    /\bolvida que\s+(.+)$/i,
+    /\bolvida\s+(.+)$/i,
+    /\bunohda\s+(.+)$/i,
+    /\bglom att\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.trim().match(pattern);
+    if (match?.[1]) {
+      return match[1].trim().replace(/[.!?]+$/, '');
+    }
+  }
+
+  return null;
+}
+
+function extractMemoryStatements(message: string): string[] {
+  const statements: string[] = [];
+  const trimmedMessage = message.trim();
+
+  const explicitRememberPatterns = [
+    /\bremember that\s+(.+)$/i,
+    /\brecuerda que\s+(.+)$/i,
+    /\bmuista etta\s+(.+)$/i,
+    /\bkom ihag att\s+(.+)$/i,
+  ];
+
+  for (const pattern of explicitRememberPatterns) {
+    const match = trimmedMessage.match(pattern);
+    if (match?.[1]) {
+      statements.push(match[1].trim().replace(/[.!?]+$/, ''));
+    }
+  }
+
+  const autoMemoryPatterns = [
+    /\b(.+?)\s+is my\s+([a-z\s]+)$/i,
+    /\b(.+?)\s+es mi\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i,
+    /\bmy meetings are always at\s+(.+)$/i,
+    /\bmis reuniones siempre son a las\s+(.+)$/i,
+    /\bmy preferred language is\s+(.+)$/i,
+    /\bmi idioma preferido es\s+(.+)$/i,
+  ];
+
+  for (const pattern of autoMemoryPatterns) {
+    const match = trimmedMessage.match(pattern);
+    if (match?.[0]) {
+      statements.push(match[0].trim().replace(/[.!?]+$/, ''));
+    }
+  }
+
+  return Array.from(new Set(statements.filter(Boolean)));
+}
+
+function getMemorySavedMessage(langCode: string): string {
+  if (langCode === 'es') return 'Lo recordare para futuras conversaciones.';
+  if (langCode === 'fi') return 'Muistan taman tulevia keskusteluja varten.';
+  if (langCode === 'sv') return 'Jag kommer att komma ihag det till framtida samtal.';
+  return 'I will remember that for future conversations.';
+}
+
+function getMemoryRecallMessage(langCode: string, memorySummary: string): string {
+  if (langCode === 'es') return `Esto es lo que recuerdo de ti ahora mismo:\n\n${memorySummary}`;
+  if (langCode === 'fi') return `Tata muistan sinusta juuri nyt:\n\n${memorySummary}`;
+  if (langCode === 'sv') return `Det har minns jag om dig just nu:\n\n${memorySummary}`;
+  return `This is what I remember about you right now:\n\n${memorySummary}`;
+}
+
+function getMemoryForgetMessage(langCode: string, deletedCount: number): string {
+  if (deletedCount === 0) {
+    if (langCode === 'es') return 'No encontre nada que coincida con eso en tu memoria.';
+    if (langCode === 'fi') return 'En loytanyt muististani siihen sopivaa tietoa.';
+    if (langCode === 'sv') return 'Jag hittade inget i minnet som matchar det.';
+    return "I couldn't find anything matching that in memory.";
+  }
+
+  if (langCode === 'es') return `He olvidado ${deletedCount} recuerdo(s) relacionado(s) con eso.`;
+  if (langCode === 'fi') return `Unohdin ${deletedCount} siihen liittyvaa muistia.`;
+  if (langCode === 'sv') return `Jag har glomt ${deletedCount} minnen som var kopplade till det.`;
+  return `I forgot ${deletedCount} memory item(s) related to that.`;
+}
+
+function isDailyBriefingIntent(message: string): boolean {
+  return /\b(dame mi resumen del dia|dame mi resumen del día|resumen del dia|resumen del día|briefing del dia|briefing del día|summary of my day|daily briefing|what do i have today|que tengo hoy|qué tengo hoy|mita minulla on tanaan|vad har jag idag)\b/i.test(message);
 }
 
 // API routes FIRST
@@ -2069,16 +2168,40 @@ function extractToolPayload(text: string): string | null {
     if (match) trimmedText = match[1].trim();
   }
 
+  const taskPlanMatch = trimmedText.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+  if (taskPlanMatch) {
+    trimmedText = taskPlanMatch[0].trim();
+  }
+
   const jsonMatch = trimmedText.match(/\{[\s\S]*"tool"[\s\S]*\}/);
   if (jsonMatch) {
     trimmedText = jsonMatch[0].trim();
   }
 
-  if (trimmedText.startsWith('{') && trimmedText.includes('"tool":')) {
+  const arrayMatch = trimmedText.match(/\[[\s\S]*"tool"[\s\S]*\]/);
+  if (arrayMatch) {
+    return `{"tasks": ${arrayMatch[0].trim()}}`;
+  }
+
+  if (trimmedText.startsWith('{') && (trimmedText.includes('"tool":') || trimmedText.includes('"tasks"'))) {
     return trimmedText;
   }
 
   return null;
+}
+
+function normalizeToolCalls(functionCall: any): any[] {
+  if (!functionCall) return [];
+  if (Array.isArray(functionCall)) {
+    return functionCall.filter((item) => item?.tool);
+  }
+  if (Array.isArray(functionCall.tasks)) {
+    return functionCall.tasks.filter((item: any) => item?.tool);
+  }
+  if (functionCall.tool) {
+    return [functionCall];
+  }
+  return [];
 }
 
 function extractJsonPayload(text: string): string | null {
@@ -2156,10 +2279,11 @@ async function extractToolCallFromMessage(
 
   try {
     const extractorPrompt =
-      `Convert the user's latest request into a single JSON tool call when the intent is clearly about Google Calendar. ` +
+      `Convert the user's latest request into JSON tool calls when the intent is clearly about Google Calendar. ` +
       `Available tools: createCalendarEvent, listCalendarEvents, searchCalendarEvents, deleteCalendarEvent, updateCalendarEvent. ` +
       `Return ONLY valid JSON and nothing else. ` +
       `If the request is not clearly a calendar action, return {"tool":"none"}. ` +
+      `If the user asks for multiple calendar actions or multiple events, return {"tasks":[...]} with the actions in user order. ` +
       `For createCalendarEvent use keys summary, dateText, description. ` +
       `For listCalendarEvents use keys dateText, maxResults. ` +
       `For searchCalendarEvents use keys query, maxResults. ` +
@@ -2434,6 +2558,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
 
     let tokenData: { tokens: string } | null = null;
     let userTokens: any | null = null;
+    let userMemories = userId ? await getUserMemories(userId, 12) : [];
     let googleAccessState = {
       hasCalendarWrite: false,
       hasGmailWrite: false,
@@ -2479,6 +2604,96 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       return res.json({
         text: getPermissionStatusFollowUpMessage(resolvedLangCode, googleAccessState),
       });
+    }
+
+    const forgetMemoryQuery = extractForgetMemoryQuery(message);
+    if (userId && forgetMemoryQuery) {
+      const deletedCount = await forgetUserMemories(userId, forgetMemoryQuery);
+      return res.json({
+        text: getMemoryForgetMessage(resolvedLangCode, deletedCount),
+      });
+    }
+
+    if (isMemoryRecallIntent(message)) {
+      return res.json({
+        text: getMemoryRecallMessage(resolvedLangCode, formatUserMemoriesSummary(userMemories, resolvedLangCode)),
+      });
+    }
+
+    const memoryStatements = extractMemoryStatements(message);
+    if (userId && memoryStatements.length > 0) {
+      await Promise.all(memoryStatements.map((memoryStatement) => saveUserMemory(userId, memoryStatement)));
+      userMemories = await getUserMemories(userId, 12);
+
+      if (/\b(remember that|recuerda que|muista etta|kom ihag att)\b/i.test(message)) {
+        return res.json({
+          text: getMemorySavedMessage(resolvedLangCode),
+        });
+      }
+    }
+
+    if (userTokens && isDailyBriefingIntent(message)) {
+      try {
+        const today = new Date();
+        const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+        const todayEvents = await listCalendarEvents(
+          userTokens,
+          today.toISOString().split('T')[0],
+          tomorrow.toISOString().split('T')[0],
+          10,
+        );
+
+        const oauth2Client = getOAuth2Client(req);
+        oauth2Client.setCredentials(userTokens);
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        const unreadResponse = await gmail.users.messages.list({
+          userId: 'me',
+          maxResults: 3,
+          q: 'is:unread',
+        });
+
+        const unreadSummaries: string[] = [];
+        for (const unreadMessage of unreadResponse.data.messages || []) {
+          const messageData = await gmail.users.messages.get({
+            userId: 'me',
+            id: unreadMessage.id as string,
+            format: 'metadata',
+            metadataHeaders: ['Subject', 'From', 'Date']
+          });
+          const headers = messageData.data.payload?.headers || [];
+          const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+          const from = headers.find((header) => header.name === 'From')?.value || 'Unknown sender';
+          unreadSummaries.push(`- ${from} — ${subject}`);
+        }
+
+        const greeting = resolvedLangCode === 'es'
+          ? `Buenos ${today.getHours() < 12 ? 'dias' : today.getHours() < 20 ? 'dias' : 'dias'}.`
+          : resolvedLangCode === 'fi'
+            ? 'Huomenta.'
+            : resolvedLangCode === 'sv'
+              ? 'God morgon.'
+              : 'Good morning.';
+
+        const eventSection = todayEvents.length > 0
+          ? todayEvents.map((event: any) => `- ${formatCalendarEventLine(event, resolvedLangCode)}`).join('\n')
+          : (resolvedLangCode === 'es' ? 'No tienes eventos hoy.' : 'You have no events today.');
+
+        const unreadSection = unreadSummaries.length > 0
+          ? unreadSummaries.join('\n')
+          : (resolvedLangCode === 'es' ? 'No veo correos urgentes o no leidos importantes.' : 'I do not see important unread emails right now.');
+
+        const memorySection = userMemories.length > 0
+          ? formatUserMemoriesSummary(userMemories.slice(0, 3), resolvedLangCode)
+          : (resolvedLangCode === 'es' ? 'Sin recordatorios persistentes destacados.' : 'No highlighted persistent reminders.');
+
+        const briefingText = resolvedLangCode === 'es'
+          ? `${greeting}\n\nResumen de tu dia:\n\nAgenda de hoy:\n${eventSection}\n\nCorreos por revisar:\n${unreadSection}\n\nLo que recuerdo:\n${memorySection}`
+          : `${greeting}\n\nHere is your day briefing:\n\nToday's schedule:\n${eventSection}\n\nEmails to review:\n${unreadSection}\n\nWhat I remember:\n${memorySection}`;
+
+        return res.json({ text: briefingText });
+      } catch (briefingError: any) {
+        console.error("Failed to build daily briefing:", briefingError.message);
+      }
     }
 
     // INTELLIGENT MODEL ROUTING
@@ -2614,6 +2829,7 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
       ...(normalizedAttachments.length > 0
         ? [`Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`]
         : []),
+      ...(userMemories.length > 0 ? ['Memoria persistente del usuario para preferencias y contexto frecuente'] : []),
       ...(userTokens
         ? [
             googleAccessState.hasCalendarWrite
@@ -2644,10 +2860,17 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
       capabilities,
       extraInstructions: [
         `IDIOMA: ${langInstruction}`,
+        ...(userMemories.length > 0
+          ? [
+              'MEMORIA DEL USUARIO:',
+              formatUserMemoriesSummary(userMemories, resolvedLangCode),
+            ]
+          : []),
         'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
         'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
         'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
         'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
+        'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
         ...(normalizedAttachments.length > 0
           ? [
               `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
@@ -2742,6 +2965,132 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         if (trimmedText) {
           console.log("🔧 Detected function call, parsing...");
           const functionCall = JSON.parse(trimmedText);
+          const toolCalls = normalizeToolCalls(functionCall);
+
+          if (toolCalls.length > 1) {
+            console.log(`🔁 Executing sequential tool plan with ${toolCalls.length} tasks`);
+
+            if (!userTokens) {
+              responseText = "Necesitas conectar tu cuenta de Google primero para ejecutar esas acciones. Ve a la seccion de Calendario o Gmail para conectarla.";
+              res.json({ text: responseText });
+              return;
+            }
+
+            const taskResults: string[] = [];
+
+            for (let index = 0; index < toolCalls.length; index += 1) {
+              const toolCall = toolCalls[index];
+              const stepPrefix = toolCalls.length > 1 ? `${index + 1}. ` : '';
+
+              try {
+                if (toolCall.tool === 'createCalendarEvent') {
+                  const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+                  if (!dateInfo) {
+                    taskResults.push(`${stepPrefix}No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`);
+                    continue;
+                  }
+
+                  const endDate =
+                    dateInfo.end ||
+                    new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+
+                  const eventData: CalendarEventData = {
+                    summary: toolCall.summary,
+                    description: toolCall.description,
+                    startDate: dateInfo.start,
+                    endDate,
+                    isAllDay: dateInfo.isAllDay,
+                  };
+
+                  let createdEvent: any = null;
+                  let lastError: any = null;
+                  for (let attempt = 1; attempt <= 3; attempt += 1) {
+                    try {
+                      createdEvent = await createCalendarEvent(userTokens, eventData);
+                      lastError = null;
+                      break;
+                    } catch (error: any) {
+                      lastError = error;
+                    }
+                  }
+
+                  if (lastError || !createdEvent) {
+                    taskResults.push(`${stepPrefix}${getCalendarToolErrorMessage(lastError, langCode)}`);
+                    continue;
+                  }
+
+                  taskResults.push(`${stepPrefix}${formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink)}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'listCalendarEvents') {
+                  const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+                  const startStr = (dateInfo?.start || new Date()).toISOString().split('T')[0];
+                  const endStr = (dateInfo?.end || dateInfo?.start || new Date()).toISOString().split('T')[0];
+                  const events = await listCalendarEvents(userTokens, startStr, endStr, toolCall.maxResults || 10);
+                  taskResults.push(`${stepPrefix}${formatCalendarListResponse(activeStyleId, langCode, toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'), events)}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'searchCalendarEvents') {
+                  const events = await searchCalendarEvents(userTokens, toolCall.query, toolCall.maxResults || 10);
+                  taskResults.push(
+                    events.length === 0
+                      ? `${stepPrefix}${langCode === 'es' ? `No encontre eventos que coincidan con "${toolCall.query}".` : `I could not find events matching "${toolCall.query}".`}`
+                      : `${stepPrefix}${events.map((event: any, resultIndex: number) => {
+                          const start = event.start?.dateTime
+                            ? new Date(event.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : (langCode === 'es' ? 'Todo el dia' : 'All day');
+                          return `${resultIndex + 1}. ${start}: ${event.summary} (ID: ${event.id})`;
+                        }).join('\n')}`
+                  );
+                  continue;
+                }
+
+                if (toolCall.tool === 'deleteCalendarEvent') {
+                  await deleteCalendarEvent(userTokens, toolCall.eventId);
+                  taskResults.push(`${stepPrefix}${formatCalendarDeleteResponse(activeStyleId)}`);
+                  continue;
+                }
+
+                if (toolCall.tool === 'updateCalendarEvent') {
+                  const updates: Partial<CalendarEventData> = {};
+                  if (toolCall.summary) updates.summary = toolCall.summary;
+                  if (toolCall.description) updates.description = toolCall.description;
+                  if (toolCall.dateText) {
+                    const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+                    if (!dateInfo) {
+                      taskResults.push(`${stepPrefix}${langCode === 'es' ? 'No pude actualizar el evento porque no entendi la nueva fecha u hora.' : 'I could not update the event because I did not understand the new date or time.'}`);
+                      continue;
+                    }
+                    updates.startDate = dateInfo.start;
+                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+                    updates.isAllDay = dateInfo.isAllDay;
+                  }
+
+                  const updatedEvent = await updateCalendarEvent(userTokens, toolCall.eventId, updates);
+                  taskResults.push(`${stepPrefix}${formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary)}`);
+                  continue;
+                }
+
+                taskResults.push(`${stepPrefix}${langCode === 'es' ? `Aun no puedo ejecutar en cadena la accion "${toolCall.tool}".` : `I cannot execute the chained action "${toolCall.tool}" yet.`}`);
+              } catch (error: any) {
+                taskResults.push(
+                  `${stepPrefix}${
+                    toolCall.tool?.toLowerCase().includes('calendar')
+                      ? getCalendarToolErrorMessage(error, langCode)
+                      : langCode === 'es'
+                        ? `La accion "${toolCall.tool}" fallo y continue con las demas.`
+                        : `The action "${toolCall.tool}" failed and I continued with the rest.`
+                  }`
+                );
+              }
+            }
+
+            responseText = taskResults.join('\n\n');
+            res.json({ text: responseText });
+            return;
+          }
 
           if (functionCall.tool) {
             console.log("   Tool:", functionCall.tool);
@@ -3011,7 +3360,11 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         }
       } catch (functionError: any) {
         console.error("❌ Function call error:", functionError.message);
-        responseText = "Hubo un problema al procesar tu solicitud. Por favor, intenta de nuevo.";
+        if (/unexpected end|json|parse/i.test(String(functionError.message || ''))) {
+          responseText = "No pude interpretar correctamente la accion solicitada. Intenta reformularla con mas detalle.";
+        } else {
+          responseText = `No pude completar la accion solicitada${functionError.message ? `: ${functionError.message}` : ''}`;
+        }
       }
     }
 
@@ -3345,10 +3698,29 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
     oauth2Client.setCredentials(userTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
+    const queryParts: string[] = [];
+    const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const fromQuery = typeof req.query.from === 'string' ? req.query.from.trim() : '';
+    const subjectQuery = typeof req.query.subject === 'string' ? req.query.subject.trim() : '';
+    const afterQuery = typeof req.query.after === 'string' ? req.query.after.trim() : '';
+    const unreadOnly = req.query.unread === 'true' || req.query.unread === '1';
+    const maxResults = Math.min(Math.max(Number(req.query.maxResults) || 5, 1), 10);
+    const pageToken = typeof req.query.pageToken === 'string' ? req.query.pageToken : undefined;
+    const includeMeta = req.query.includeMeta === 'true' || req.query.includeMeta === '1';
+
+    if (rawQuery) queryParts.push(rawQuery);
+    if (fromQuery) queryParts.push(`from:${fromQuery}`);
+    if (subjectQuery) queryParts.push(`subject:${subjectQuery}`);
+    if (afterQuery) queryParts.push(`after:${afterQuery.replace(/-/g, '/')}`);
+    if (unreadOnly || queryParts.length === 0) queryParts.push('is:unread');
+
+    const gmailQuery = queryParts.join(' ').trim();
+
     const response = await gmail.users.messages.list({
       userId: 'me',
-      maxResults: 5,
-      q: 'is:unread'
+      maxResults,
+      q: gmailQuery || undefined,
+      pageToken,
     });
 
     const messages = [];
@@ -3369,9 +3741,35 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
         // Clean up "From" name
         const fromMatch = fromHeader.match(/^(.*?)\s*</);
         const from = fromMatch ? fromMatch[1].replace(/"/g, '') : fromHeader;
+        const labels = (msgData.data.labelIds || []).map((label) => String(label));
+        const { category, urgency } = classifyGmailMessage({
+          subject,
+          from,
+          snippet: msgData.data.snippet || '',
+          labels,
+        });
 
-        messages.push({ id: msg.id, subject, from, date, snippet: msgData.data.snippet });
+        messages.push({
+          id: msg.id,
+          threadId: msgData.data.threadId || null,
+          subject,
+          from,
+          date,
+          snippet: msgData.data.snippet,
+          labels,
+          unread: labels.includes('UNREAD'),
+          category,
+          urgency,
+        });
       }
+    }
+
+    if (includeMeta) {
+      return res.json({
+        messages,
+        nextPageToken: response.data.nextPageToken || null,
+        query: gmailQuery,
+      });
     }
 
     res.json(messages);
@@ -3395,9 +3793,8 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
   }
 
   try {
-    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(writableTokens);
+    oauth2Client.setCredentials(userTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const { id } = req.params;
@@ -3416,38 +3813,20 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
     const date = headers.find(h => h.name === 'Date')?.value || '';
     const messageId = headers.find(h => h.name === 'Message-ID')?.value || '';
 
-    // Extract body content
-    let bodyText = '';
-    let bodyHtml = '';
-
-    // Try to get body from parts
-    if (message.data.payload?.parts) {
-      for (const part of message.data.payload.parts) {
-        if (part.mimeType === 'text/plain' && part.body?.data) {
-          bodyText = Buffer.from(part.body.data, 'base64').toString('utf-8');
-        } else if (part.mimeType === 'text/html' && part.body?.data) {
-          bodyHtml = Buffer.from(part.body.data, 'base64').toString('utf-8');
-        }
-      }
-    }
-
-    // If no parts, try main body
-    if (!bodyText && !bodyHtml && message.data.payload?.body?.data) {
-      const decoded = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
-      bodyText = decoded;
-    }
+    const bodyText = extractBody(message.data.payload);
+    const bodyHtml = extractHtmlBody(message.data.payload);
 
     // Get attachments info
     const attachments = [];
-    if (message.data.payload?.parts) {
-      for (const part of message.data.payload.parts) {
-        if (part.filename && part.filename.length > 0) {
-          attachments.push({
-            filename: part.filename,
-            mimeType: part.mimeType,
-            size: part.body?.size || 0
-          });
-        }
+    for (const part of collectMimeParts(message.data.payload)) {
+      if (part.filename && part.filename.length > 0) {
+        attachments.push({
+          filename: part.filename,
+          mimeType: part.mimeType,
+          size: part.body?.size || 0,
+          attachmentId: part.body?.attachmentId || null,
+          partId: part.partId || null,
+        });
       }
     }
 
@@ -3463,13 +3842,136 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
       date,
       messageId,
       bodyText,
-      bodyHtml: bodyHtml || bodyText, // Fallback to text if no HTML
+      bodyHtml: bodyHtml || bodyText,
       snippet: message.data.snippet || '',
       attachments,
       labels: message.data.labelIds || []
     });
   } catch (error: any) {
     console.error("❌ Error fetching Gmail message:", error.message);
+    await handleGoogleApiError(error, req, res, 'gmail');
+  }
+});
+
+app.get("/api/gmail/messages/:messageId/attachments/:attachmentId", authenticateSupabaseUser, async (req, res) => {
+  console.log("📎 Gmail attachment request received");
+
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials(userTokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const { messageId, attachmentId } = req.params;
+    const analyze = req.query.analyze === 'true' || req.query.analyze === '1';
+    const language = typeof req.query.language === 'string' ? req.query.language : 'en';
+
+    const message = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'full'
+    });
+
+    const parts = collectMimeParts(message.data.payload);
+    const attachmentPart = parts.find((part: any) => part.body?.attachmentId === attachmentId);
+
+    if (!attachmentPart) {
+      return res.status(404).json({
+        error: "Attachment not found",
+        errorCode: "ATTACHMENT_NOT_FOUND"
+      });
+    }
+
+    const attachmentResponse = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId,
+      id: attachmentId,
+    });
+
+    const attachmentData = attachmentResponse.data.data || '';
+    const normalizedBase64 = attachmentData.replace(/-/g, '+').replace(/_/g, '/');
+    const mimeType = attachmentPart.mimeType || 'application/octet-stream';
+    const filename = attachmentPart.filename || 'attachment';
+    const size = attachmentPart.body?.size || 0;
+
+    if (size > 10 * 1024 * 1024) {
+      return res.status(413).json({
+        error: "Attachment too large",
+        errorCode: "ATTACHMENT_TOO_LARGE",
+        message: language === 'es'
+          ? 'El adjunto supera el limite de 10MB.'
+          : 'The attachment exceeds the 10MB limit.',
+      });
+    }
+
+    if (!analyze) {
+      return res.json({
+        filename,
+        mimeType,
+        size,
+        data: normalizedBase64,
+      });
+    }
+
+    const ai = getGenAI();
+    const supportedAnalysis =
+      mimeType.startsWith('image/') ||
+      mimeType === 'application/pdf' ||
+      mimeType.startsWith('text/') ||
+      mimeType === 'application/json' ||
+      mimeType === 'text/csv';
+
+    if (!supportedAnalysis) {
+      return res.status(400).json({
+        error: "Attachment type not supported for analysis",
+        errorCode: "ATTACHMENT_UNSUPPORTED",
+        message: language === 'es'
+          ? 'Este tipo de adjunto todavia no se puede analizar automaticamente.'
+          : 'This attachment type cannot be analyzed automatically yet.',
+      });
+    }
+
+    const prompt = language === 'es'
+      ? 'Analiza este adjunto. Devuelve un resumen claro, hallazgos clave, datos importantes y riesgos o dudas si existen.'
+      : 'Analyze this attachment. Return a clear summary, key findings, important details, and any risks or open questions.';
+
+    const analysisResponse = await ai.models.generateContent({
+      model: mimeType === 'application/pdf' ? 'gemini-2.5-pro' : 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: normalizedBase64,
+              }
+            }
+          ]
+        }
+      ],
+      config: {
+        maxOutputTokens: 1800,
+        temperature: 0.4,
+      }
+    });
+
+    return res.json({
+      filename,
+      mimeType,
+      size,
+      analysis: analysisResponse.text || null,
+    });
+  } catch (error: any) {
+    console.error("❌ Error fetching/analyzing Gmail attachment:", error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
@@ -3906,27 +4408,143 @@ function createEmailMessage(to: string, subject: string, body: string, inReplyTo
     .replace(/=+$/, '');
 }
 
+function decodeGoogleBodyData(data?: string | null): string {
+  if (!data) return '';
+
+  try {
+    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function collectMimeParts(payload: any): any[] {
+  if (!payload) return [];
+
+  const parts: any[] = [];
+  const queue = [payload];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    if (current !== payload) {
+      parts.push(current);
+    }
+
+    if (Array.isArray(current.parts)) {
+      queue.push(...current.parts);
+    }
+  }
+
+  return parts;
+}
+
+function extractHtmlBody(payload: any): string {
+  if (!payload) return '';
+
+  const parts = collectMimeParts(payload);
+  for (const part of parts) {
+    if (part.mimeType === 'text/html' && part.body?.data) {
+      return decodeGoogleBodyData(part.body.data);
+    }
+  }
+
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return decodeGoogleBodyData(payload.body.data);
+  }
+
+  return '';
+}
+
 // Helper function to extract body from message payload
 function extractBody(payload: any): string {
   if (!payload) return '';
 
-  // Try parts first
-  if (payload.parts) {
-    for (const part of payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        return Buffer.from(part.body.data, 'base64').toString('utf-8');
-      } else if (part.mimeType === 'text/html' && part.body?.data) {
-        return Buffer.from(part.body.data, 'base64').toString('utf-8');
-      }
+  const parts = collectMimeParts(payload);
+  for (const part of parts) {
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      return decodeGoogleBodyData(part.body.data);
     }
   }
 
-  // Try main body
+  for (const part of parts) {
+    if (part.mimeType === 'text/html' && part.body?.data) {
+      return decodeGoogleBodyData(part.body.data);
+    }
+  }
+
   if (payload.body?.data) {
-    return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+    return decodeGoogleBodyData(payload.body.data);
   }
 
   return '';
+}
+
+function classifyGmailMessage({
+  subject,
+  from,
+  snippet,
+  labels,
+}: {
+  subject: string;
+  from: string;
+  snippet: string;
+  labels: string[];
+}): { category: 'general' | 'newsletters' | 'updates'; urgency: 'low' | 'normal' | 'high' } {
+  const haystack = `${subject} ${from} ${snippet}`.toLowerCase();
+  const normalizedLabels = labels.map((label) => label.toUpperCase());
+
+  const urgentPatterns = [
+    /\burgent\b/,
+    /\basap\b/,
+    /\bimmediately\b/,
+    /\baction required\b/,
+    /\bdeadline\b/,
+    /\bimportant\b/,
+    /\burgente\b/,
+    /\binmediato\b/,
+    /\bimportante\b/,
+    /\bimportant\b/,
+    /\bkiireellinen\b/,
+    /\bbradskande\b/,
+  ];
+  const newsletterPatterns = [
+    /\bnewsletter\b/,
+    /\bdigest\b/,
+    /\bweekly\b/,
+    /\bdaily news\b/,
+    /\bboletin\b/,
+    /\bnyhetsbrev\b/,
+    /\buutiskirje\b/,
+    /\bnoreply\b/,
+    /\bno-reply\b/,
+  ];
+  const updatePatterns = [
+    /\bupdate\b/,
+    /\bnotification\b/,
+    /\balert\b/,
+    /\bsummary\b/,
+    /\bstatus\b/,
+    /\bresumen\b/,
+    /\bactualizacion\b/,
+    /\bpaivitys\b/,
+    /\buppdatering\b/,
+  ];
+
+  const category = normalizedLabels.includes('CATEGORY_PROMOTIONS') || normalizedLabels.includes('CATEGORY_FORUMS') || newsletterPatterns.some((pattern) => pattern.test(haystack))
+    ? 'newsletters'
+    : normalizedLabels.includes('CATEGORY_UPDATES') || updatePatterns.some((pattern) => pattern.test(haystack))
+      ? 'updates'
+      : 'general';
+
+  const urgency = normalizedLabels.includes('IMPORTANT') || urgentPatterns.some((pattern) => pattern.test(haystack))
+    ? 'high'
+    : category === 'newsletters'
+      ? 'low'
+      : 'normal';
+
+  return { category, urgency };
 }
 
 async function startServer() {
