@@ -37,6 +37,8 @@
     "history_restored": "Keskustelu palautettu",
     "history_clear_error": "Edellisen chatin tyhjentaminen ei onnistunut kokonaan. Yrita uudelleen.",
     "new_conversation_started": "Uusi keskustelu aloitettu",
+    "delete_conversation": "Poista keskustelu",
+    "conversation_deleted": "Keskustelu poistettu",
     "attachment_analysis_default": "Analysoi liitetyt tiedostot, kiitos.",
     "attachment_unsupported": "Osa tiedostoista ei ole viela tuettu. Kayta kuvia, PDF, TXT, CSV, JSON tai Markdown.",
     "attachments_added": "{{count}} liite lisatty",
@@ -68,6 +70,7 @@
     "google_connected": "Google-tili yhdistetty",
     "google_not_connected": "Google-tilia ei ole yhdistetty",
     "google_permissions_hint": "Jos tapahtuman luonti epaonnistuu, yhdista Google uudelleen paivittaaksesi Calendarin kirjoitusoikeuden.",
+    "google_write_required": "Google tarvitsee uudet kirjoitusoikeudet, jotta Mima voi taas luoda tapahtumia ja luonnoksia. Yhdista tilisi uudelleen.",
     "google_connect": "Yhdista Google",
     "google_reconnect": "Yhdista Google uudelleen",
     "google_disconnect": "Katkaise yhteys",
@@ -96,7 +99,8 @@
     "permission_denied": "Oikeudet eivat riita. Tarkista, etta Gmail API on kaytossa.",
     "draft_creating": "Luodaan luonnosta...",
     "draft_created": "Vastausluonnos luotu Gmailiin",
-    "draft_error": "Gmail-luonnoksen luonti ei onnistunut juuri nyt."
+    "draft_error": "Gmail-luonnoksen luonti ei onnistunut juuri nyt.",
+    "reconnect_required": "Gmail tarvitsee kirjoitusoikeudet. Yhdista Google uudelleen, jotta Mima voi taas luoda ja lahettaa luonnoksia."
   },
   "calendar": {
     "title": "Kalenteri",
@@ -108,7 +112,8 @@
     "open_google": "Avaa Google Calendarissa",
     "error_loading": "Tapahtumien lataus epaonnistui",
     "token_expired": "Google-yhteys vanheni. Yhdista tilisi uudelleen.",
-    "permission_denied": "Oikeudet eivat riita. Tarkista, etta Calendar API on kaytossa."
+    "permission_denied": "Oikeudet eivat riita. Tarkista, etta Calendar API on kaytossa.",
+    "reconnect_required": "Google Calendar tarvitsee kirjoitusoikeudet. Yhdista Google uudelleen, jotta Mima voi taas luoda ja muokata tapahtumia."
   },
   "auth": {
     "welcome_back": "Tervetuloa takaisin",

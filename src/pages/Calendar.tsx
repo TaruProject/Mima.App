@@ -32,7 +32,7 @@ export default function Calendar() {
   const dateLocale = getDateLocale(i18n.language);
   const weekDays = useMemo(() => getLocalizedWeekDays(i18n.language), [i18n.language]);
 
-  const { isConnected, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
+  const { isConnected, reconnectRequired, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
 
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -84,7 +84,9 @@ export default function Calendar() {
         setError(t('calendar.token_expired'));
         checkStatus(); // Verify if still connected
       } else if (response.status === 403) {
-        setError(t('calendar.permission_denied'));
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.errorCode === 'RECONNECT_REQUIRED' ? t('calendar.reconnect_required') : t('calendar.permission_denied'));
+        checkStatus();
       } else {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.message || t('common.loading_failed'));
@@ -225,6 +227,11 @@ export default function Calendar() {
           </div>
         ) : (
           <div className="space-y-4">
+            {reconnectRequired && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {t('calendar.reconnect_required')}
+              </div>
+            )}
             {events.map((event, index) => {
               const start = event.start.dateTime || event.start.date;
               const end = event.end.dateTime || event.end.date;

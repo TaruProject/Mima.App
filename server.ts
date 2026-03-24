@@ -310,6 +310,219 @@ const getOAuth2Client = (req?: express.Request) => {
   );
 };
 
+type GoogleServiceName = 'calendar' | 'gmail';
+
+const GOOGLE_REQUIRED_SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/userinfo.profile'
+];
+
+const GOOGLE_WRITE_SCOPES: Record<GoogleServiceName, string[]> = {
+  calendar: ['https://www.googleapis.com/auth/calendar'],
+  gmail: [
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/gmail.send'
+  ]
+};
+
+const GOOGLE_SCOPE_VERSION = 1;
+
+function normalizeGoogleScopes(scopes: unknown): string[] {
+  if (Array.isArray(scopes)) {
+    return scopes
+      .filter((scope): scope is string => typeof scope === 'string' && scope.length > 0)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof scopes === 'string') {
+    return scopes
+      .split(/[\s,]+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getMissingGoogleScopes(tokens: any, requiredScopes: string[]): string[] {
+  const granted = new Set(normalizeGoogleScopes(tokens?.granted_scopes ?? tokens?.scope));
+  return requiredScopes.filter((scope) => !granted.has(scope));
+}
+
+function isGoogleScopeError(error: any): boolean {
+  const message = String(error?.message || '');
+  return (
+    error?.errorCode === 'RECONNECT_REQUIRED' ||
+    /insufficient|insufficient permissions|insufficientpermission|forbidden|scope|permission/i.test(message)
+  );
+}
+
+async function resolveGrantedGoogleScopes(tokens: any, req?: express.Request): Promise<string[]> {
+  const existingScopes = normalizeGoogleScopes(tokens?.granted_scopes ?? tokens?.scope);
+
+  if (!tokens?.access_token) {
+    return existingScopes;
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client(req);
+    oauth2Client.setCredentials(tokens);
+    const tokenInfo: any = await oauth2Client.getTokenInfo(tokens.access_token);
+    return normalizeGoogleScopes(tokenInfo?.scopes ?? tokenInfo?.scope ?? existingScopes);
+  } catch (error: any) {
+    console.warn("⚠️ Failed to resolve granted Google scopes:", error.message);
+    return existingScopes;
+  }
+}
+
+async function attachGoogleScopeMetadata(tokens: any, req?: express.Request): Promise<any> {
+  if (!tokens) return tokens;
+
+  const grantedScopes = await resolveGrantedGoogleScopes(tokens, req);
+  return {
+    ...tokens,
+    granted_scopes: grantedScopes,
+    scope_version: GOOGLE_SCOPE_VERSION,
+  };
+}
+
+function googleScopeMetadataChanged(previousTokens: any, nextTokens: any): boolean {
+  const previousVersion = previousTokens?.scope_version ?? 0;
+  const nextVersion = nextTokens?.scope_version ?? 0;
+  if (previousVersion !== nextVersion) {
+    return true;
+  }
+
+  const previousScopes = normalizeGoogleScopes(previousTokens?.granted_scopes ?? previousTokens?.scope).sort();
+  const nextScopes = normalizeGoogleScopes(nextTokens?.granted_scopes ?? nextTokens?.scope).sort();
+  return JSON.stringify(previousScopes) !== JSON.stringify(nextScopes);
+}
+
+async function persistGoogleTokens(userId: string, tokens: any, req?: express.Request): Promise<void> {
+  if (req) {
+    req.session.tokens = tokens;
+    try {
+      await saveSession(req);
+    } catch (sessionError) {
+      console.warn("⚠️ Failed to persist Google tokens in session:", sessionError);
+    }
+  }
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return;
+  }
+
+  const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+  const encryptedTokens = encrypt(JSON.stringify(tokens));
+
+  const { error } = await supabaseAdmin
+    .from('user_google_tokens')
+    .upsert({
+      user_id: userId,
+      tokens: encryptedTokens,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+
+  if (error) {
+    throw new Error(`Database upsert failed: ${error.message}`);
+  }
+}
+
+async function ensureGoogleWriteAccess(tokens: any, serviceName: GoogleServiceName, req?: express.Request): Promise<any> {
+  const enrichedTokens = await attachGoogleScopeMetadata(tokens, req);
+  const missingScopes = getMissingGoogleScopes(enrichedTokens, GOOGLE_WRITE_SCOPES[serviceName]);
+
+  if (missingScopes.length > 0) {
+    const serviceLabel = serviceName === 'calendar' ? 'Google Calendar' : 'Gmail';
+    const error: any = new Error(`${serviceLabel} needs additional write permissions`);
+    error.status = 403;
+    error.code = 403;
+    error.errorCode = 'RECONNECT_REQUIRED';
+    error.serviceName = serviceName;
+    error.missingScopes = missingScopes;
+    throw error;
+  }
+
+  return enrichedTokens;
+}
+
+function getGoogleAccessState(tokens: any) {
+  const calendarMissingScopes = getMissingGoogleScopes(tokens, GOOGLE_WRITE_SCOPES.calendar);
+  const gmailMissingScopes = getMissingGoogleScopes(tokens, GOOGLE_WRITE_SCOPES.gmail);
+
+  return {
+    hasCalendarWrite: calendarMissingScopes.length === 0,
+    hasGmailWrite: gmailMissingScopes.length === 0,
+    calendarMissingScopes,
+    gmailMissingScopes,
+  };
+}
+
+function shouldHandlePermissionFollowUp(message: string, history: any[] = []): boolean {
+  const normalizedMessage = message.trim().toLowerCase();
+  const followUpPattern = /\b(ya se lo di|ya lo di|ya di el permiso|ya reconecte|ya reconecté|already gave it|already granted|already reconnected|i already did|i already gave permission)\b/i;
+
+  if (followUpPattern.test(normalizedMessage)) {
+    return true;
+  }
+
+  if (normalizedMessage.length > 80) {
+    return false;
+  }
+
+  const lastAssistantMessage = [...history]
+    .reverse()
+    .find((entry: any) => entry?.role === 'assistant' || entry?.role === 'model');
+
+  const assistantText = String(lastAssistantMessage?.content || '').toLowerCase();
+  return /permiso de escritura|write permission|reconnect google|reconecta google|read-only|solo lectura/.test(assistantText);
+}
+
+function getPermissionStatusFollowUpMessage(
+  langCode: string,
+  accessState: ReturnType<typeof getGoogleAccessState>,
+): string {
+  const stillMissingCalendar = !accessState.hasCalendarWrite;
+  const stillMissingGmail = !accessState.hasGmailWrite;
+
+  const messages: Record<string, { both: string; calendar: string; gmail: string; ok: string }> = {
+    en: {
+      both: 'I still see Google Calendar and Gmail without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
+      calendar: 'I still see Google Calendar without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
+      gmail: 'I still see Gmail without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
+      ok: 'The server already sees Google with write access. You can try the action again now.',
+    },
+    es: {
+      both: 'Sigo viendo Google Calendar y Gmail sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
+      calendar: 'Sigo viendo Google Calendar sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
+      gmail: 'Sigo viendo Gmail sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
+      ok: 'El servidor ya ve Google con permiso de escritura. Puedes volver a intentar la accion ahora.',
+    },
+    fi: {
+      both: 'Palvelin nayttaa edelleen Google Calendarin ja Gmailin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
+      calendar: 'Palvelin nayttaa edelleen Google Calendarin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
+      gmail: 'Palvelin nayttaa edelleen Gmailin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
+      ok: 'Palvelin naykee jo Googlen kirjoitusoikeudella. Voit yrittää toimintoa nyt uudelleen.',
+    },
+    sv: {
+      both: 'Servern visar fortfarande Google Calendar och Gmail utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
+      calendar: 'Servern visar fortfarande Google Calendar utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
+      gmail: 'Servern visar fortfarande Gmail utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
+      ok: 'Servern ser redan Google med skrivbehorighet. Du kan prova atgarden igen nu.',
+    },
+  };
+
+  const selected = messages[langCode] || messages.en;
+  if (stillMissingCalendar && stillMissingGmail) return selected.both;
+  if (stillMissingCalendar) return selected.calendar;
+  if (stillMissingGmail) return selected.gmail;
+  return selected.ok;
+}
+
 // API routes FIRST
 app.get("/api/health", (req, res) => {
   console.log("Health check requested");
@@ -595,16 +808,9 @@ app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
     }
 
     const oauth2Client = getOAuth2Client(req);
-    const scopes = [
-      'https://www.googleapis.com/auth/calendar',
-      'https://www.googleapis.com/auth/gmail.readonly',
-      'https://www.googleapis.com/auth/gmail.compose',
-      'https://www.googleapis.com/auth/gmail.send',
-      'https://www.googleapis.com/auth/userinfo.profile'
-    ];
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: scopes,
+      scope: GOOGLE_REQUIRED_SCOPES,
       prompt: 'consent',
       state: `google_auth:${user.id}`
     });
@@ -803,6 +1009,8 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
         }
       }
 
+      finalTokens = await attachGoogleScopeMetadata(finalTokens, req);
+
       // Save to session
       req.session.tokens = finalTokens;
       console.log("   Tokens assigned to session");
@@ -816,26 +1024,14 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
       }
 
       // Encrypt and save to database
-      console.log("   Encrypting tokens for database...");
-      const encryptedTokens = encrypt(JSON.stringify(finalTokens));
-
       console.log("   Upserting to user_google_tokens table...");
-      const { error: upsertError } = await supabaseAdmin
-        .from('user_google_tokens')
-        .upsert({
-          user_id: userId,
-          tokens: encryptedTokens,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id' });
-
-      if (upsertError) {
-        throw new Error(`Database upsert failed: ${upsertError.message}`);
-      }
+      await persistGoogleTokens(userId, finalTokens);
 
       console.log("✅ Tokens saved to Supabase successfully");
     } else {
       // Save to session only
       console.log("   Supabase not configured, saving to session only");
+      finalTokens = await attachGoogleScopeMetadata(finalTokens, req);
       req.session.tokens = finalTokens;
       try {
         await saveSession(req);
@@ -870,40 +1066,60 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
 
 app.get("/api/auth/status", async (req, res) => {
-  // If we already have tokens in session, we're connected
-  if (req.session.tokens) {
-    return res.json({ isConnected: true });
-  }
-
   try {
+    let userId: string | null = null;
     const authHeader = req.headers.authorization;
-    if (!authHeader) return res.json({ isConnected: false });
-    const token = authHeader.split(' ')[1];
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) return res.json({ isConnected: false });
-
-    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
-    const { data, error } = await supabaseAdmin
-      .from('user_google_tokens')
-      .select('tokens')
-      .eq('user_id', user.id)
-      .single();
-
-    if (error || !data || !data.tokens) {
-      return res.json({ isConnected: false });
+    if (authHeader) {
+      const token = authHeader.split(' ')[1];
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      if (!authError && user) {
+        userId = user.id;
+      }
     }
 
-    // Decrypt tokens and save to session
-    const decryptedTokens = JSON.parse(decrypt(data.tokens));
-    req.session.tokens = decryptedTokens;
+    let resolvedTokens = req.session.tokens ?? null;
 
-    return res.json({ isConnected: true });
+    if (!resolvedTokens && userId) {
+      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+      const { data, error } = await supabaseAdmin
+        .from('user_google_tokens')
+        .select('tokens')
+        .eq('user_id', userId)
+        .single();
+
+      if (error || !data || !data.tokens) {
+        return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
+      }
+
+      resolvedTokens = JSON.parse(decrypt(data.tokens));
+    }
+
+    if (!resolvedTokens) {
+      return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
+    }
+
+    const enrichedTokens = await attachGoogleScopeMetadata(resolvedTokens, req);
+    if (userId && googleScopeMetadataChanged(resolvedTokens, enrichedTokens)) {
+      await persistGoogleTokens(userId, enrichedTokens, req);
+    } else {
+      req.session.tokens = enrichedTokens;
+    }
+
+    const missingScopes = getMissingGoogleScopes(enrichedTokens, [
+      ...GOOGLE_WRITE_SCOPES.calendar,
+      ...GOOGLE_WRITE_SCOPES.gmail
+    ]);
+
+    return res.json({
+      isConnected: true,
+      hasWriteAccess: missingScopes.length === 0,
+      reconnectRequired: missingScopes.length > 0,
+      missingScopes,
+    });
   } catch (error) {
     console.error("Error checking token status in Supabase:", error);
-    return res.json({ isConnected: false });
+    return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
   }
 });
 
@@ -1273,8 +1489,9 @@ function parseNaturalDate(
 
 // Create a calendar event
 async function createCalendarEvent(userTokens: any, eventData: CalendarEventData): Promise<any> {
+  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'calendar');
   const oauth2Client = getOAuth2Client();
-  oauth2Client.setCredentials(userTokens);
+  oauth2Client.setCredentials(writableTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
   let event: any = {
@@ -1403,8 +1620,9 @@ async function searchCalendarEvents(userTokens: any, query: string, maxResults: 
 
 // Delete a calendar event
 async function deleteCalendarEvent(userTokens: any, eventId: string): Promise<void> {
+  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'calendar');
   const oauth2Client = getOAuth2Client();
-  oauth2Client.setCredentials(userTokens);
+  oauth2Client.setCredentials(writableTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
   await calendar.events.delete({
@@ -1415,8 +1633,9 @@ async function deleteCalendarEvent(userTokens: any, eventId: string): Promise<vo
 
 // Update a calendar event
 async function updateCalendarEvent(userTokens: any, eventId: string, updates: Partial<CalendarEventData>): Promise<any> {
+  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'calendar');
   const oauth2Client = getOAuth2Client();
-  oauth2Client.setCredentials(userTokens);
+  oauth2Client.setCredentials(writableTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
   // Get existing event
@@ -1985,7 +2204,8 @@ function getCalendarToolErrorMessage(error: any, langCode: string): string {
   const isPermissionError =
     error?.status === 403 ||
     error?.code === 403 ||
-    /insufficient permissions|insufficientpermission|forbidden|calendar usage limits/i.test(message);
+    isGoogleScopeError(error) ||
+    /calendar usage limits/i.test(message);
   const isTokenError =
     error?.status === 401 ||
     /invalid_grant|expired or revoked|refresh token/i.test(message);
@@ -2030,7 +2250,11 @@ const languageInstructions: Record<string, string> = {
 };
 
 // Model selection router - determines which Gemini model to use
-function selectModelForTask(message: string, mode?: string): { model: string; reason: string; maxTokens: number } {
+function selectModelForTask(
+  message: string,
+  mode?: string,
+  attachmentCount: number = 0,
+): { model: string; reason: string; maxTokens: number } {
   const lowerMsg = message.toLowerCase();
   const activeStyleId = normalizeStyleId(mode);
 
@@ -2052,6 +2276,23 @@ function selectModelForTask(message: string, mode?: string): { model: string; re
   const isComplexTask = complexIndicators.some(indicator => lowerMsg.includes(indicator));
   const isLongContext = message.length > 500;
   const isBusinessMode = activeStyleId === 'profesional';
+  const hasAttachments = attachmentCount > 0;
+
+  if (hasAttachments && (attachmentCount > 1 || isComplexTask || isLongContext)) {
+    return {
+      model: 'gemini-2.5-pro',
+      reason: 'Attachment analysis requires deeper reasoning and more output budget',
+      maxTokens: 2500
+    };
+  }
+
+  if (hasAttachments) {
+    return {
+      model: 'gemini-2.5-pro',
+      reason: 'Single attachment analysis prioritized for completeness',
+      maxTokens: 2200
+    };
+  }
 
   // Decision logic - Using Gemini 2.5 models (1.5 is deprecated)
   if (isBusinessMode && isComplexTask) {
@@ -2187,8 +2428,18 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
     const resolvedLangInstruction = languageInstructions[resolvedLangCode] || languageInstructions.en;
     const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
 
+    const normalizedAttachments = Array.isArray(attachments)
+      ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
+      : [];
+
     let tokenData: { tokens: string } | null = null;
     let userTokens: any | null = null;
+    let googleAccessState = {
+      hasCalendarWrite: false,
+      hasGmailWrite: false,
+      calendarMissingScopes: [...GOOGLE_WRITE_SCOPES.calendar],
+      gmailMissingScopes: [...GOOGLE_WRITE_SCOPES.gmail],
+    };
     let todayEventsSummary = resolvedLangCode === 'es' ? 'No disponible' : 'Not available';
 
     if (userId) {
@@ -2202,7 +2453,8 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
 
       if (tokenData?.tokens) {
         try {
-          userTokens = JSON.parse(decrypt(tokenData.tokens));
+          userTokens = await attachGoogleScopeMetadata(JSON.parse(decrypt(tokenData.tokens)), req);
+          googleAccessState = getGoogleAccessState(userTokens);
 
           const today = new Date();
           const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
@@ -2223,8 +2475,14 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       }
     }
 
+    if (shouldHandlePermissionFollowUp(message, Array.isArray(history) ? history : [])) {
+      return res.json({
+        text: getPermissionStatusFollowUpMessage(resolvedLangCode, googleAccessState),
+      });
+    }
+
     // INTELLIGENT MODEL ROUTING
-    const modelSelection = selectModelForTask(message, activeStyleId);
+    const modelSelection = selectModelForTask(message, activeStyleId, normalizedAttachments.length);
     console.log("🧠 Model selected:", modelSelection.model);
     console.log("   Reason:", modelSelection.reason);
 
@@ -2242,7 +2500,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
 
     // CALENDAR TOOLS INSTRUCTIONS for function calling
-    const calendarToolsInstruction = userTokens ? `
+    let calendarToolsInstruction = userTokens ? `
 
 CALENDAR TOOLS:
 Tienes acceso al calendario del usuario. Para crear eventos, responde EXACTAMENTE con este formato JSON:
@@ -2265,7 +2523,7 @@ Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO 
 Si NO es una petición de calendario, responde normalmente.` : '';
 
     // GMAIL TOOLS INSTRUCTIONS for function calling
-    const gmailToolsInstruction = userTokens ? `
+    let gmailToolsInstruction = userTokens ? `
 
 GMAIL TOOLS (BORRADORES SEGUROS):
 Tienes acceso a Gmail del usuario. IMPORTANTE: NUNCA envíes emails automáticamente. Siempre crea borradores que el usuario debe revisar y aprobar antes de enviar.
@@ -2302,6 +2560,35 @@ Tú: {"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": tru
 
 Si NO es una petición de Gmail, responde normalmente.` : '';
 
+    if (userTokens && !googleAccessState.hasCalendarWrite) {
+      calendarToolsInstruction = `
+
+CALENDAR STATUS:
+Google Calendar del usuario esta conectado solo en modo lectura. Puedes consultar o buscar eventos, pero NO puedes crear, editar ni eliminar nada hasta que el usuario reconecte Google desde Perfil.
+Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
+
+Para ver eventos:
+{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
+
+Para buscar eventos por nombre:
+{"tool": "searchCalendarEvents", "query": "reunion", "maxResults": 10}
+
+Si el usuario pide crear, editar o eliminar eventos, responde de forma breve explicando que Google Calendar sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+    }
+
+    if (userTokens && !googleAccessState.hasGmailWrite) {
+      gmailToolsInstruction = `
+
+GMAIL STATUS:
+Gmail del usuario esta conectado solo en modo lectura. Puedes leer correos, pero NO puedes crear, editar ni enviar borradores hasta que el usuario reconecte Google desde Perfil.
+Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
+
+Para leer un email completo:
+{"tool": "readGmailMessage", "messageId": "id_del_email"}
+
+Si el usuario pide crear, editar o enviar borradores, responde de forma breve explicando que Gmail sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+    }
+
     // CRITICAL: Explicit system prompt with language enforcement
     const systemInstruction = `${modeInstruction}\n\n${langInstruction}\n\n${calendarToolsInstruction}\n\n` +
       `STRICT INSTRUCTIONS:\n` +
@@ -2324,10 +2611,17 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
 
     const capabilities = [
       'Consultas de informacion general',
+      ...(normalizedAttachments.length > 0
+        ? [`Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`]
+        : []),
       ...(userTokens
         ? [
-            'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)',
-            'Redaccion y respuesta de correos via Gmail en modo borrador',
+            googleAccessState.hasCalendarWrite
+              ? 'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)'
+              : 'Google Calendar conectado solo en lectura (solo consultar y buscar eventos)',
+            googleAccessState.hasGmailWrite
+              ? 'Redaccion y respuesta de correos via Gmail en modo borrador'
+              : 'Gmail conectado solo en lectura (solo leer correos)',
           ]
         : [
             'Google Calendar no conectado actualmente',
@@ -2353,6 +2647,14 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
         'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
         'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
         'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
+        'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
+        ...(normalizedAttachments.length > 0
+          ? [
+              `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
+              'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.',
+              'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.',
+            ]
+          : []),
         ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
         ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
         `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
@@ -2369,10 +2671,6 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
       const primaryModel = modelSelection.model;
 
       console.log(`🔄 Attempting Gemini call with: ${primaryModel}`);
-      const normalizedAttachments = Array.isArray(attachments)
-        ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
-        : [];
-
       const userParts: Array<any> = [{ text: message }];
       for (const attachment of normalizedAttachments) {
         userParts.push({
@@ -2595,8 +2893,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
               else if (functionCall.tool === 'createGmailDraft') {
                 try {
                   console.log("   Creating Gmail draft...");
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                   const oauth2Client = getOAuth2Client();
-                  oauth2Client.setCredentials(userTokens);
+                  oauth2Client.setCredentials(writableTokens);
                   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
                   const raw = createEmailMessage(
@@ -2619,7 +2918,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                   console.log("   Draft created:", draft.data.id);
                 } catch (error: any) {
                   console.error("   Error creating draft:", error.message);
-                  responseText = "No pude crear el borrador. Verifica los datos e intenta de nuevo.";
+                  responseText = isGoogleScopeError(error)
+                    ? "Necesito permiso de escritura en Gmail para crear ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
+                    : "No pude crear el borrador. Verifica los datos e intenta de nuevo.";
                 }
               }
               else if (functionCall.tool === 'listGmailDrafts') {
@@ -2650,8 +2951,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
               else if (functionCall.tool === 'deleteGmailDraft') {
                 try {
                   console.log("   Deleting Gmail draft:", functionCall.draftId);
+                  const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                   const oauth2Client = getOAuth2Client();
-                  oauth2Client.setCredentials(userTokens);
+                  oauth2Client.setCredentials(writableTokens);
                   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
                   await gmail.users.drafts.delete({
@@ -2663,7 +2965,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                   console.log("   Draft deleted");
                 } catch (error: any) {
                   console.error("   Error deleting draft:", error.message);
-                  responseText = "No pude eliminar el borrador. Verifica el ID e intenta de nuevo.";
+                  responseText = isGoogleScopeError(error)
+                    ? "Necesito permiso de escritura en Gmail para eliminar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
+                    : "No pude eliminar el borrador. Verifica el ID e intenta de nuevo.";
                 }
               }
               else if (functionCall.tool === 'sendGmailDraft') {
@@ -2674,8 +2978,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                 } else {
                   try {
                     console.log("   Sending Gmail draft:", functionCall.draftId);
+                    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                     const oauth2Client = getOAuth2Client();
-                    oauth2Client.setCredentials(userTokens);
+                    oauth2Client.setCredentials(writableTokens);
                     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
                     const sent = await gmail.users.drafts.send({
@@ -2695,7 +3000,9 @@ Si NO es una petición de Gmail, responde normalmente.` : '';
                     console.log("   Email sent:", sent.data.id);
                   } catch (error: any) {
                     console.error("   Error sending draft:", error.message);
-                    responseText = "No pude enviar el email. Verifica el borrador e intenta de nuevo.";
+                    responseText = isGoogleScopeError(error)
+                      ? "Necesito permiso de escritura en Gmail para enviar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
+                      : "No pude enviar el email. Verifica el borrador e intenta de nuevo.";
                   }
                 }
               }
@@ -2817,17 +3124,17 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
 
   // Handle other API errors
   if (error.status === 403) {
-    const message = String(error.message || '');
-    const needsReconnect =
-      serviceName === 'calendar' &&
-      /insufficient|forbidden|scope|permission/i.test(message);
+    const needsReconnect = isGoogleScopeError(error);
 
     return res.status(403).json({
       error: `${serviceName}_permission_denied`,
       message: needsReconnect
-        ? 'Google Calendar needs write permission. Reconnect Google to grant calendar access again.'
+        ? serviceName === 'calendar'
+          ? 'Google Calendar needs write permission. Reconnect Google to grant calendar access again.'
+          : 'Gmail needs write permission. Reconnect Google to grant compose and send access again.'
         : `Permission denied for ${serviceName}. Please check API is enabled in Google Cloud Console.`,
-      errorCode: needsReconnect ? 'RECONNECT_REQUIRED' : 'PERMISSION_DENIED'
+      errorCode: needsReconnect ? 'RECONNECT_REQUIRED' : 'PERMISSION_DENIED',
+      missingScopes: Array.isArray(error?.missingScopes) ? error.missingScopes : undefined
     });
   }
 
@@ -2969,6 +3276,13 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
       }
     }
 
+    const enrichedTokens = await attachGoogleScopeMetadata(resolvedTokens, req);
+    if (googleScopeMetadataChanged(resolvedTokens, enrichedTokens)) {
+      resolvedTokens = enrichedTokens;
+      await persistGoogleTokens(user.id, resolvedTokens, req);
+      console.log("✅ Google scope metadata refreshed in session and Supabase");
+    }
+
     return resolvedTokens;
   } catch (error: any) {
     console.error("❌ Error fetching tokens from Supabase:", error.message);
@@ -3081,8 +3395,9 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
   }
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const { id } = req.params;
@@ -3182,8 +3497,9 @@ app.post("/api/gmail/messages/:id/draft-reply-ai", authenticateSupabaseUser, asy
     }
 
     const language = typeof req.body?.language === 'string' ? req.body.language : 'en';
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client(req);
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const messageResponse = await gmail.users.messages.get({
@@ -3252,11 +3568,7 @@ Do not include markdown fences or extra commentary.`,
     });
   } catch (error: any) {
     console.error("❌ Error creating AI draft reply:", error.message);
-    return res.status(500).json({
-      error: "Failed to create AI draft reply",
-      errorCode: "GMAIL_AI_DRAFT_FAILED",
-      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
-    });
+    return handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
@@ -3284,8 +3596,9 @@ app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
   }
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     // Create raw RFC 2822 message
@@ -3328,8 +3641,9 @@ app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
   }
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const response = await gmail.users.drafts.list({
@@ -3380,8 +3694,9 @@ app.get("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
   }
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const { id } = req.params;
@@ -3426,8 +3741,9 @@ app.put("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
   const { to, subject, body, threadId } = req.body;
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     // Create raw RFC 2822 message
@@ -3482,8 +3798,9 @@ app.post("/api/gmail/drafts/:id/send", authenticateSupabaseUser, async (req, res
   }
 
   try {
+    const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail', req);
     const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
+    oauth2Client.setCredentials(writableTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     console.log(`🚀 Sending draft ${id}...`);

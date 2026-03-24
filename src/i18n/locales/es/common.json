@@ -37,6 +37,8 @@
     "history_restored": "Conversacion restaurada",
     "history_clear_error": "No pude limpiar por completo el chat anterior. Intentalo de nuevo.",
     "new_conversation_started": "Nueva conversacion iniciada",
+    "delete_conversation": "Borrar conversacion",
+    "conversation_deleted": "Conversacion borrada",
     "attachment_analysis_default": "Analiza los archivos adjuntos, por favor.",
     "attachment_unsupported": "Algunos archivos aun no son compatibles. Usa imagenes, PDF, TXT, CSV, JSON o Markdown.",
     "attachments_added": "Se agrego {{count}} archivo",
@@ -68,6 +70,7 @@
     "google_connected": "Cuenta de Google conectada",
     "google_not_connected": "Cuenta de Google no conectada",
     "google_permissions_hint": "Si crear eventos falla, reconecta Google para renovar el permiso de escritura en Calendar.",
+    "google_write_required": "Google necesita permisos nuevos de escritura para que Mima vuelva a crear eventos y borradores. Reconecta tu cuenta.",
     "google_connect": "Conectar Google",
     "google_reconnect": "Reconectar Google",
     "google_disconnect": "Desconectar",
@@ -96,7 +99,8 @@
     "permission_denied": "Permisos insuficientes. Verifica que Gmail API este habilitado.",
     "draft_creating": "Creando borrador...",
     "draft_created": "Borrador de respuesta creado en Gmail",
-    "draft_error": "No pude crear el borrador de Gmail ahora mismo."
+    "draft_error": "No pude crear el borrador de Gmail ahora mismo.",
+    "reconnect_required": "Gmail necesita permisos de escritura. Reconecta Google para que Mima pueda crear y enviar borradores otra vez."
   },
   "calendar": {
     "title": "Calendario",
@@ -108,7 +112,8 @@
     "open_google": "Abrir en Google Calendar",
     "error_loading": "Error al cargar eventos",
     "token_expired": "La conexion con Google expiro. Reconecta tu cuenta.",
-    "permission_denied": "Permisos insuficientes. Verifica que Calendar API este habilitado."
+    "permission_denied": "Permisos insuficientes. Verifica que Calendar API este habilitado.",
+    "reconnect_required": "Google Calendar necesita permisos de escritura. Reconecta Google para que Mima pueda volver a crear y editar eventos."
   },
   "auth": {
     "welcome_back": "Bienvenido de nuevo",

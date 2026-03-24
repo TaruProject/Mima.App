@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X } from "lucide-react";
+import { Menu, Mic, ArrowUp, Plus, Square, Play, MessageSquarePlus, X, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import { ActionMenu } from "../components/ui/ActionMenu";
@@ -495,6 +495,11 @@ export default function Chat() {
     showToast(t("chat.history_restored"), "success");
   };
 
+  const handleDeleteArchivedConversation = (conversationId: string) => {
+    setArchivedConversations((prev) => prev.filter((conversation) => conversation.id !== conversationId));
+    showToast(t("chat.conversation_deleted"), "success");
+  };
+
   const handleAttachFileClick = () => {
     fileInputRef.current?.click();
   };
@@ -679,21 +684,32 @@ export default function Chat() {
                 </div>
               ) : (
                 archivedConversations.map((conversation) => (
-                  <button
-                    key={conversation.id}
-                    onClick={() => handleRestoreConversation(conversation)}
-                    className="w-full text-left rounded-2xl border border-white/5 bg-surface-dark p-4 hover:bg-surface-highlight transition-colors"
-                  >
-                    <div className="text-sm font-semibold text-white mb-1">{conversation.title}</div>
-                    <div className="text-xs text-slate-400">
-                      {new Date(conversation.createdAt).toLocaleString([], {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                  <div key={conversation.id} className="rounded-2xl border border-white/5 bg-surface-dark p-4">
+                    <div className="flex items-start gap-3">
+                      <button
+                        onClick={() => handleRestoreConversation(conversation)}
+                        className="flex-1 text-left hover:bg-surface-highlight/60 rounded-xl transition-colors -m-1 p-1"
+                      >
+                        <div className="text-sm font-semibold text-white mb-1">{conversation.title}</div>
+                        <div className="text-xs text-slate-400">
+                          {new Date(conversation.createdAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteArchivedConversation(conversation.id)}
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                        aria-label={t("chat.delete_conversation")}
+                        title={t("chat.delete_conversation")}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))
               )}
             </div>
@@ -836,7 +852,7 @@ export default function Chat() {
 
           <button
             onClick={handleSend}
-            disabled={isLoading || !input.trim()}
+            disabled={isLoading || (!input.trim() && selectedAttachments.length === 0)}
             className="flex-shrink-0 w-12 h-12 mb-0 flex items-center justify-center rounded-full bg-primary hover:bg-primary-dark text-white shadow-lg shadow-primary/30 transition-all active:scale-95 group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowUp className="w-6 h-6 group-hover:hidden" />

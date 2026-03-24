@@ -7,6 +7,9 @@ export function useGoogleConnection() {
   const { user, session } = useAuth();
 
   const [isConnected, setIsConnected] = useState<boolean | null>(null); // null means checking
+  const [hasWriteAccess, setHasWriteAccess] = useState(false);
+  const [reconnectRequired, setReconnectRequired] = useState(false);
+  const [missingScopes, setMissingScopes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -28,14 +31,23 @@ export function useGoogleConnection() {
       if (response.ok) {
         const data = await response.json();
         setIsConnected(data.isConnected);
+        setHasWriteAccess(Boolean(data.hasWriteAccess));
+        setReconnectRequired(Boolean(data.reconnectRequired));
+        setMissingScopes(Array.isArray(data.missingScopes) ? data.missingScopes : []);
         setError(null);
         setErrorCode(null);
       } else {
         setIsConnected(false);
+        setHasWriteAccess(false);
+        setReconnectRequired(false);
+        setMissingScopes([]);
       }
     } catch (err) {
       console.error("Failed to check Google connection status:", err);
       setIsConnected(false);
+      setHasWriteAccess(false);
+      setReconnectRequired(false);
+      setMissingScopes([]);
     }
   }, [getAuthHeaders]);
 
@@ -81,6 +93,9 @@ export function useGoogleConnection() {
       }
 
       setIsConnected(false);
+      setHasWriteAccess(false);
+      setReconnectRequired(false);
+      setMissingScopes([]);
     } catch (err) {
       console.error("Google disconnect error:", err);
       setError(t('common.auth_failed'));
@@ -102,6 +117,9 @@ export function useGoogleConnection() {
       window.history.replaceState({}, '', newUrl);
     } else if (authError === 'google_auth_failed') {
       setIsConnected(false);
+      setHasWriteAccess(false);
+      setReconnectRequired(false);
+      setMissingScopes([]);
       setError(errorDesc || t('common.auth_failed'));
       setErrorCode('AUTH_FAILED');
       // Clean up URL
@@ -116,11 +134,17 @@ export function useGoogleConnection() {
       checkStatus();
     } else {
       setIsConnected(false);
+      setHasWriteAccess(false);
+      setReconnectRequired(false);
+      setMissingScopes([]);
     }
   }, [user, checkStatus]);
 
   return {
     isConnected,
+    hasWriteAccess,
+    reconnectRequired,
+    missingScopes,
     isConnecting,
     error,
     errorCode,

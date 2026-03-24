@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
+const SILENT_AUDIO_DATA_URI = 'data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
 export const useAudioPlayback = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,23 @@ export const useAudioPlayback = () => {
     });
   }, []);
 
+  const unlockAudioElement = useCallback(async (audio: HTMLAudioElement) => {
+    try {
+      audio.muted = true;
+      audio.src = SILENT_AUDIO_DATA_URI;
+      audio.load();
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // Ignore unlock failures; we still try normal playback next.
+    } finally {
+      audio.muted = false;
+      audio.removeAttribute('src');
+      audio.load();
+    }
+  }, []);
+
   const play = useCallback(async (url: string, body?: any, useAuth = true) => {
     try {
       cleanup();
@@ -77,10 +96,12 @@ export const useAudioPlayback = () => {
       audio.preload = 'auto';
       audio.setAttribute('playsinline', 'true');
       audio.setAttribute('webkit-playsinline', 'true');
+      audio.autoplay = false;
       audio.style.display = 'none';
       document.body.appendChild(audio);
       mountedAudioRef.current = true;
       audioRef.current = audio;
+      await unlockAudioElement(audio);
 
       const headers: Record<string, string> = {};
       
@@ -97,6 +118,8 @@ export const useAudioPlayback = () => {
           ...headers,
           ...(body && { 'Content-Type': 'application/json' }),
         },
+        credentials: 'include',
+        cache: 'no-store',
         ...(body && { body: JSON.stringify(body) }),
       });
 
@@ -105,7 +128,8 @@ export const useAudioPlayback = () => {
         throw new Error(`Audio fetch failed: ${response.status} ${errorText}`.trim());
       }
 
-      const blob = await response.blob();
+      const arrayBuffer = await response.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: response.headers.get('content-type') || 'audio/mpeg' });
       const objectUrl = URL.createObjectURL(blob);
       objectUrlRef.current = objectUrl;
 

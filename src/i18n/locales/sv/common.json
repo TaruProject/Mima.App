@@ -37,6 +37,8 @@
     "history_restored": "Konversation aterstalld",
     "history_clear_error": "Jag kunde inte rensa den tidigare chatten helt. Forsok igen.",
     "new_conversation_started": "Ny konversation startad",
+    "delete_conversation": "Radera konversation",
+    "conversation_deleted": "Konversation raderad",
     "attachment_analysis_default": "Analysera de bifogade filerna, tack.",
     "attachment_unsupported": "Vissa filer stods inte annu. Anvand bilder, PDF, TXT, CSV, JSON eller Markdown.",
     "attachments_added": "{{count}} bilaga tillagd",
@@ -68,6 +70,7 @@
     "google_connected": "Google-konto anslutet",
     "google_not_connected": "Google-konto inte anslutet",
     "google_permissions_hint": "Om det misslyckas att skapa handelser, anslut Google igen for att uppdatera Calendar-skrivbehorigheten.",
+    "google_write_required": "Google behover fornyade skrivbehorigheter sa att Mima kan skapa handelser och utkast igen. Anslut kontot pa nytt.",
     "google_connect": "Anslut Google",
     "google_reconnect": "Anslut Google igen",
     "google_disconnect": "Koppla bort",
@@ -96,7 +99,8 @@
     "permission_denied": "Otillrackliga behorigheter. Kontrollera att Gmail API ar aktiverat.",
     "draft_creating": "Skapar utkast...",
     "draft_created": "Svarsutkast skapat i Gmail",
-    "draft_error": "Jag kunde inte skapa Gmail-utkastet just nu."
+    "draft_error": "Jag kunde inte skapa Gmail-utkastet just nu.",
+    "reconnect_required": "Gmail behover skrivbehorigheter. Anslut Google pa nytt sa att Mima kan skapa och skicka utkast igen."
   },
   "calendar": {
     "title": "Kalender",
@@ -108,7 +112,8 @@
     "open_google": "Oppna i Google Calendar",
     "error_loading": "Det gick inte att ladda handelser",
     "token_expired": "Google-anslutningen har gatt ut. Anslut kontot igen.",
-    "permission_denied": "Otillrackliga behorigheter. Kontrollera att Calendar API ar aktiverat."
+    "permission_denied": "Otillrackliga behorigheter. Kontrollera att Calendar API ar aktiverat.",
+    "reconnect_required": "Google Calendar behover skrivbehorigheter. Anslut Google pa nytt sa att Mima kan skapa och redigera handelser igen."
   },
   "auth": {
     "welcome_back": "Valkommen tillbaka",

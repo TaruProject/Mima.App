@@ -7,7 +7,7 @@ import { useToast } from "../hooks/useToast";
 export default function Inbox() {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
-  const { isConnected, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
+  const { isConnected, reconnectRequired, connect, getAuthHeaders, checkStatus } = useGoogleConnection();
 
   const [emails, setEmails] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,7 +36,9 @@ export default function Inbox() {
         setError(t('inbox.token_expired'));
         checkStatus();
       } else if (response.status === 403) {
-        setError(t('inbox.permission_denied'));
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.errorCode === 'RECONNECT_REQUIRED' ? t('inbox.reconnect_required') : t('inbox.permission_denied'));
+        checkStatus();
       } else {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.message || t('common.loading_failed'));
@@ -66,14 +68,21 @@ export default function Inbox() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Failed to create draft");
+        const errorData = await response.json().catch(() => null);
+        if (errorData?.errorCode === "RECONNECT_REQUIRED") {
+          throw new Error("RECONNECT_REQUIRED");
+        }
+        throw new Error(errorData?.error || "Failed to create draft");
       }
 
       showToast(t("inbox.draft_created"), "success");
     } catch (draftError) {
       console.error("Failed to create Gmail draft reply", draftError);
-      showToast(t("inbox.draft_error"), "error");
+      const message = draftError instanceof Error && draftError.message === "RECONNECT_REQUIRED"
+        ? t("inbox.reconnect_required")
+        : t("inbox.draft_error");
+      showToast(message, "error");
+      checkStatus();
     } finally {
       setDraftingEmailId(null);
     }
@@ -164,6 +173,11 @@ export default function Inbox() {
           </div>
         ) : (
           <div className="space-y-4">
+            {reconnectRequired && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {t('inbox.reconnect_required')}
+              </div>
+            )}
             {emails.map((email) => (
               <div key={email.id} className="group relative overflow-hidden rounded-2xl bg-surface-dark border border-white/5 p-4 transition-all hover:bg-surface-highlight">
                 <div className="flex items-start gap-4 mb-3">

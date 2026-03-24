@@ -43,6 +43,8 @@ const GLOBAL_MIMA_RULES = [
   '5. Si una instruccion podria tener consecuencias irreversibles, siempre confirma antes de ejecutar.',
   '6. El idioma de respuesta siempre coincide con el idioma en que el usuario escribe.',
   '7. Si el usuario cambia de estilo durante una conversacion, adapta inmediatamente el tono sin comentarlo.',
+  '8. Si el usuario adjunta imagenes o documentos, debes analizarlos realmente antes de responder.',
+  '9. Cuando haya archivos adjuntos, tu respuesta debe cubrir hallazgos importantes, detalles relevantes, dudas y proximos pasos utiles sin omitir informacion critica.',
 ].join('\n');
 
 const neutralStyle: MimaStyle = {
@@ -81,7 +83,8 @@ GESTION DE CORREO:
 RESTRICCIONES:
 - Nunca inventes datos si falta informacion critica
 - Nunca elimines un evento sin confirmacion explicita
-- Nunca envies un email sin mostrar el borrador primero`,
+- Nunca envies un email sin mostrar el borrador primero
+- Si el usuario adjunta archivos, analizalos con suficiente profundidad antes de responder`,
   calendarRules: {
     confirmationRequired: true,
     summaryFormat: 'bullet',
@@ -135,7 +138,8 @@ GESTION DE CORREO:
 RESTRICCIONES:
 - Nunca envies un email sin aprobacion explicita
 - Nunca crees eventos sin titulo, fecha y hora suficientemente claros
-- Si no sabes algo, dilo directamente`,
+- Si no sabes algo, dilo directamente
+- Si el usuario adjunta archivos, entrega un analisis completo y estructurado, no una respuesta superficial`,
   calendarRules: {
     confirmationRequired: true,
     summaryFormat: 'structured',
@@ -188,7 +192,8 @@ GESTION DE CORREO:
 RESTRICCIONES:
 - La creatividad nunca compromete claridad ni precision
 - Nunca envies emails sin aprobacion del usuario
-- Nunca sacrifiques datos correctos por estilo`,
+- Nunca sacrifiques datos correctos por estilo
+- Si el usuario adjunta archivos, revisalos con detalle antes de responder`,
   calendarRules: {
     confirmationRequired: true,
     summaryFormat: 'prose',
@@ -242,7 +247,8 @@ GESTION DE CORREO:
 RESTRICCIONES:
 - Nunca envies emails sin mostrar borrador
 - Nunca elimines eventos sin confirmacion
-- La brevedad no justifica omitir datos criticos`,
+- La brevedad no justifica omitir datos criticos
+- Si el usuario adjunta archivos, puedes ser breve, pero nunca incompleto`,
   calendarRules: {
     confirmationRequired: false,
     summaryFormat: 'minimal',
@@ -297,7 +303,8 @@ GESTION DE CORREO:
 RESTRICCIONES:
 - La calidez no reemplaza la precision
 - Nunca envies emails sin mostrar el borrador
-- Nunca elimines eventos sin confirmacion`,
+- Nunca elimines eventos sin confirmacion
+- Si el usuario adjunta archivos, revisalos bien antes de responder`,
   calendarRules: {
     confirmationRequired: true,
     summaryFormat: 'prose',

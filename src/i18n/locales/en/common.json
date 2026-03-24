@@ -37,6 +37,8 @@
     "history_restored": "Conversation restored",
     "history_clear_error": "I couldn't fully clear the previous chat. Please try again.",
     "new_conversation_started": "New conversation started",
+    "delete_conversation": "Delete conversation",
+    "conversation_deleted": "Conversation deleted",
     "attachment_analysis_default": "Please analyze the attached files.",
     "attachment_unsupported": "Some files are not supported yet. Use images, PDF, TXT, CSV, JSON, or Markdown.",
     "attachments_added": "{{count}} attachment added",
@@ -68,6 +70,7 @@
     "google_connected": "Google account connected",
     "google_not_connected": "Google account not connected",
     "google_permissions_hint": "If event creation fails, reconnect Google to refresh Calendar write access.",
+    "google_write_required": "Google needs renewed write permissions so Mima can create events and drafts again. Reconnect your account.",
     "google_connect": "Connect Google",
     "google_reconnect": "Reconnect Google",
     "google_disconnect": "Disconnect",
@@ -96,7 +99,8 @@
     "permission_denied": "Insufficient permissions. Please verify Gmail API is enabled.",
     "draft_creating": "Creating draft...",
     "draft_created": "Draft reply created in Gmail",
-    "draft_error": "I couldn't create the Gmail draft right now."
+    "draft_error": "I couldn't create the Gmail draft right now.",
+    "reconnect_required": "Gmail needs write permissions. Reconnect Google so Mima can create and send drafts again."
   },
   "calendar": {
     "title": "Calendar",
@@ -108,7 +112,8 @@
     "open_google": "Open in Google Calendar",
     "error_loading": "Error loading events",
     "token_expired": "Google connection expired. Please reconnect your account.",
-    "permission_denied": "Insufficient permissions. Please verify Calendar API is enabled."
+    "permission_denied": "Insufficient permissions. Please verify Calendar API is enabled.",
+    "reconnect_required": "Google Calendar needs write permissions. Reconnect Google so Mima can create and edit events again."
   },
   "auth": {
     "welcome_back": "Welcome back",

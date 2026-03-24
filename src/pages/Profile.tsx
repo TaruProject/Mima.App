@@ -23,7 +23,7 @@ export default function Profile() {
   const { user, signOut } = useAuth();
   const { showToast } = useToast();
   const { play: playAudio, stop: stopAudio, isPlaying: isAudioPlaying, cleanup: cleanupAudio } = useAudioPlayback();
-  const { isConnected, isConnecting, connect, disconnect, checkStatus } = useGoogleConnection();
+  const { isConnected, reconnectRequired, isConnecting, connect, disconnect, checkStatus } = useGoogleConnection();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const [fullName, setFullName] = useState("");
@@ -408,6 +408,11 @@ export default function Profile() {
           </div>
 
           <div className="bg-surface-dark border border-white/5 rounded-2xl p-4 space-y-4">
+            {reconnectRequired && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {t("profile.google_write_required")}
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isConnected ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-300"}`}>
                 <Link2 className="w-5 h-5" />
