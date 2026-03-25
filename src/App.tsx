@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import Layout from "./components/Layout";
@@ -34,7 +34,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const swUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const versionCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isCheckingVersionRef = useRef(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [forceUpdateRequired, setForceUpdateRequired] = useState(false);
   const [versionLabel, setVersionLabel] = useState<string | null>(null);
@@ -45,9 +47,9 @@ function AppRoutes() {
   } = useRegisterSW({
     onRegistered(r) {
       if (r) {
-        intervalRef.current = setInterval(() => {
-          r.update();
-        }, 60 * 1000);
+        swUpdateIntervalRef.current = setInterval(() => {
+          void r.update();
+        }, 20 * 1000);
       }
     },
     onRegisterError(error) {
@@ -58,15 +60,21 @@ function AppRoutes() {
 
   useEffect(() => {
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      if (swUpdateIntervalRef.current) {
+        clearInterval(swUpdateIntervalRef.current);
+      }
+      if (versionCheckIntervalRef.current) {
+        clearInterval(versionCheckIntervalRef.current);
       }
     };
   }, []);
 
   const { user } = useAuth();
 
-  const checkServerVersion = async () => {
+  const checkServerVersion = useCallback(async () => {
+    if (isCheckingVersionRef.current) return;
+    isCheckingVersionRef.current = true;
+
     try {
       const response = await fetch(`/api/version?ts=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) return;
@@ -78,41 +86,55 @@ function AppRoutes() {
 
       if (data.deployId !== BUILD_ID) {
         setForceUpdateRequired(true);
+        if ("serviceWorker" in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.update().catch(() => undefined)));
+        }
         return;
       }
 
       setForceUpdateRequired(false);
     } catch (error) {
       console.error("Failed to check deployed version:", error);
+    } finally {
+      isCheckingVersionRef.current = false;
     }
-  };
+  }, []);
 
   useEffect(() => {
-    // Check for updates when the app comes back to focus
-    const handleFocus = () => {
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then((registration) => {
-          registration.update();
-        });
+    const runUpdateCheck = () => {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.ready
+          .then((registration) => registration.update())
+          .catch(() => undefined);
       }
       void checkServerVersion();
     };
-    
+
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        handleFocus();
+      if (document.visibilityState === "visible") {
+        runUpdateCheck();
       }
     };
 
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    void checkServerVersion();
-    
+    window.addEventListener("focus", runUpdateCheck);
+    window.addEventListener("pageshow", runUpdateCheck);
+    window.addEventListener("online", runUpdateCheck);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    versionCheckIntervalRef.current = setInterval(() => {
+      void checkServerVersion();
+    }, 20 * 1000);
+
+    runUpdateCheck();
+
     return () => {
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener("focus", runUpdateCheck);
+      window.removeEventListener("pageshow", runUpdateCheck);
+      window.removeEventListener("online", runUpdateCheck);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [checkServerVersion]);
 
   const handleUpdate = async () => {
     if (isUpdating) return;
@@ -125,30 +147,42 @@ function AppRoutes() {
       reloaded = true;
       const url = new URL(window.location.href);
       url.searchParams.set("update", `${Date.now()}`);
+      url.searchParams.set("build", BUILD_ID);
       window.location.replace(url.toString());
     };
 
     try {
-      if ("caches" in window) {
-        const cacheKeys = await caches.keys();
-        await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
-      }
-
-      if ('serviceWorker' in navigator) {
+      if ("serviceWorker" in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map((registration) => registration.update()));
+
+        await Promise.all(
+          registrations.map(async (registration) => {
+            await registration.update().catch(() => undefined);
+            if (registration.waiting) {
+              registration.waiting.postMessage({ type: "SKIP_WAITING" });
+            }
+          }),
+        );
+
         navigator.serviceWorker.addEventListener(
-          'controllerchange',
+          "controllerchange",
           () => {
             forceReload();
           },
           { once: true },
         );
+
+        await updateServiceWorker(true).catch(() => undefined);
+        await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
       }
 
-      await updateServiceWorker(true);
+      if ("caches" in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+      }
+
       setForceUpdateRequired(false);
-      window.setTimeout(forceReload, 1500);
+      window.setTimeout(forceReload, 600);
     } catch (error) {
       console.error('Failed to apply service worker update:', error);
       forceReload();

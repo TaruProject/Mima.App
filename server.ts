@@ -4596,7 +4596,7 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
     const subjectQuery = typeof req.query.subject === 'string' ? req.query.subject.trim() : '';
     const afterQuery = typeof req.query.after === 'string' ? req.query.after.trim() : '';
     const unreadOnly = req.query.unread === 'true' || req.query.unread === '1';
-    const maxResults = Math.min(Math.max(Number(req.query.maxResults) || 5, 1), 10);
+    const maxResults = Math.min(Math.max(Number(req.query.maxResults) || 25, 1), 50);
     const pageToken = typeof req.query.pageToken === 'string' ? req.query.pageToken : undefined;
     const includeMeta = req.query.includeMeta === 'true' || req.query.includeMeta === '1';
 
@@ -4604,7 +4604,7 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
     if (fromQuery) queryParts.push(`from:${fromQuery}`);
     if (subjectQuery) queryParts.push(`subject:${subjectQuery}`);
     if (afterQuery) queryParts.push(`after:${afterQuery.replace(/-/g, '/')}`);
-    if (unreadOnly || queryParts.length === 0) queryParts.push('is:unread');
+    if (unreadOnly) queryParts.push('is:unread');
 
     const gmailQuery = queryParts.join(' ').trim();
 

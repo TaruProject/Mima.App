@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useGoogleConnection } from "../hooks/useGoogleConnection";
 import { useToast } from "../hooks/useToast";
-import { ProductivitySnapshot } from "../components/ProductivitySnapshot";
 
 type InboxFilter = "all" | "urgent" | "newsletters" | "updates";
 type EmailCategory = "general" | "newsletters" | "updates";
@@ -118,7 +117,7 @@ export default function Inbox() {
       try {
         const params = new URLSearchParams({
           includeMeta: "true",
-          maxResults: "10",
+          maxResults: "50",
         });
 
         if (query.trim()) {
@@ -391,7 +390,6 @@ export default function Inbox() {
           })}
           </div>
 
-          <ProductivitySnapshot compact maxTasks={2} maxDrafts={2} />
         </div>
       )}
 
