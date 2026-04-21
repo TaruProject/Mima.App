@@ -11,18 +11,21 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         includeAssets: ['assets/logo.jpg'],
         workbox: {
           cleanupOutdatedCaches: true,
           skipWaiting: true,
           clientsClaim: true,
+          navigateFallback: 'index.html',
+          navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
             {
               urlPattern: ({ request }) => request.mode === 'navigate',
               handler: 'NetworkFirst',
               options: {
                 cacheName: 'navigation-cache',
+                networkTimeoutSeconds: 10,
                 expiration: {
                   maxEntries: 1,
                 },
@@ -42,21 +45,21 @@ export default defineConfig(({ mode }) => {
               src: '/logo.jpg',
               sizes: '192x192',
               type: 'image/jpeg',
-              purpose: 'any maskable'
+              purpose: 'any maskable',
             },
             {
               src: '/logo.jpg',
               sizes: '512x512',
               type: 'image/jpeg',
-              purpose: 'any maskable'
-            }
-          ]
+              purpose: 'any maskable',
+            },
+          ],
         },
         devOptions: {
           enabled: true,
-          type: 'module'
-        }
-      })
+          type: 'module',
+        },
+      }),
     ],
     resolve: {
       alias: {

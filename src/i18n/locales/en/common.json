@@ -216,7 +216,12 @@
   "update": {
     "title": "Mandatory Update\nAvailable",
     "description": "A critical security patch and new features are ready. Please refresh to continue using Mima.",
-    "button": "Refresh & Update"
+    "button": "Refresh & Update",
+    "updating": "Updating...",
+    "network_error_title": "Connection Unstable",
+    "network_error_description": "Could not download the update. Please check your network and try again.",
+    "retry_button": "Retry Update",
+    "retry_count": "Attempt {{current}} of {{max}}"
   },
   "google_callback": {
     "processing_title": "Connecting...",

@@ -214,9 +214,14 @@
     "install_button": "Instalar"
   },
   "update": {
-    "title": "Actualizacion obligatoria disponible",
-    "description": "Hay un parche critico y nuevas funciones listas. Actualiza para seguir usando Mima.",
-    "button": "Actualizar"
+    "title": "Actualización obligatoria\ndisponible",
+    "description": "Hay un parche crítico y nuevas funciones listas. Actualiza para seguir usando Mima.",
+    "button": "Actualizar",
+    "updating": "Actualizando...",
+    "network_error_title": "Conexión inestable",
+    "network_error_description": "No se pudo descargar la actualización. Verifica tu conexión e inténtalo de nuevo.",
+    "retry_button": "Reintentar actualización",
+    "retry_count": "Intento {{current}} de {{max}}"
   },
   "google_callback": {
     "processing_title": "Conectando...",

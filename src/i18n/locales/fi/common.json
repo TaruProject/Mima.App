@@ -214,9 +214,14 @@
     "install_button": "Asenna"
   },
   "update": {
-    "title": "Pakollinen paivitys saatavilla",
-    "description": "Kriittinen tietoturvapaivitys ja uusia ominaisuuksia on valmiina. Paivita jatkaaksesi Miman kayttoa.",
-    "button": "Paivita"
+    "title": "Pakollinen päivitys\nsaatavilla",
+    "description": "Kriittinen tietoturvapäivitys ja uusia ominaisuuksia on valmiina. Päivitä jatkaaksesi Miman käyttöä.",
+    "button": "Päivitä",
+    "updating": "Päivitetään...",
+    "network_error_title": "Yhteys epävakaa",
+    "network_error_description": "Päivityksen lataaminen epäonnistui. Tarkista verkkoyhteytesi ja yritä uudelleen.",
+    "retry_button": "Yritä päivitystä uudelleen",
+    "retry_count": "Yritys {{current}} / {{max}}"
   },
   "google_callback": {
     "processing_title": "Yhdistetaan...",

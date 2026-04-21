@@ -214,9 +214,14 @@
     "install_button": "Installera"
   },
   "update": {
-    "title": "Obligatorisk uppdatering tillganglig",
-    "description": "En kritisk sakerhetsuppdatering och nya funktioner ar klara. Uppdatera for att fortsatta anvanda Mima.",
-    "button": "Uppdatera"
+    "title": "Obligatorisk uppdatering\ntillgänglig",
+    "description": "En kritisk säkerhetsuppdatering och nya funktioner är klara. Uppdatera för att fortsätta använda Mima.",
+    "button": "Uppdatera",
+    "updating": "Uppdaterar...",
+    "network_error_title": "Instabil anslutning",
+    "network_error_description": "Det gick inte att ladda ner uppdateringen. Kontrollera nätverket och försök igen.",
+    "retry_button": "Försök uppdatera igen",
+    "retry_count": "Försök {{current}} av {{max}}"
   },
   "google_callback": {
     "processing_title": "Ansluter...",
