@@ -55,7 +55,10 @@
     "action_menu": "Toimintovalikko",
     "error_message": "Anteeksi, jokin meni pieleen. Yrita uudelleen.",
     "audio_error": "Virhe aanen toistossa",
-    "voice_not_found": "Aanta ei ole maaritetty. Mene profiiliin."
+    "voice_not_found": "Aanta ei ole maaritetty. Mene profiiliin.",
+    "tts_generating": "Luodaan aanta...",
+    "tts_cached": "Toista vahvistettu aani",
+    "tts_unavailable": "Aanipalvelu tilapaisesti saavuttamattomissa"
   },
   "profile": {
     "title": "Profiili",

@@ -55,7 +55,10 @@
     "action_menu": "Action menu",
     "error_message": "Sorry, something went wrong. Please try again.",
     "audio_error": "Error playing audio",
-    "voice_not_found": "Voice not configured. Please go to profile."
+    "voice_not_found": "Voice not configured. Please go to profile.",
+    "tts_generating": "Generating audio...",
+    "tts_cached": "Play cached audio",
+    "tts_unavailable": "Voice service temporarily unavailable"
   },
   "profile": {
     "title": "Profile",

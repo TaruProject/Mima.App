@@ -55,7 +55,10 @@
     "action_menu": "Menu de acciones",
     "error_message": "Lo siento, algo salio mal. Intentalo de nuevo.",
     "audio_error": "Error al reproducir audio",
-    "voice_not_found": "Voz no configurada. Ve al perfil, por favor."
+    "voice_not_found": "Voz no configurada. Ve al perfil, por favor.",
+    "tts_generating": "Generando audio...",
+    "tts_cached": "Reproducir audio en cache",
+    "tts_unavailable": "Servicio de voz temporalmente no disponible"
   },
   "profile": {
     "title": "Perfil",

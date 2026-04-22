@@ -1,17 +1,16 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Helper to get Supabase client with latest environment variables
-function getSupabase() {
-  return createClient(
-    process.env.VITE_SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-  );
+let supabaseUrl = '';
+let supabaseServiceKey = '';
+
+export function initUserPreferencesService(url: string, key: string) {
+  supabaseUrl = url;
+  supabaseServiceKey = key;
 }
 
-/**
- * User Preferences Service
- * Manages user preferences stored in Supabase (not localStorage)
- */
+function getSupabase(): SupabaseClient {
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 export interface UserPreferences {
   user_id: string;
@@ -34,7 +33,6 @@ export interface ChatMessage {
   updated_at?: string;
 }
 
-// Get user preferences
 export async function getUserPreferences(userId: string): Promise<UserPreferences | null> {
   try {
     const supabase = getSupabase();
@@ -46,14 +44,13 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 
     if (error) {
       if (error.code === 'PGRST116') {
-        // No preferences found, return defaults
         return {
           user_id: userId,
           onboarding_done: false,
           voice_id: 'DODLEQrClDo8wCz460ld',
           language: 'en',
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         };
       }
       console.error('Error fetching user preferences:', error);
@@ -67,23 +64,23 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
   }
 }
 
-// Update user preferences
 export async function updateUserPreferences(
   userId: string,
   preferences: Partial<UserPreferences>
 ): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    
-    const { error } = await supabase
-      .from('user_preferences')
-      .upsert({
+
+    const { error } = await supabase.from('user_preferences').upsert(
+      {
         user_id: userId,
         ...preferences,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id'
-      });
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'user_id',
+      }
+    );
 
     if (error) {
       console.error('Error updating user preferences:', error);
@@ -97,11 +94,7 @@ export async function updateUserPreferences(
   }
 }
 
-// Get chat history for user
-export async function getChatHistory(
-  userId: string,
-  limit: number = 50
-): Promise<ChatMessage[]> {
+export async function getChatHistory(userId: string, limit: number = 50): Promise<ChatMessage[]> {
   try {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -123,18 +116,15 @@ export async function getChatHistory(
   }
 }
 
-// Save chat message
 export async function saveChatMessage(message: ChatMessage): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    
-    const { error } = await supabase
-      .from('chat_messages')
-      .insert({
-        ...message,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
+
+    const { error } = await supabase.from('chat_messages').insert({
+      ...message,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
 
     if (error) {
       console.error('Error saving chat message:', error);
@@ -148,20 +138,17 @@ export async function saveChatMessage(message: ChatMessage): Promise<boolean> {
   }
 }
 
-// Save multiple chat messages (for batch saves)
 export async function saveChatMessages(messages: ChatMessage[]): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    
-    const messagesWithTimestamps = messages.map(msg => ({
+
+    const messagesWithTimestamps = messages.map((msg) => ({
       ...msg,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     }));
 
-    const { error } = await supabase
-      .from('chat_messages')
-      .insert(messagesWithTimestamps);
+    const { error } = await supabase.from('chat_messages').insert(messagesWithTimestamps);
 
     if (error) {
       console.error('Error saving chat messages:', error);
@@ -175,15 +162,11 @@ export async function saveChatMessages(messages: ChatMessage[]): Promise<boolean
   }
 }
 
-// Clear chat history for user
 export async function clearChatHistory(userId: string): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    
-    const { error } = await supabase
-      .from('chat_messages')
-      .delete()
-      .eq('user_id', userId);
+
+    const { error } = await supabase.from('chat_messages').delete().eq('user_id', userId);
 
     if (error) {
       console.error('Error clearing chat history:', error);
@@ -197,12 +180,10 @@ export async function clearChatHistory(userId: string): Promise<boolean> {
   }
 }
 
-// Delete old chat messages (keep only last N messages)
 export async function pruneOldMessages(userId: string, keepCount: number = 100): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    
-    // Get IDs of messages to keep
+
     const { data: messagesToKeep } = await supabase
       .from('chat_messages')
       .select('id')
@@ -210,13 +191,12 @@ export async function pruneOldMessages(userId: string, keepCount: number = 100):
       .order('created_at', { ascending: false })
       .limit(keepCount);
 
-    const keepIds = messagesToKeep?.map(m => m.id) || [];
+    const keepIds = messagesToKeep?.map((m) => m.id) || [];
 
     if (keepIds.length === 0) {
-      return true; // No messages to prune
+      return true;
     }
 
-    // Delete messages not in the keep list
     const { error } = await supabase
       .from('chat_messages')
       .delete()

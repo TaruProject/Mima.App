@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
-// Vite is imported dynamically in startServer() to save memory in production
 import session from 'express-session';
 import { google } from 'googleapis';
 import path from 'path';
@@ -13,25 +12,30 @@ import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 import * as chrono from 'chrono-node';
 import multer from 'multer';
+import pg from 'pg';
+import connectPgSimple from 'connect-pg-simple';
 import {
   getUserPreferences,
   updateUserPreferences,
   getChatHistory,
   saveChatMessage,
   clearChatHistory,
-} from './src/services/userPreferencesService.js';
+  initUserPreferencesService,
+} from './server/services/userPreferencesService.js';
 import {
   formatUserMemoriesSummary,
   forgetUserMemories,
   getUserMemories,
   saveUserMemory,
-} from './src/services/userMemoryService.js';
+  initUserMemoryService,
+} from './server/services/userMemoryService.js';
 import {
   completeUserTasks,
   formatUserTasksSummary,
   getUserTasks,
   saveUserTask,
-} from './src/services/userTaskService.js';
+  initUserTaskService,
+} from './server/services/userTaskService.js';
 import {
   buildSystemPrompt,
   getMimaStyle,
@@ -61,12 +65,22 @@ function logToFile(message: string, data?: any) {
   console.log(logEntry);
 }
 
-// Environment variables validation - deferred until after dotenv loads completely
-let envValidationComplete = false;
-let envValidationResult = { valid: false, missing: [] as string[], critical: [] as string[] };
+const SECURITY_V2 = process.env.MIMA_SECURITY_V2 !== 'false';
+
+if (SECURITY_V2) {
+  console.log('[SECURITY] Hardened mode enabled');
+} else {
+  console.warn('[SECURITY] Legacy mode — NOT hardened. Do not use in production.');
+}
+
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (SECURITY_V2 && (!SESSION_SECRET || SESSION_SECRET.length < 32)) {
+  console.error('[FATAL] SESSION_SECRET missing or <32 chars. Server cannot start.');
+  process.exit(1);
+}
+const EFFECTIVE_SESSION_SECRET = SESSION_SECRET || 'mima-session-fallback-secret';
 
 const requiredEnvVars = [
-  'SESSION_SECRET',
   'GEMINI_API_KEY',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
@@ -77,32 +91,21 @@ const requiredEnvVars = [
   'APP_URL',
 ];
 
-const criticalVars = [
-  'GEMINI_API_KEY',
-  'SESSION_SECRET',
-  'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-];
+let envValidationComplete = false;
+let envValidationResult = { valid: false, missing: [] as string[], critical: [] as string[] };
 
-// Validate after a short delay to ensure dotenv has loaded completely
 setTimeout(() => {
   const missingVars = requiredEnvVars.filter((varName) => !process.env[varName]);
-  const missingCritical = missingVars.filter((v) => criticalVars.includes(v));
 
   envValidationResult = {
-    valid: missingCritical.length === 0,
+    valid: missingVars.length === 0,
     missing: missingVars,
-    critical: missingCritical,
+    critical: [],
   };
   envValidationComplete = true;
 
-  if (missingCritical.length > 0) {
-    console.error(
-      '❌ CRITICAL: Missing required environment variables:',
-      missingCritical.join(', ')
-    );
-  } else if (missingVars.length > 0) {
-    console.warn('⚠️  WARNING: Some optional variables are missing:', missingVars.join(', '));
+  if (missingVars.length > 0) {
+    console.warn('⚠️  WARNING: Some env vars are missing:', missingVars.join(', '));
   } else {
     console.log('✅ All environment variables loaded successfully');
   }
@@ -135,40 +138,90 @@ console.log('🔍 Environment detection:', {
   IS_PROD,
 });
 
-// Safe initialization of encryption key
 let ENCRYPTION_KEY: Buffer;
 try {
-  const secret = process.env.SESSION_SECRET || 'mima-default-fallback-secret-32-chars-long';
-  ENCRYPTION_KEY = crypto.scryptSync(secret, 'salt', 32);
+  if (SECURITY_V2) {
+    const DEPLOYMENT_SALT = crypto.scryptSync(
+      EFFECTIVE_SESSION_SECRET,
+      'mima-encryption-salt-v2',
+      16
+    );
+    ENCRYPTION_KEY = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, DEPLOYMENT_SALT, 32);
+  } else {
+    ENCRYPTION_KEY = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, 'salt', 32);
+  }
 } catch (err) {
   console.error('❌ Failed to initialize encryption key:', err);
-  ENCRYPTION_KEY = Buffer.alloc(32, 'a'); // Last resort fallback
+  if (SECURITY_V2) {
+    process.exit(1);
+  }
+  ENCRYPTION_KEY = Buffer.alloc(32, 'a');
 }
-const IV_LENGTH = 16;
-const SERVER_STARTED_AT = BUILD_TIMESTAMP;
-const SERVER_DEPLOY_ID = BUILD_ID;
-const MIN_SUPPORTED_VERSION = process.env.MIN_SUPPORTED_VERSION || BUILD_VERSION;
 
-function encrypt(text: string) {
-  const iv = crypto.randomBytes(IV_LENGTH);
+const GCM_IV_LENGTH = 12;
+const CBC_IV_LENGTH = 16;
+
+function encryptGCM(text: string): string {
+  const iv = crypto.randomBytes(GCM_IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8');
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decryptGCM(ciphertext: string): string {
+  const parts = ciphertext.split(':');
+  if (parts.length === 2) {
+    return decryptCBC(ciphertext);
+  }
+  const iv = Buffer.from(parts[0], 'hex');
+  const authTag = Buffer.from(parts[1], 'hex');
+  const encrypted = Buffer.from(parts[2], 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  decipher.setAuthTag(authTag);
+  let decrypted = decipher.update(encrypted);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+function encryptCBC(text: string): string {
+  const iv = crypto.randomBytes(CBC_IV_LENGTH);
   const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
 }
 
-function decrypt(text: string) {
-  const textParts = text.split(':');
+function decryptCBC(ciphertext: string): string {
+  const textParts = ciphertext.split(':');
   const iv = Buffer.from(textParts.shift()!, 'hex');
   const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  const legacyKey = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, 'salt', 32);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', legacyKey, iv);
   let decrypted = decipher.update(encryptedText);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
 }
 
+function encrypt(text: string): string {
+  return SECURITY_V2 ? encryptGCM(text) : encryptCBC(text);
+}
+
+function decrypt(text: string): string {
+  return SECURITY_V2 ? decryptGCM(text) : decryptCBC(text);
+}
+
+const SERVER_STARTED_AT = BUILD_TIMESTAMP;
+const SERVER_DEPLOY_ID = BUILD_ID;
+const MIN_SUPPORTED_VERSION = process.env.MIN_SUPPORTED_VERSION || BUILD_VERSION;
+
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+
+initUserPreferencesService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+initUserMemoryService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+initUserTaskService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
 
 // NOTE: Panic middleware removed - env validation now happens asynchronously
 // Errors are reported via /api/health and /api/health-detailed endpoints instead of 503
@@ -194,24 +247,67 @@ app.use((req, res, next) => {
   next();
 });
 
-// Session configuration optimized for Hostinger
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || 'mima-session-fallback-secret',
-    resave: false,
-    saveUninitialized: false,
-    name: 'mima.session', // Specific cookie name to avoid conflicts
-    cookie: {
-      secure: IS_PROD, // Require HTTPS in production
-      sameSite: IS_PROD ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      httpOnly: true, // Security: prevent XSS access to cookie
-    },
-  })
-);
+let pgPool: pg.Pool | null = null;
 
-// Log session configuration on startup
-console.log('🔧 Session configuration:');
+if (SECURITY_V2 && process.env.SUPABASE_DB_URL) {
+  pgPool = new pg.Pool({
+    connectionString: process.env.SUPABASE_DB_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  pgPool.on('error', (err) => {
+    console.error('[SECURITY] Unexpected pg pool error:', err.message);
+  });
+} else if (SECURITY_V2 && !process.env.SUPABASE_DB_URL) {
+  console.error('[FATAL] SUPABASE_DB_URL is required when MIMA_SECURITY_V2 is enabled.');
+  process.exit(1);
+}
+
+if (SECURITY_V2 && pgPool) {
+  const PgSessionStore = connectPgSimple(session);
+  app.use(
+    session({
+      store: new PgSessionStore({
+        pool: pgPool,
+        tableName: 'session',
+        schemaName: 'public',
+        pruneSessionInterval: 900,
+        ttl: 7 * 24 * 60 * 60,
+      }),
+      secret: EFFECTIVE_SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      name: 'mima.session',
+      cookie: {
+        secure: IS_PROD,
+        sameSite: IS_PROD ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+      },
+    })
+  );
+  console.log('🔧 Session configuration: PostgreSQL store (7d TTL)');
+} else {
+  app.use(
+    session({
+      secret: EFFECTIVE_SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      name: 'mima.session',
+      cookie: {
+        secure: IS_PROD,
+        sameSite: IS_PROD ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+      },
+    })
+  );
+  console.log('🔧 Session configuration: MemoryStore (24h TTL) — legacy mode');
+}
+
 console.log('   - Cookie secure:', IS_PROD);
 console.log('   - Cookie sameSite:', IS_PROD ? 'none' : 'lax');
 console.log('   - Cookie httpOnly: true');
@@ -1817,18 +1913,47 @@ app.get('/api/tts/preview', authenticateSupabaseUser, async (req, res) => {
   }
 });
 
+const ALLOWED_TTS_VOICE_IDS = new Set([
+  'DODLEQrClDo8wCz460ld',
+  'L0yTtpRXzdyzQlzALhgD',
+  'd3MFdIuCfbAIwiu7jC4a',
+  'l4Coq6695JDX9xtLqXDE',
+  'EXAVITQu4vr4xnSDxMaL',
+  'FGY2WhTYpP6BYn95boSj',
+  'IKne3meq5a9ay67vC7pY',
+  'YSabzCJMvEHDduIDMdwV',
+  'c4ZwDxrFaobUF5e1KlEM',
+  'RiWFFlzYFZuu4lPMig3i',
+  'cLAH1kXlkAivJHxCW601',
+  'HqmZnnvy6tCQd8EGWKRT',
+  '1Iztu4UHnTb9SUjJcpS1',
+  'CaJslL1xziwefCeTNzHv',
+  'm7yTemJqdIqrcNleANfX',
+  'qBvury71WUJfVeT1STkG',
+]);
+
 app.post('/api/tts', authenticateSupabaseUser, async (req, res) => {
   const { text, voiceId } = req.body;
+  const requestStart = Date.now();
   console.log('TTS request received', { textLength: text?.length, voiceId });
+
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text is required' });
+  }
 
   if (!process.env.ELEVENLABS_API_KEY) {
     console.error('ELEVENLABS_API_KEY is missing');
     return res.status(500).json({ error: 'ELEVENLABS_API_KEY is not configured' });
   }
 
+  const selectedVoiceId =
+    voiceId && ALLOWED_TTS_VOICE_IDS.has(voiceId) ? voiceId : 'DODLEQrClDo8wCz460ld';
+
   try {
-    const selectedVoiceId = voiceId || 'DODLEQrClDo8wCz460ld';
     console.log(`Calling ElevenLabs with voiceId: ${selectedVoiceId}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
       method: 'POST',
@@ -1845,22 +1970,45 @@ app.post('/api/tts', authenticateSupabaseUser, async (req, res) => {
           similarity_boost: 0.5,
         },
       }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
+      clearTimeout(timeoutId);
       const errorText = await response.text();
       console.error(`ElevenLabs API error: ${response.status}`, errorText);
+      if (response.status === 429) {
+        return res.status(429).json({
+          error: 'Voice service rate limited. Please try again later.',
+          errorCode: 'TTS_RATE_LIMITED',
+        });
+      }
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
     const audioBuffer = Buffer.from(await response.arrayBuffer());
+    clearTimeout(timeoutId);
+
+    const generationTimeMs = Date.now() - requestStart;
+    console.log(
+      `TTS_PROXY_SUCCESS voiceId=${selectedVoiceId} size=${audioBuffer.length} time=${generationTimeMs}ms`
+    );
+
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', String(audioBuffer.length));
-    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Cache-Control', 'private, max-age=86400, stale-while-revalidate=3600');
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Disposition', 'inline; filename="mima-response.mp3"');
+    res.setHeader('X-Generation-Time-Ms', String(generationTimeMs));
     res.send(audioBuffer);
-  } catch (error) {
+  } catch (error: any) {
+    const generationTimeMs = Date.now() - requestStart;
+    if (error?.name === 'AbortError') {
+      console.error(`TTS_PROXY_TIMEOUT: ElevenLabs request aborted after ${generationTimeMs}ms`);
+      return res
+        .status(504)
+        .json({ error: 'Voice service timed out. Please try again.', errorCode: 'TTS_TIMEOUT' });
+    }
     console.error('TTS Error:', error);
     res.status(500).json({
       error: 'Failed to generate speech',
@@ -6071,6 +6219,22 @@ process.on('unhandledRejection', (reason, promise) => {
   const errorMsg = `🔥 UNHANDLED REJECTION: ${reason}`;
   console.error(errorMsg);
   logToFile('UNHANDLED REJECTION', { reason: String(reason) });
+});
+
+process.on('SIGTERM', async () => {
+  if (pgPool) {
+    console.log('[SECURITY] Closing pg pool on SIGTERM...');
+    await pgPool.end();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  if (pgPool) {
+    console.log('[SECURITY] Closing pg pool on SIGINT...');
+    await pgPool.end();
+  }
+  process.exit(0);
 });
 
 console.log('🚀 Finalizing server initialization...');

@@ -55,7 +55,10 @@
     "action_menu": "Atgardsmeny",
     "error_message": "Tyvarr, nagot gick fel. Forsok igen.",
     "audio_error": "Fel vid uppspelning av ljud",
-    "voice_not_found": "Rost inte konfigurerad. Ga till profilen."
+    "voice_not_found": "Rost inte konfigurerad. Ga till profilen.",
+    "tts_generating": "Genererar ljud...",
+    "tts_cached": "Spela upp cachat ljud",
+    "tts_unavailable": "Rosttjanst tillfallet otillganglig"
   },
   "profile": {
     "title": "Profil",
