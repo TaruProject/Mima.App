@@ -241,8 +241,8 @@ export async function invalidateCacheForVoice(voiceId: string): Promise<void> {
 export function isOptimizationEnabled(): boolean {
   try {
     const value = localStorage.getItem('mima_tts_optimization');
-    return value !== 'legacy';
+    return value === 'v2';
   } catch {
-    return true;
+    return false;
   }
 }

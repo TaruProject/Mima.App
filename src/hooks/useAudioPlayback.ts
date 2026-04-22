@@ -25,7 +25,7 @@ export const useAudioPlayback = () => {
 
   const updateTtsStatus = useCallback((status: TtsStatus) => {
     ttsStatusRef.current = status;
-    updateTtsStatus(status);
+    setTtsStatus(status);
   }, []);
 
   const stop = useCallback(() => {
@@ -163,6 +163,14 @@ export const useAudioPlayback = () => {
         const errorPayload = contentType.includes('application/json')
           ? await response.json().catch(() => null)
           : await response.text().catch(() => '');
+
+        if (response.status === 429) {
+          throw new Error('TTS_RATE_LIMITED');
+        }
+        if (response.status >= 500) {
+          throw new Error('TTS_SERVER_ERROR');
+        }
+
         const message =
           typeof errorPayload === 'string'
             ? errorPayload
@@ -332,6 +340,10 @@ export const useAudioPlayback = () => {
           clearTimeout(timeoutId);
           if (err?.name === 'AbortError') {
             console.log('TTS_PROXY_TIMEOUT: preload aborted after 30s');
+          } else if (err?.message === 'TTS_RATE_LIMITED') {
+            console.log('TTS_RATE_LIMITED: preload skipped due to rate limit');
+          } else if (err?.message === 'TTS_SERVER_ERROR') {
+            console.log('TTS_SERVER_ERROR: preload skipped, server error');
           } else {
             console.log('TTS_PROXY_ERROR: preload failed', err?.message);
           }
@@ -364,7 +376,7 @@ export const useAudioPlayback = () => {
           console.log(`TTS_CACHE_MISS hash=${hash} — fetching synchronously`);
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 20000);
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
 
           try {
             blob = await fetchAudio('/api/tts', { text, voiceId }, true, controller.signal);
@@ -374,7 +386,16 @@ export const useAudioPlayback = () => {
           } catch (fetchErr: any) {
             clearTimeout(timeoutId);
             if (fetchErr?.name === 'AbortError') {
-              console.log('TTS_PROXY_TIMEOUT: sync fetch aborted after 20s');
+              console.log('TTS_PROXY_TIMEOUT: sync fetch aborted after 2s');
+              throw new Error(
+                'Audio generation is taking longer than expected. Try again in a moment.'
+              );
+            } else if (fetchErr?.message === 'TTS_RATE_LIMITED') {
+              console.log('TTS_RATE_LIMITED: voice service rate limited');
+              throw new Error('Voice service rate limited. Please try again later.');
+            } else if (fetchErr?.message === 'TTS_SERVER_ERROR') {
+              console.log('TTS_SERVER_ERROR: voice service temporarily unavailable');
+              throw new Error('Voice service temporarily unavailable.');
             } else {
               console.log('TTS_PROXY_ERROR:', fetchErr?.message);
             }

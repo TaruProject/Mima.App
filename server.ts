@@ -231,12 +231,19 @@ app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
 // CSP headers - Unified for all environments
 app.use((req, res, next) => {
+  const isDev = !IS_PROD;
   const cspDirectives = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com",
+    isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com http://localhost:*"
+      : "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
-    "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
+    isDev
+      ? "font-src 'self' https://fonts.gstatic.com data: https://r2cdn.perplexity.ai"
+      : "font-src 'self' https://fonts.gstatic.com data:",
+    isDev
+      ? "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com ws://localhost:* http://localhost:*"
+      : "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
     "img-src 'self' data: https: blob:",
     "media-src 'self' data: blob:",
     "worker-src 'self' blob:",
@@ -1148,7 +1155,7 @@ app.get('/api/health/env', (req, res) => {
     all: requiredEnvVars.map((v) => ({
       name: v,
       present: !!process.env[v],
-      critical: criticalVars.includes(v),
+      critical: ['GEMINI_API_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'].includes(v),
     })),
   });
 });
@@ -1994,9 +2001,13 @@ app.post('/api/tts', authenticateSupabaseUser, async (req, res) => {
       `TTS_PROXY_SUCCESS voiceId=${selectedVoiceId} size=${audioBuffer.length} time=${generationTimeMs}ms`
     );
 
+    const etag =
+      '"' + crypto.createHash('md5').update(audioBuffer).digest('hex').slice(0, 16) + '"';
+
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', String(audioBuffer.length));
     res.setHeader('Cache-Control', 'private, max-age=86400, stale-while-revalidate=3600');
+    res.setHeader('ETag', etag);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Disposition', 'inline; filename="mima-response.mp3"');
     res.setHeader('X-Generation-Time-Ms', String(generationTimeMs));

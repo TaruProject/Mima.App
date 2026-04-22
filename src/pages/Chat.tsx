@@ -4,7 +4,6 @@ import {
   Mic,
   ArrowUp,
   Plus,
-  Square,
   Play,
   MessageSquarePlus,
   X,
@@ -14,6 +13,8 @@ import {
   Sparkles,
   Volume2,
   Loader2,
+  Music,
+  Pause,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -181,6 +182,7 @@ export default function Chat() {
   const messagesRef = useRef<ChatMessage[]>([]);
   const persistedMessageIdsRef = useRef<Set<string>>(new Set());
   const isPersistingRef = useRef(false);
+  const preloadInFlightRef = useRef<Set<string>>(new Set());
   const activeMode = getMimaStyle(mode);
 
   useEffect(() => {
@@ -765,16 +767,27 @@ export default function Chat() {
   useEffect(() => {
     if (!isOptimizationEnabled()) return;
 
+    const MAX_CONCURRENT_PRELOADS = 2;
     const assistantMessages = messages.filter(
       (msg) => msg.role === 'assistant' && !msg.isWelcome && msg.text.trim()
     );
     if (assistantMessages.length === 0) return;
 
     const schedulePreload = () => {
+      let activeCount = preloadInFlightRef.current.size;
+
       for (const msg of assistantMessages) {
+        if (activeCount >= MAX_CONCURRENT_PRELOADS) break;
+
         const key = msg.id.toString();
         if (ttsCacheStatuses[key] === 'ready' || ttsCacheStatuses[key] === 'loading') continue;
-        preload(msg.text, voiceId).then(() => {
+        if (preloadInFlightRef.current.has(key)) continue;
+
+        preloadInFlightRef.current.add(key);
+        activeCount++;
+
+        preload(msg.text, voiceId).finally(() => {
+          preloadInFlightRef.current.delete(key);
           checkCacheStatus(msg.text, voiceId).then((status) => {
             setTtsCacheStatuses((prev) => {
               if (prev[key] === status) return prev;
@@ -1091,7 +1104,7 @@ export default function Chat() {
                       let buttonClass: string;
 
                       if (isCurrentlyPlaying && ttsStatus === 'playing') {
-                        buttonIcon = <Square className="w-4 h-4 fill-current" />;
+                        buttonIcon = <Pause className="w-4 h-4 fill-current" />;
                         buttonTitle = t('chat.stop_audio');
                         buttonClass = 'text-primary bg-primary/10 hover:bg-primary/20';
                       } else if (isGenerating) {
@@ -1099,7 +1112,7 @@ export default function Chat() {
                         buttonTitle = t('chat.tts_generating');
                         buttonClass = 'text-primary bg-primary/10';
                       } else if (isReady) {
-                        buttonIcon = <Volume2 className="w-4 h-4 text-green-400" />;
+                        buttonIcon = <Music className="w-4 h-4" />;
                         buttonTitle = t('chat.tts_cached');
                         buttonClass = 'text-green-400 bg-green-400/10 hover:bg-green-400/20';
                       } else {
