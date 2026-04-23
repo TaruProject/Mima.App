@@ -27,7 +27,7 @@ function mapAuthErrorToTranslationKey(error: unknown): string {
   return 'auth.error_generic';
 }
 
-type AuthStep = 'language' | 'welcome' | 'form';
+type AuthStep = 'language' | 'welcome' | 'form' | 'confirm_email';
 
 export default function Auth() {
   const { t, i18n } = useTranslation();
@@ -37,6 +37,7 @@ export default function Auth() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState('');
   const [selectedLanguage, setSelectedLanguage] =
     useState<SupportedLanguage>(getPreferredLanguage());
 
@@ -77,8 +78,32 @@ export default function Auth() {
 
     try {
       if (isLogin) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
         if (signInError) throw signInError;
+
+        if (signInData.user?.id) {
+          const { data: prefs } = await supabase
+            .from('user_preferences')
+            .select('user_id')
+            .eq('user_id', signInData.user.id)
+            .maybeSingle();
+
+          if (!prefs) {
+            const timestamp = new Date().toISOString();
+            await supabase.from('user_preferences').upsert(
+              {
+                user_id: signInData.user.id,
+                language: selectedLanguage,
+                onboarding_done: false,
+                updated_at: timestamp,
+              },
+              { onConflict: 'user_id' }
+            );
+          }
+        }
       } else {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
@@ -133,6 +158,10 @@ export default function Auth() {
               preferencesResult.value.error
             );
           }
+        } else if (data.user && !data.session) {
+          setConfirmEmail(email);
+          setStep('confirm_email');
+          return;
         }
       }
     } catch (authError: unknown) {
@@ -221,6 +250,57 @@ export default function Auth() {
                 className="mt-4 text-slate-500 text-sm hover:text-slate-300 transition-colors"
               >
                 {t('auth.change_language')}
+              </button>
+            </motion.div>
+          )}
+
+          {step === 'confirm_email' && (
+            <motion.div
+              key="confirm-email-step"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="w-full max-w-sm flex flex-col items-center"
+            >
+              <div className="w-16 h-16 rounded-2xl overflow-hidden mb-6 shadow-lg shadow-primary/20 border border-white/10 flex items-center justify-center bg-primary/10">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-8 h-8 text-primary"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
+              </div>
+
+              <h1 className="text-2xl font-bold text-white mb-3 text-center">
+                {t('auth.confirm_email_title')}
+              </h1>
+              <p className="text-slate-400 text-center mb-2">{t('auth.confirm_email_subtitle')}</p>
+              <p className="text-primary font-medium text-center mb-8">{confirmEmail}</p>
+
+              <button
+                onClick={() => {
+                  setIsLogin(true);
+                  setError('');
+                  setStep('form');
+                }}
+                className="w-full py-3.5 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20 hover:bg-primary/90 active:scale-[0.98] transition-all"
+              >
+                {t('auth.confirm_email_sign_in')}
+              </button>
+
+              <button
+                onClick={() => setStep('welcome')}
+                className="w-full mt-4 text-slate-500 text-sm hover:text-slate-300 transition-colors text-center"
+              >
+                {t('common.back')}
               </button>
             </motion.div>
           )}

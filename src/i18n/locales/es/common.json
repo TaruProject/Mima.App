@@ -173,6 +173,9 @@
     "error_invalid_credentials": "Correo o contrasena invalidos.",
     "error_weak_password": "La contrasena es demasiado debil. Usa al menos 6 caracteres.",
     "error_generic": "La autenticacion fallo. Intentalo de nuevo.",
+    "confirm_email_title": "Revisa tu correo",
+    "confirm_email_subtitle": "Enviamos un enlace de confirmacion a:",
+    "confirm_email_sign_in": "Ya confirme mi correo, iniciar sesion",
     "welcome_title": "Bienvenido a Mima",
     "welcome_subtitle": "Tu asistente personal inteligente para gestionar tu dia, correos y mucho mas.",
     "change_language": "Cambiar idioma"

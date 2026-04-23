@@ -173,6 +173,9 @@
     "error_invalid_credentials": "Fel e-postadress eller losenord.",
     "error_weak_password": "Losenordet ar for svagt. Anvand minst 6 tecken.",
     "error_generic": "Autentisering misslyckades. Forsok igen.",
+    "confirm_email_title": "Kontrollera din e-post",
+    "confirm_email_subtitle": "Vi skickade en bekräftelselank till:",
+    "confirm_email_sign_in": "Jag har bekriftat min e-post, logga in",
     "welcome_title": "Valkommen till Mima",
     "welcome_subtitle": "Din intelligenta personliga assistent for att hantera din dag, e-post och mycket mer.",
     "change_language": "Byt sprak"
