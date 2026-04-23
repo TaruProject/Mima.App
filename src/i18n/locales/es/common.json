@@ -172,7 +172,10 @@
     "error_user_exists": "Este correo ya esta registrado. Intenta iniciar sesion.",
     "error_invalid_credentials": "Correo o contrasena invalidos.",
     "error_weak_password": "La contrasena es demasiado debil. Usa al menos 6 caracteres.",
-    "error_generic": "La autenticacion fallo. Intentalo de nuevo."
+    "error_generic": "La autenticacion fallo. Intentalo de nuevo.",
+    "welcome_title": "Bienvenido a Mima",
+    "welcome_subtitle": "Tu asistente personal inteligente para gestionar tu dia, correos y mucho mas.",
+    "change_language": "Cambiar idioma"
   },
   "layout": {
     "chat": "Chat",

@@ -172,7 +172,10 @@
     "error_user_exists": "Den har e-postadressen ar redan registrerad. Prova att logga in.",
     "error_invalid_credentials": "Fel e-postadress eller losenord.",
     "error_weak_password": "Losenordet ar for svagt. Anvand minst 6 tecken.",
-    "error_generic": "Autentisering misslyckades. Forsok igen."
+    "error_generic": "Autentisering misslyckades. Forsok igen.",
+    "welcome_title": "Valkommen till Mima",
+    "welcome_subtitle": "Din intelligenta personliga assistent for att hantera din dag, e-post och mycket mer.",
+    "change_language": "Byt sprak"
   },
   "layout": {
     "chat": "Chatt",

@@ -172,7 +172,10 @@
     "error_user_exists": "This email is already registered. Try signing in instead.",
     "error_invalid_credentials": "Invalid email or password.",
     "error_weak_password": "Your password is too weak. Use at least 6 characters.",
-    "error_generic": "Authentication failed. Please try again."
+    "error_generic": "Authentication failed. Please try again.",
+    "welcome_title": "Welcome to Mima",
+    "welcome_subtitle": "Your intelligent personal assistant to manage your day, emails, and much more.",
+    "change_language": "Change language"
   },
   "layout": {
     "chat": "Chat",

@@ -172,7 +172,10 @@
     "error_user_exists": "Tama sahkoposti on jo rekisteroity. Kokeile kirjautumista.",
     "error_invalid_credentials": "Virheellinen sahkoposti tai salasana.",
     "error_weak_password": "Salasana on liian heikko. Kayta vahintaan 6 merkki?.",
-    "error_generic": "Tunnistautuminen epaonnistui. Yrita uudelleen."
+    "error_generic": "Tunnistautuminen epaonnistui. Yrita uudelleen.",
+    "welcome_title": "Tervetuloa Mimaan",
+    "welcome_subtitle": "Älykas henkilökohtainen avustajasi paivan, sahkopostien ja paljon muoren hallintaan.",
+    "change_language": "Vaihda kieli"
   },
   "layout": {
     "chat": "Chatti",
