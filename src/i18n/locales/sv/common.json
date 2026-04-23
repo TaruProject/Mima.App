@@ -152,6 +152,7 @@
     "reconnect_required": "Google Calendar behover skrivbehorigheter. Anslut Google pa nytt sa att Mima kan skapa och redigera handelser igen."
   },
   "auth": {
+    "select_language": "Välj ditt språk",
     "welcome_back": "Valkommen tillbaka",
     "create_account": "Skapa ett konto",
     "sign_in_subtitle": "Ange dina uppgifter for att komma at Mima.",

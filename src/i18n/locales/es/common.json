@@ -152,6 +152,7 @@
     "reconnect_required": "Google Calendar necesita permisos de escritura. Reconecta Google para que Mima pueda volver a crear y editar eventos."
   },
   "auth": {
+    "select_language": "Elige tu idioma",
     "welcome_back": "Bienvenido de nuevo",
     "create_account": "Crear una cuenta",
     "sign_in_subtitle": "Ingresa tus datos para acceder a Mima.",

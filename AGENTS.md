@@ -201,7 +201,7 @@ INPUT → PLAN → ROUTER → EXECUTION → MEMORY → VERIFY → DELIVERY
 | `src/components/UpdateOverlay.tsx`             | Overlay de actualización obligatoria         |
 | `src/components/ErrorBoundary.tsx`             | Catch de errores de render                   |
 | `src/components/ProductivitySnapshot.tsx`      | Widget resumen productividad ⚠️ no importado |
-| `src/components/onboarding/OnboardingFlow.tsx` | Flujo onboarding (4 steps: 0-3)              |
+| `src/components/onboarding/OnboardingFlow.tsx` | Flujo onboarding (3 steps: 0-2)              |
 | `src/components/ui/ActionMenu.tsx`             | Menú de acciones del chat                    |
 | `src/components/ui/ModeBottomSheet.tsx`        | Selector de modo IA                          |
 | `src/components/ui/Toast.tsx`                  | Notificaciones toast                         |
@@ -626,7 +626,7 @@ Usuario: "Responde este email"
 | **Session Recovery**     | Extraer userId del `state` parameter cuando sesión Express se pierde en callback OAuth         |
 | **MimaStyle**            | Configuración de personalidad IA: neutral, profesional, creativo, zen, familiar                |
 | **Memory**               | Dato persistente que el usuario pide recordar                                                  |
-| **Onboarding**           | Flujo de 4 steps (0-3): idioma → bienvenida → voz → listo                                      |
+| **Onboarding**           | Flujo de 3 steps (0-2): bienvenida → voz → listo (idioma seleccionado en auth)                 |
 | **Static Path Fallback** | 6 rutas verificadas para encontrar `dist/` en Hostinger                                        |
 | **Auto-refresh Tokens**  | `oauth2Client.on('tokens')` listener que cachea tokens renovados automáticamente               |
 

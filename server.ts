@@ -41,7 +41,35 @@ import {
   getMimaStyle,
   normalizeStyleId,
   type MimaStyleId,
+  GLOBAL_MIMA_RULES,
 } from './src/config/mimaStyles.js';
+import { getSystemPrompt, type SupportedLanguage } from './server/prompts/systemPrompts.js';
+
+function buildLocalizedSystemPrompt(
+  language: SupportedLanguage,
+  mode: string,
+  context: any
+): string {
+  const basePrompt = getSystemPrompt(language, mode as keyof typeof getSystemPrompt);
+
+  return [
+    basePrompt,
+    '',
+    'CONTEXTO ACTUAL:',
+    `- Fecha y hora: ${context.currentDateTime}`,
+    `- Usuario: ${context.userName}`,
+    `- Zona horaria: ${context.timezone}`,
+    `- Eventos próximos hoy: ${context.todayEvents}`,
+    '',
+    'CAPACIDADES DISPONIBLES:',
+    ...context.capabilities.map((item: string) => `- ${item}`),
+    ...(context.extraInstructions?.length > 0 ? ['', ...context.extraInstructions] : []),
+    '',
+    GLOBAL_MIMA_RULES,
+  ]
+    .join('\n')
+    .trim();
+}
 import { BUILD_ID, BUILD_TIMESTAMP, BUILD_VERSION } from './src/generated/buildInfo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -3611,14 +3639,14 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
       });
     }
 
-    const resolvedLangCode = language || 'en';
-    const resolvedLangInstruction =
-      languageInstructions[resolvedLangCode] || languageInstructions.en;
     const supabaseAdmin = createClient(
       supabaseUrl,
       process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
     );
     const userPreferences = userId ? await getUserPreferences(userId) : null;
+    const resolvedLangCode = userPreferences?.language || language || 'en';
+    const resolvedLangInstruction =
+      languageInstructions[resolvedLangCode] || languageInstructions.en;
 
     const normalizedAttachments = Array.isArray(attachments)
       ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
@@ -4018,46 +4046,50 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         : ['Google Calendar no conectado actualmente', 'Gmail no conectado actualmente']),
     ];
 
-    const finalSystemInstruction = buildSystemPrompt(activeStyleId, {
-      currentDateTime: new Date().toLocaleString(langCode, {
-        timeZone: clientTimeZone,
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      userName:
-        user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario',
-      timezone: clientTimeZone,
-      todayEvents: todayEventsSummary,
-      capabilities,
-      extraInstructions: [
-        `IDIOMA: ${langInstruction}`,
-        ...(userMemories.length > 0
-          ? ['MEMORIA DEL USUARIO:', formatUserMemoriesSummary(userMemories, resolvedLangCode)]
-          : []),
-        ...(userTasks.length > 0
-          ? ['TAREAS ABIERTAS DEL USUARIO:', formatUserTasksSummary(userTasks, resolvedLangCode)]
-          : []),
-        'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
-        'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
-        'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
-        'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
-        'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
-        'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.',
-        ...(normalizedAttachments.length > 0
-          ? [
-              `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
-              'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.',
-              'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.',
-            ]
-          : []),
-        ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
-        ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
-        `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
-      ],
-    });
+    const finalSystemInstruction = buildLocalizedSystemPrompt(
+      resolvedLangCode as SupportedLanguage,
+      activeStyleId,
+      {
+        currentDateTime: new Date().toLocaleString(langCode, {
+          timeZone: clientTimeZone,
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        userName:
+          user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario',
+        timezone: clientTimeZone,
+        todayEvents: todayEventsSummary,
+        capabilities,
+        extraInstructions: [
+          `IDIOMA: ${langInstruction}`,
+          ...(userMemories.length > 0
+            ? ['MEMORIA DEL USUARIO:', formatUserMemoriesSummary(userMemories, resolvedLangCode)]
+            : []),
+          ...(userTasks.length > 0
+            ? ['TAREAS ABIERTAS DEL USUARIO:', formatUserTasksSummary(userTasks, resolvedLangCode)]
+            : []),
+          'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
+          'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
+          'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
+          'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
+          'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
+          'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.',
+          ...(normalizedAttachments.length > 0
+            ? [
+                `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
+                'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.',
+                'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.',
+              ]
+            : []),
+          ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
+          ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
+          `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
+        ],
+      }
+    );
 
     // Call Gemini API with selected model
     console.log('🔄 Calling Gemini API...');

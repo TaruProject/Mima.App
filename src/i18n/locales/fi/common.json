@@ -152,6 +152,7 @@
     "reconnect_required": "Google Calendar tarvitsee kirjoitusoikeudet. Yhdista Google uudelleen, jotta Mima voi taas luoda ja muokata tapahtumia."
   },
   "auth": {
+    "select_language": "Valitse kieli",
     "welcome_back": "Tervetuloa takaisin",
     "create_account": "Luo tili",
     "sign_in_subtitle": "Kirjaudu sisaan kayttaaksesi Mimaa.",
