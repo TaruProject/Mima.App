@@ -1,22 +1,22 @@
-import { useTranslation } from 'react-i18next';
+﻿import { useTranslation } from 'react-i18next';
 
 interface LanguageSelectorProps {
   onSelect: (language: string) => void;
   selectedLanguage: string;
-  showFlags?: boolean;
+  showCodes?: boolean;
 }
 
 const languages = [
-  { code: 'fi', name: 'Suomi', flag: '🇫🇮' },
-  { code: 'sv', name: 'Svenska', flag: '🇸🇪' },
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Español', flag: '🇪🇸' },
+  { code: 'fi', labelKey: 'profile.language_option_fi', shortCode: 'FI' },
+  { code: 'sv', labelKey: 'profile.language_option_sv', shortCode: 'SV' },
+  { code: 'en', labelKey: 'profile.language_option_en', shortCode: 'EN' },
+  { code: 'es', labelKey: 'profile.language_option_es', shortCode: 'ES' },
 ];
 
 export default function LanguageSelector({
   onSelect,
   selectedLanguage,
-  showFlags = true,
+  showCodes = true,
 }: LanguageSelectorProps) {
   const { t } = useTranslation();
 
@@ -35,11 +35,17 @@ export default function LanguageSelector({
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-white/10 bg-white/5 text-white hover:border-white/20'
             }`}
-            aria-label={`Select ${lang.name} language`}
+            aria-label={t('auth.select_language_aria', {
+              language: t(lang.labelKey),
+            })}
           >
             <div className="flex flex-col items-center space-y-2">
-              {showFlags && <span className="text-2xl">{lang.flag}</span>}
-              <span className="text-sm font-medium">{lang.name}</span>
+              {showCodes && (
+                <span className="text-xs font-bold tracking-wider text-slate-300">
+                  {lang.shortCode}
+                </span>
+              )}
+              <span className="text-sm font-medium">{t(lang.labelKey)}</span>
             </div>
           </button>
         ))}

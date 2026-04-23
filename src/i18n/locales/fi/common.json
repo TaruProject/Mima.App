@@ -166,7 +166,13 @@
     "sign_up": "Rekisteroidy",
     "no_account": "Eiko sinulla ole tiliä?",
     "have_account": "Onko sinulla jo tili?",
-    "google_error": "Google-kirjautuminen epaonnistui. Yrita uudelleen."
+    "google_error": "Google-kirjautuminen epaonnistui. Yrita uudelleen.",
+    "select_language_aria": "Valitse kieli {{language}}",
+    "error_database_save": "Tilin luonti ei onnistunut juuri nyt. Yrita hetken kuluttua uudelleen.",
+    "error_user_exists": "Tama sahkoposti on jo rekisteroity. Kokeile kirjautumista.",
+    "error_invalid_credentials": "Virheellinen sahkoposti tai salasana.",
+    "error_weak_password": "Salasana on liian heikko. Kayta vahintaan 6 merkki?.",
+    "error_generic": "Tunnistautuminen epaonnistui. Yrita uudelleen."
   },
   "layout": {
     "chat": "Chatti",

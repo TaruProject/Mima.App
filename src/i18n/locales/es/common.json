@@ -166,7 +166,13 @@
     "sign_up": "Registrarse",
     "no_account": "No tienes cuenta?",
     "have_account": "Ya tienes cuenta?",
-    "google_error": "La autenticacion con Google fallo. Intentalo de nuevo."
+    "google_error": "La autenticacion con Google fallo. Intentalo de nuevo.",
+    "select_language_aria": "Seleccionar idioma {{language}}",
+    "error_database_save": "No pudimos crear tu cuenta en este momento. Intentalo de nuevo en unos minutos.",
+    "error_user_exists": "Este correo ya esta registrado. Intenta iniciar sesion.",
+    "error_invalid_credentials": "Correo o contrasena invalidos.",
+    "error_weak_password": "La contrasena es demasiado debil. Usa al menos 6 caracteres.",
+    "error_generic": "La autenticacion fallo. Intentalo de nuevo."
   },
   "layout": {
     "chat": "Chat",

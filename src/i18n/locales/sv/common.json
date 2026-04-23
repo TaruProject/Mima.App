@@ -166,7 +166,13 @@
     "sign_up": "Registrera dig",
     "no_account": "Har du inget konto?",
     "have_account": "Har du redan ett konto?",
-    "google_error": "Google-autentisering misslyckades. Forsok igen."
+    "google_error": "Google-autentisering misslyckades. Forsok igen.",
+    "select_language_aria": "Valj sprak {{language}}",
+    "error_database_save": "Kontot kunde inte skapas just nu. Forsok igen om en stund.",
+    "error_user_exists": "Den har e-postadressen ar redan registrerad. Prova att logga in.",
+    "error_invalid_credentials": "Fel e-postadress eller losenord.",
+    "error_weak_password": "Losenordet ar for svagt. Anvand minst 6 tecken.",
+    "error_generic": "Autentisering misslyckades. Forsok igen."
   },
   "layout": {
     "chat": "Chatt",

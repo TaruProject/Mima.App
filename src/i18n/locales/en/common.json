@@ -166,7 +166,13 @@
     "sign_up": "Sign Up",
     "no_account": "Don't have an account?",
     "have_account": "Already have an account?",
-    "google_error": "Google authentication failed. Please try again."
+    "google_error": "Google authentication failed. Please try again.",
+    "select_language_aria": "Select {{language}} language",
+    "error_database_save": "We could not create your account right now. Please try again shortly.",
+    "error_user_exists": "This email is already registered. Try signing in instead.",
+    "error_invalid_credentials": "Invalid email or password.",
+    "error_weak_password": "Your password is too weak. Use at least 6 characters.",
+    "error_generic": "Authentication failed. Please try again."
   },
   "layout": {
     "chat": "Chat",

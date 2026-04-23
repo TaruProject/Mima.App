@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+﻿import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
@@ -37,35 +37,140 @@ import {
   initUserTaskService,
 } from './server/services/userTaskService.js';
 import {
-  buildSystemPrompt,
   getMimaStyle,
   normalizeStyleId,
   type MimaStyleId,
-  GLOBAL_MIMA_RULES,
 } from './src/config/mimaStyles.js';
 import { getSystemPrompt, type SupportedLanguage } from './server/prompts/systemPrompts.js';
+
+function getLocalizedPromptLabels(language: SupportedLanguage) {
+  if (language === 'es') {
+    return {
+      contextTitle: 'CONTEXTO ACTUAL:',
+      dateTimeLabel: 'Fecha y hora',
+      userLabel: 'Usuario',
+      timezoneLabel: 'Zona horaria',
+      eventsLabel: 'Eventos proximos hoy',
+      capabilitiesTitle: 'CAPACIDADES DISPONIBLES:',
+      globalRulesTitle: 'REGLAS GLOBALES MIMA - NO NEGOCIABLES:',
+    };
+  }
+
+  if (language === 'fi') {
+    return {
+      contextTitle: 'NYKYINEN KONTEXTI:',
+      dateTimeLabel: 'Paivamaara ja aika',
+      userLabel: 'Kayttaja',
+      timezoneLabel: 'Aikavyohyke',
+      eventsLabel: 'Paivan tulevat tapahtumat',
+      capabilitiesTitle: 'KAYTOSSA OLEVAT KYVYT:',
+      globalRulesTitle: 'MIMAN GLOBAALIT SAANNOT - EI NEUVOTELTAVISSA:',
+    };
+  }
+
+  if (language === 'sv') {
+    return {
+      contextTitle: 'AKTUELL KONTEXT:',
+      dateTimeLabel: 'Datum och tid',
+      userLabel: 'Anvandare',
+      timezoneLabel: 'Tidszon',
+      eventsLabel: 'Kommande handelser idag',
+      capabilitiesTitle: 'TILLGANGLIGA FUNKTIONER:',
+      globalRulesTitle: 'GLOBALA MIMA-REGLER - EJ FORHANDLINGSBARA:',
+    };
+  }
+
+  return {
+    contextTitle: 'CURRENT CONTEXT:',
+    dateTimeLabel: 'Date and time',
+    userLabel: 'User',
+    timezoneLabel: 'Time zone',
+    eventsLabel: 'Upcoming events today',
+    capabilitiesTitle: 'AVAILABLE CAPABILITIES:',
+    globalRulesTitle: 'GLOBAL MIMA RULES - NON NEGOTIABLE:',
+  };
+}
+
+function getLocalizedGlobalRules(language: SupportedLanguage): string[] {
+  if (language === 'es') {
+    return [
+      'Nunca envies un correo sin mostrar borrador y recibir confirmacion explicita.',
+      'Nunca elimines eventos sin confirmacion explicita del usuario.',
+      'Si una herramienta no esta disponible, comunicalo claramente.',
+      'Los datos del usuario siempre tienen prioridad sobre suposiciones.',
+      'Si una accion puede ser irreversible, confirma antes de ejecutar.',
+      'Responde en el idioma seleccionado por el usuario.',
+      'Si el estilo cambia, adaptate de inmediato sin comentarlo.',
+      'Si hay archivos adjuntos, analizalos antes de responder.',
+      'Con adjuntos, incluye hallazgos clave, detalles, dudas y siguientes pasos.',
+    ];
+  }
+
+  if (language === 'fi') {
+    return [
+      'Ala koskaan laheta sahkopostia ilman luonnosta ja nimenomaista vahvistusta.',
+      'Ala koskaan poista kalenteritapahtumaa ilman nimenomaista vahvistusta.',
+      'Jos tyokalu ei ole saatavilla, kerro se selkeasti.',
+      'Kayttajan antamat tiedot ovat aina oletuksia vahvempia.',
+      'Jos toiminto voi olla peruuttamaton, vahvista ennen suoritusta.',
+      'Vastaa kayttajan valitsemalla kielella.',
+      'Jos tyyli muuttuu, sopeudu heti ilman erillista kommenttia.',
+      'Jos liitteita on mukana, analysoi ne ennen vastausta.',
+      'Liitteiden kanssa anna havainnot, yksityiskohdat, avoimet kysymykset ja jatkoaskeleet.',
+    ];
+  }
+
+  if (language === 'sv') {
+    return [
+      'Skicka aldrig e-post utan utkast och uttrycklig bekraftelse.',
+      'Radera aldrig kalenderhandelser utan uttrycklig bekraftelse.',
+      'Om ett verktyg inte ar tillgangligt, sag det tydligt.',
+      'Anvandarens uppgifter har alltid foretrade framfor antaganden.',
+      'Om en atgard kan vara oaterkallelig, bekrafta innan utforande.',
+      'Svara pa anvandarens valda sprak.',
+      'Om stil laget andras, anpassa dig direkt utan att kommentera det.',
+      'Om bilagor finns, analysera dem innan du svarar.',
+      'Med bilagor: ge nyckelfynd, detaljer, fragetecken och nasta steg.',
+    ];
+  }
+
+  return [
+    'Never send an email without showing a draft and explicit user confirmation.',
+    'Never delete calendar events without explicit user confirmation.',
+    'If a tool is unavailable, say so clearly.',
+    'User-provided names, dates, times, and contacts always win over assumptions.',
+    'If an action may be irreversible, confirm before executing.',
+    'Reply in the selected user language.',
+    'When style changes, adapt immediately without announcing it.',
+    'If files are attached, analyze them before responding.',
+    'With attachments, include key findings, relevant details, doubts, and next steps.',
+  ];
+}
 
 function buildLocalizedSystemPrompt(
   language: SupportedLanguage,
   mode: string,
   context: any
 ): string {
-  const basePrompt = getSystemPrompt(language, mode as keyof typeof getSystemPrompt);
+  const basePrompt = getSystemPrompt(language, normalizeStyleId(mode));
+  const labels = getLocalizedPromptLabels(language);
+  const globalRules = getLocalizedGlobalRules(language);
 
   return [
     basePrompt,
     '',
-    'CONTEXTO ACTUAL:',
-    `- Fecha y hora: ${context.currentDateTime}`,
-    `- Usuario: ${context.userName}`,
-    `- Zona horaria: ${context.timezone}`,
-    `- Eventos próximos hoy: ${context.todayEvents}`,
+    labels.contextTitle,
+    `- ${labels.dateTimeLabel}: ${context.currentDateTime}`,
+    `- ${labels.userLabel}: ${context.userName}`,
+    `- ${labels.timezoneLabel}: ${context.timezone}`,
+    `- ${labels.eventsLabel}: ${context.todayEvents}`,
     '',
-    'CAPACIDADES DISPONIBLES:',
+    labels.capabilitiesTitle,
     ...context.capabilities.map((item: string) => `- ${item}`),
     ...(context.extraInstructions?.length > 0 ? ['', ...context.extraInstructions] : []),
     '',
-    GLOBAL_MIMA_RULES,
+    labels.globalRulesTitle,
+    ...globalRules.map((rule, index) => `${index + 1}. ${rule}`),
   ]
     .join('\n')
     .trim();
@@ -3436,6 +3541,15 @@ const languageInstructions: Record<string, string> = {
   en: 'Always respond in English.',
 };
 
+function toSupportedLanguage(language: unknown): SupportedLanguage {
+  if (typeof language !== 'string') return 'en';
+  const normalized = language.toLowerCase().slice(0, 2);
+  if (normalized === 'es' || normalized === 'fi' || normalized === 'sv' || normalized === 'en') {
+    return normalized;
+  }
+  return 'en';
+}
+
 // Model selection router - determines which Gemini model to use
 function selectModelForTask(
   message: string,
@@ -3593,8 +3707,9 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
   try {
     const currentTimeLocation = typeof message === 'string' ? extractTimeLocation(message) : null;
     if (currentTimeLocation) {
+      const resolvedRequestLanguage = toSupportedLanguage(language);
       return res.json({
-        text: getLocalizedCurrentTimeResponse(currentTimeLocation, language || 'en'),
+        text: getLocalizedCurrentTimeResponse(currentTimeLocation, resolvedRequestLanguage),
       });
     }
 
@@ -3644,7 +3759,7 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
     );
     const userPreferences = userId ? await getUserPreferences(userId) : null;
-    const resolvedLangCode = userPreferences?.language || language || 'en';
+    const resolvedLangCode = toSupportedLanguage(userPreferences?.language || language);
     const resolvedLangInstruction =
       languageInstructions[resolvedLangCode] || languageInstructions.en;
 
@@ -3662,7 +3777,14 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
       calendarMissingScopes: [...GOOGLE_WRITE_SCOPES.calendar],
       gmailMissingScopes: [...GOOGLE_WRITE_SCOPES.gmail],
     };
-    let todayEventsSummary = resolvedLangCode === 'es' ? 'No disponible' : 'Not available';
+    let todayEventsSummary =
+      resolvedLangCode === 'es'
+        ? 'No disponible'
+        : resolvedLangCode === 'fi'
+          ? 'Ei saatavilla'
+          : resolvedLangCode === 'sv'
+            ? 'Inte tillganglig'
+            : 'Not available';
 
     if (userId) {
       const tokenResult = await supabaseAdmin
@@ -3694,7 +3816,11 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
                   .join(' | ')
               : resolvedLangCode === 'es'
                 ? 'Sin eventos proximos hoy'
-                : 'No upcoming events today';
+                : resolvedLangCode === 'fi'
+                  ? 'Ei tulevia tapahtumia tanaan'
+                  : resolvedLangCode === 'sv'
+                    ? 'Inga kommande handelser idag'
+                    : 'No upcoming events today';
         } catch (tokenError: any) {
           console.error('Could not prepare user context from Google tokens:', tokenError.message);
           userTokens = null;
@@ -3890,160 +4016,126 @@ app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
     console.log('🧠 Model selected:', modelSelection.model);
     console.log('   Reason:', modelSelection.reason);
 
-    // System prompt with explicit language instruction
-    let modeInstruction =
-      'Eres Mima, un asistente personal inteligente, directo y objetivo. Ayudas con tareas de calendario, correos y organización personal.';
-    if (mode === 'Business Mode') {
-      modeInstruction =
-        'Eres Mima, un Experto en Lean Management. Identificas desperdicio de tiempo. Predices flujos de trabajo lógicos. Asesoras sobre eficiencia. Evitas charlas innecesarias.';
-    } else if (mode === 'Family Mode') {
-      modeInstruction =
-        'Eres Mima, un Organizador Familiar. Sugieres rutinas para las tardes. Recuerdas necesidades familiares. Generas sensación de logro. Reduces prisa y conflicto.';
-    } else if (mode === 'Zen Mode') {
-      modeInstruction =
-        'Eres Mima, un Coach de Bienestar. Priorizas el bienestar humano. Recuerdas pausas, hidratación y descanso. Fomentas el equilibrio.';
-    }
-
-    const langCode = language || 'en';
+    const langCode = resolvedLangCode;
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
+    const isSpanishPrompt = langCode === 'es';
 
-    // CALENDAR TOOLS INSTRUCTIONS for function calling
     let calendarToolsInstruction = userTokens
-      ? `
-
+      ? isSpanishPrompt
+        ? `
 CALENDAR TOOLS:
-Tienes acceso al calendario del usuario. Para crear eventos, responde EXACTAMENTE con este formato JSON:
-{"tool": "createCalendarEvent", "summary": "Título del evento", "dateText": "mañana a las 3pm", "description": "Descripción opcional"}
-
-Para ver eventos:
-{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
-
-Para buscar eventos por nombre:
-{"tool": "searchCalendarEvents", "query": "reunión", "maxResults": 10}
-
-Para eliminar eventos (primero busca si no tienes el ID):
-{"tool": "deleteCalendarEvent", "eventId": "id_del_evento"}
-
-Para actualizar eventos:
-{"tool": "updateCalendarEvent", "eventId": "id_del_evento", "summary": "Nuevo título", "dateText": "pasado mañana a las 5pm"}
-
-IMPORTANTE: Si el usuario dice "elimina mi reunión de mañana", PRIMERO busca con searchCalendarEvents, luego elimina.
-Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO con el JSON de la herramienta, sin texto adicional.
-Si NO es una petición de calendario, responde normalmente.`
+Si el usuario pide crear/listar/buscar/actualizar/eliminar eventos, responde SOLO con JSON de herramienta.
+Usa estos formatos:
+{"tool": "createCalendarEvent", "summary": "...", "dateText": "...", "description": "..."}
+{"tool": "listCalendarEvents", "dateText": "...", "maxResults": 10}
+{"tool": "searchCalendarEvents", "query": "...", "maxResults": 10}
+{"tool": "updateCalendarEvent", "eventId": "...", "summary": "...", "dateText": "..."}
+{"tool": "deleteCalendarEvent", "eventId": "..."}`
+        : `
+CALENDAR TOOLS:
+If the user asks to create/list/search/update/delete events, return ONLY tool JSON.
+Use these formats:
+{"tool": "createCalendarEvent", "summary": "...", "dateText": "...", "description": "..."}
+{"tool": "listCalendarEvents", "dateText": "...", "maxResults": 10}
+{"tool": "searchCalendarEvents", "query": "...", "maxResults": 10}
+{"tool": "updateCalendarEvent", "eventId": "...", "summary": "...", "dateText": "..."}
+{"tool": "deleteCalendarEvent", "eventId": "..."}`
       : '';
 
-    // GMAIL TOOLS INSTRUCTIONS for function calling
     let gmailToolsInstruction = userTokens
-      ? `
-
+      ? isSpanishPrompt
+        ? `
 GMAIL TOOLS (BORRADORES SEGUROS):
-Tienes acceso a Gmail del usuario. IMPORTANTE: NUNCA envíes emails automáticamente. Siempre crea borradores que el usuario debe revisar y aprobar antes de enviar.
-
-Para leer un email completo (cuando el usuario quiere ver el contenido):
-{"tool": "readGmailMessage", "messageId": "id_del_email"}
-
-Para crear un borrador de respuesta (SAFE - no se envía):
-{"tool": "createGmailDraft", "to": "email@ejemplo.com", "subject": "Re: Asunto original", "body": "<p>Cuerpo del email en HTML</p>", "inReplyTo": "message-id-original", "threadId": "thread-id-opcional"}
-
-Para ver lista de borradores existentes:
+Nunca envies correos sin confirmacion explicita.
+Usa estos formatos:
+{"tool": "readGmailMessage", "messageId": "..."}
+{"tool": "createGmailDraft", "to": "...", "subject": "...", "body": "<p>...</p>", "inReplyTo": "...", "threadId": "..."}
 {"tool": "listGmailDrafts"}
-
-Para eliminar un borrador:
-{"tool": "deleteGmailDraft", "draftId": "id_del_borrador"}
-
-Para ENVIAR un borrador (SOLO con confirmación explícita del usuario):
-{"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
-
-REGLAS IMPORTANTES DE GMAIL:
-1. NUNCA envíes emails sin confirmación explícita del usuario
-2. Siempre crea borradores primero
-3. Cuando el usuario diga "responde este email", crea un borrador y dile que lo revise
-4. El borrador se envía SOLO si el usuario dice explícitamente "envía el borrador" o "sí, envíalo"
-5. Usa HTML simple en el cuerpo (<p>, <br>, <b>, etc.)
-6. Para respuestas, usa "Re: " en el asunto y mantén el threadId original
-
-EJEMPLO DE FLUJO SEGURO:
-Usuario: "Responde este email diciendo que estaré allí"
-Tú: {"tool": "createGmailDraft", "to": "persona@ejemplo.com", "subject": "Re: Reunión", "body": "<p>Hola,<br>Estaré allí. Saludos.</p>", "inReplyTo": "message-id-original"}
-Tú (después): "He creado un borrador. ¿Quieres que lo envíe?"
-Usuario: "Sí, envíalo"
-Tú: {"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
-
-Si NO es una petición de Gmail, responde normalmente.`
+{"tool": "deleteGmailDraft", "draftId": "..."}
+{"tool": "sendGmailDraft", "draftId": "...", "confirmSend": true}`
+        : `
+GMAIL TOOLS (SAFE DRAFTS):
+Never send emails without explicit user confirmation.
+Use these formats:
+{"tool": "readGmailMessage", "messageId": "..."}
+{"tool": "createGmailDraft", "to": "...", "subject": "...", "body": "<p>...</p>", "inReplyTo": "...", "threadId": "..."}
+{"tool": "listGmailDrafts"}
+{"tool": "deleteGmailDraft", "draftId": "..."}
+{"tool": "sendGmailDraft", "draftId": "...", "confirmSend": true}`
       : '';
 
     if (userTokens && !googleAccessState.hasCalendarWrite) {
-      calendarToolsInstruction = `
-
+      calendarToolsInstruction = isSpanishPrompt
+        ? `
 CALENDAR STATUS:
-Google Calendar del usuario esta conectado solo en modo lectura. Puedes consultar o buscar eventos, pero NO puedes crear, editar ni eliminar nada hasta que el usuario reconecte Google desde Perfil.
-Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
-
-Para ver eventos:
-{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
-
-Para buscar eventos por nombre:
-{"tool": "searchCalendarEvents", "query": "reunion", "maxResults": 10}
-
-Si el usuario pide crear, editar o eliminar eventos, responde de forma breve explicando que Google Calendar sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+Google Calendar esta en modo lectura. Puedes consultar y buscar, pero no crear/editar/eliminar.
+Si el usuario pide escritura, indicale reconectar Google desde Perfil.`
+        : `
+CALENDAR STATUS:
+Google Calendar is read-only. You can list and search, but cannot create/update/delete.
+If the user asks for write actions, ask them to reconnect Google from Profile.`;
     }
 
     if (userTokens && !googleAccessState.hasGmailWrite) {
-      gmailToolsInstruction = `
-
+      gmailToolsInstruction = isSpanishPrompt
+        ? `
 GMAIL STATUS:
-Gmail del usuario esta conectado solo en modo lectura. Puedes leer correos, pero NO puedes crear, editar ni enviar borradores hasta que el usuario reconecte Google desde Perfil.
-Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
-
-Para leer un email completo:
-{"tool": "readGmailMessage", "messageId": "id_del_email"}
-
-Si el usuario pide crear, editar o enviar borradores, responde de forma breve explicando que Gmail sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+Gmail esta en modo lectura. Puedes leer correos, pero no crear/enviar borradores.
+Si el usuario pide escritura, indicale reconectar Google desde Perfil.`
+        : `
+GMAIL STATUS:
+Gmail is read-only. You can read emails, but cannot create/send drafts.
+If the user asks for write actions, ask them to reconnect Google from Profile.`;
     }
 
-    // CRITICAL: Explicit system prompt with language enforcement
-    const systemInstruction =
-      `${modeInstruction}\n\n${langInstruction}\n\n${calendarToolsInstruction}\n\n` +
-      `STRICT INSTRUCTIONS:\n` +
-      `1. You MUST ALWAYS respond in the user's selected language: ${langCode}.\n` +
-      `2. Do not use any other language unless explicitly asked by the user.\n` +
-      `3. If you use a tool (JSON format), that's the only thing you should return.\n` +
-      `4. Maintain the persona: ${mode || 'Neutral'}.`;
-
-    const enhancedSystemInstruction =
-      `${systemInstruction}\n` +
-      `5. You are multilingual and can communicate naturally in the user's requested language.\n` +
-      `6. If the user asks whether you can speak another language, the answer is yes.\n` +
-      `7. If the user asks for the current time in a city or country, return ONLY this JSON format: {"tool":"getCurrentTime","location":"City or Country"}.\n` +
-      `8. If the user asks to create, update, delete, search, or list calendar events, prefer the calendar tool JSON formats.\n` +
-      `9. Current server time (UTC) is ${new Date().toISOString()}.`;
-
-    console.log('📝 System prompt prepared (length:', systemInstruction.length, ')');
     console.log('📝 Language instruction:', langInstruction);
     console.log('📝 Model to use:', modelSelection.model);
     console.log('📝 Max tokens:', modelSelection.maxTokens);
 
     const capabilities = [
-      'Consultas de informacion general',
+      isSpanishPrompt ? 'Consultas de informacion general' : 'General information queries',
       ...(normalizedAttachments.length > 0
-        ? [`Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`]
+        ? [
+            isSpanishPrompt
+              ? `Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`
+              : `Deep analysis of ${normalizedAttachments.length} attached file(s)`,
+          ]
         : []),
       ...(userMemories.length > 0
-        ? ['Memoria persistente del usuario para preferencias y contexto frecuente']
+        ? [
+            isSpanishPrompt
+              ? 'Memoria persistente del usuario para preferencias y contexto frecuente'
+              : 'Persistent memory for user preferences and recurring context',
+          ]
         : []),
       ...(userTasks.length > 0
-        ? ['Gestion ligera de tareas abiertas y pendientes del usuario']
+        ? [
+            isSpanishPrompt
+              ? 'Gestion ligera de tareas abiertas y pendientes del usuario'
+              : 'Light task management for open and pending tasks',
+          ]
         : []),
       ...(userTokens
         ? [
             googleAccessState.hasCalendarWrite
-              ? 'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)'
-              : 'Google Calendar conectado solo en lectura (solo consultar y buscar eventos)',
+              ? isSpanishPrompt
+                ? 'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)'
+                : 'Google Calendar management (create, update, delete, list events)'
+              : isSpanishPrompt
+                ? 'Google Calendar conectado solo en lectura (solo consultar y buscar eventos)'
+                : 'Google Calendar connected in read-only mode (list/search only)',
             googleAccessState.hasGmailWrite
-              ? 'Redaccion y respuesta de correos via Gmail en modo borrador'
-              : 'Gmail conectado solo en lectura (solo leer correos)',
+              ? isSpanishPrompt
+                ? 'Redaccion y respuesta de correos via Gmail en modo borrador'
+                : 'Gmail drafting and reply flows with safe draft-first policy'
+              : isSpanishPrompt
+                ? 'Gmail conectado solo en lectura (solo leer correos)'
+                : 'Gmail connected in read-only mode (read emails only)',
           ]
-        : ['Google Calendar no conectado actualmente', 'Gmail no conectado actualmente']),
+        : [
+            isSpanishPrompt ? 'Google Calendar no conectado actualmente' : 'Google Calendar not connected',
+            isSpanishPrompt ? 'Gmail no conectado actualmente' : 'Gmail not connected',
+          ]),
     ];
 
     const finalSystemInstruction = buildLocalizedSystemPrompt(
@@ -4059,34 +4151,63 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
           minute: '2-digit',
         }),
         userName:
-          user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario',
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email ||
+          (isSpanishPrompt ? 'Usuario' : 'User'),
         timezone: clientTimeZone,
         todayEvents: todayEventsSummary,
         capabilities,
         extraInstructions: [
-          `IDIOMA: ${langInstruction}`,
+          `${isSpanishPrompt ? 'IDIOMA' : 'LANGUAGE'}: ${langInstruction}`,
           ...(userMemories.length > 0
-            ? ['MEMORIA DEL USUARIO:', formatUserMemoriesSummary(userMemories, resolvedLangCode)]
+            ? [
+                isSpanishPrompt ? 'MEMORIA DEL USUARIO:' : 'USER MEMORY:',
+                formatUserMemoriesSummary(userMemories, resolvedLangCode),
+              ]
             : []),
           ...(userTasks.length > 0
-            ? ['TAREAS ABIERTAS DEL USUARIO:', formatUserTasksSummary(userTasks, resolvedLangCode)]
+            ? [
+                isSpanishPrompt ? 'TAREAS ABIERTAS DEL USUARIO:' : 'OPEN USER TASKS:',
+                formatUserTasksSummary(userTasks, resolvedLangCode),
+              ]
             : []),
-          'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
-          'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
-          'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
-          'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
-          'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
-          'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.',
+          isSpanishPrompt
+            ? 'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.'
+            : 'If you use a tool, return ONLY the tool JSON and nothing else.',
+          isSpanishPrompt
+            ? 'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.'
+            : 'If the user asks for current time in a city or country, return ONLY {"tool":"getCurrentTime","location":"City or Country"}.',
+          isSpanishPrompt
+            ? 'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.'
+            : 'If the user asks whether you can speak another language, the answer is yes.',
+          isSpanishPrompt
+            ? 'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.'
+            : 'Never claim Google write access based only on user statements. Confirm it from server state in this turn.',
+          isSpanishPrompt
+            ? 'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.'
+            : 'If the user shares a stable personal fact or preference, remember it for future turns.',
+          isSpanishPrompt
+            ? 'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.'
+            : 'If the user mentions tasks, consider stored open tasks for continuity and context.',
           ...(normalizedAttachments.length > 0
             ? [
-                `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
-                'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.',
-                'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.',
+                isSpanishPrompt
+                  ? `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`
+                  : `The user attached ${normalizedAttachments.length} file(s). Analyze them before responding.`,
+                isSpanishPrompt
+                  ? 'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.'
+                  : 'With attachments, provide a complete response: summary, key findings, relevant details, risks/questions, and next steps.',
+                isSpanishPrompt
+                  ? 'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.'
+                  : 'Do not provide a superficial response and do not ignore attachments, even when the user message is short.',
               ]
             : []),
           ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
           ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
-          `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
+          isSpanishPrompt
+            ? `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`
+            : `Active style is ${activeStyleId}. Stay faithful to this style without announcing it.`,
         ],
       }
     );
