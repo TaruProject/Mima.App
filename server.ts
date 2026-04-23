@@ -1,4 +1,4 @@
-﻿import dotenv from 'dotenv';
+import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
@@ -36,11 +36,7 @@ import {
   saveUserTask,
   initUserTaskService,
 } from './server/services/userTaskService.js';
-import {
-  getMimaStyle,
-  normalizeStyleId,
-  type MimaStyleId,
-} from './src/config/mimaStyles.js';
+import { getMimaStyle, normalizeStyleId, type MimaStyleId } from './src/config/mimaStyles.js';
 import { getSystemPrompt, type SupportedLanguage } from './server/prompts/systemPrompts.js';
 
 function getLocalizedPromptLabels(language: SupportedLanguage) {
@@ -1203,20 +1199,76 @@ async function buildDailyBriefingText({
 }
 
 // API routes FIRST
-app.get('/api/health', (req, res) => {
-  console.log('Health check requested');
-  res.json({
-    status: 'ok',
-    env: {
-      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
-      hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-      hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
-      hasGeminiKey: !!process.env.GEMINI_API_KEY,
-      appUrl: process.env.APP_URL,
-      nodeEnv: process.env.NODE_ENV,
-      envValidationComplete,
-      envValidation: envValidationComplete ? envValidationResult : 'pending',
+app.get('/api/health', async (req, res) => {
+  const memUsage = process.memoryUsage();
+  const memUsedMb = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const memTotalMb = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+
+  const checks: { name: string; ok: boolean; detail?: string }[] = [
+    {
+      name: 'env_vars',
+      ok: envValidationComplete && envValidationResult.valid,
+      detail: envValidationComplete
+        ? envValidationResult.valid
+          ? 'all present'
+          : `missing: ${envValidationResult.missing.join(',')}`
+        : 'pending',
     },
+    {
+      name: 'gemini',
+      ok: geminiInitialized || !!process.env.GEMINI_API_KEY,
+      detail: geminiInitialized ? 'initialized' : geminiInitError || 'pending',
+    },
+    {
+      name: 'memory',
+      ok: memPercent < 90,
+      detail: `${memUsedMb}MB/${memTotalMb}MB (${memPercent}%)`,
+    },
+  ];
+
+  let supabaseOk = false;
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    supabaseOk = !sbErr;
+    checks.push({ name: 'supabase', ok: supabaseOk, detail: sbErr ? sbErr.message : 'connected' });
+  } catch {
+    checks.push({ name: 'supabase', ok: false, detail: 'connection failed' });
+  }
+
+  if (IS_PROD) {
+    let hasStatic = false;
+    const possiblePaths = [
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, 'public_html'),
+      path.join(__dirname, '../public_html'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'public_html'),
+    ];
+    for (const p of possiblePaths) {
+      if (fs.existsSync(path.join(p, 'index.html'))) {
+        hasStatic = true;
+        break;
+      }
+    }
+    checks.push({
+      name: 'static_assets',
+      ok: hasStatic,
+      detail: hasStatic ? 'found' : 'index.html missing',
+    });
+  }
+
+  const allOk = checks.every((c) => c.ok);
+  const status = allOk ? 'ok' : 'degraded';
+
+  res.status(allOk ? 200 : 503).json({
+    status,
+    uptime: Math.round(process.uptime()),
+    version: BUILD_VERSION,
+    deployId: SERVER_DEPLOY_ID,
+    checks,
   });
 });
 
@@ -1232,20 +1284,33 @@ app.get('/api/version', (req, res) => {
 });
 
 // Detailed health check - works in production
-app.get('/api/health-detailed', (req, res) => {
-  const healthData = {
+app.get('/api/health-detailed', async (req, res) => {
+  const memUsage = process.memoryUsage();
+  const memUsedMb = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const memTotalMb = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+
+  const healthData: Record<string, any> = {
     status: 'ok',
     timestamp: new Date().toISOString(),
     server: {
       uptime: process.uptime(),
+      uptimeFormatted: `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
       nodeVersion: process.version,
       platform: process.platform,
+      pid: process.pid,
+      memory: {
+        heapUsedMb: memUsedMb,
+        heapTotalMb: memTotalMb,
+        heapUsagePercent: memPercent,
+        rssMb: Math.round(memUsage.rss / 1024 / 1024),
+        externalMb: Math.round(memUsage.external / 1024 / 1024),
+      },
     },
     gemini: {
       initialized: geminiInitialized,
       initError: geminiInitError,
       apiKeyPresent: !!process.env.GEMINI_API_KEY,
-      apiKeyLength: process.env.GEMINI_API_KEY?.length || 0,
     },
     environment: {
       nodeEnv: process.env.NODE_ENV,
@@ -1254,8 +1319,10 @@ app.get('/api/health-detailed', (req, res) => {
       hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
       hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY,
       hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasDbUrl: !!process.env.SUPABASE_DB_URL,
       isHostinger: IS_HOSTINGER,
       isProd: IS_PROD,
+      securityV2: SECURITY_V2,
     },
     envValidation: {
       complete: envValidationComplete,
@@ -1265,17 +1332,62 @@ app.get('/api/health-detailed', (req, res) => {
     },
   };
 
-  // If Gemini failed, mark as degraded
+  let supabaseOk = false;
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const start = Date.now();
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    const latencyMs = Date.now() - start;
+    healthData.supabase = { connected: !sbErr, latencyMs, error: sbErr?.message || null };
+    supabaseOk = !sbErr;
+  } catch (err: any) {
+    healthData.supabase = { connected: false, latencyMs: -1, error: err.message };
+  }
+
+  if (IS_PROD) {
+    const possiblePaths = [
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, 'public_html'),
+      path.join(__dirname, '../public_html'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'public_html'),
+    ];
+    let foundPath: string | null = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(path.join(p, 'index.html'))) {
+        foundPath = p;
+        break;
+      }
+    }
+    healthData.staticAssets = {
+      found: !!foundPath,
+      path: foundPath,
+      indexHtmlExists: !!foundPath,
+    };
+  }
+
   if (!geminiInitialized && geminiInitError) {
     healthData.status = 'degraded';
   }
 
-  // If env validation failed, mark as error
   if (envValidationComplete && !envValidationResult.valid) {
     healthData.status = 'error';
   }
 
-  res.json(healthData);
+  if (!supabaseOk) {
+    healthData.status = 'error';
+  }
+
+  if (memPercent >= 90) {
+    healthData.status = 'error';
+  } else if (memPercent >= 80) {
+    healthData.status = 'degraded';
+  }
+
+  const httpStatus =
+    healthData.status === 'ok' ? 200 : healthData.status === 'degraded' ? 200 : 503;
+  res.status(httpStatus).json(healthData);
 });
 
 // Environment variables status endpoint
@@ -1290,6 +1402,49 @@ app.get('/api/health/env', (req, res) => {
       present: !!process.env[v],
       critical: ['GEMINI_API_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'].includes(v),
     })),
+  });
+});
+
+let isShuttingDown = false;
+
+app.get('/api/health/liveness', (req, res) => {
+  if (isShuttingDown) {
+    res.status(503).json({ status: 'shutting_down' });
+    return;
+  }
+  res.status(200).json({ status: 'alive', uptime: Math.round(process.uptime()) });
+});
+
+app.get('/api/health/readiness', async (req, res) => {
+  if (isShuttingDown) {
+    res.status(503).json({ status: 'shutting_down' });
+    return;
+  }
+
+  const checks: { name: string; ok: boolean }[] = [];
+
+  if (!envValidationComplete || !envValidationResult.valid) {
+    checks.push({ name: 'env_vars', ok: false });
+  } else {
+    checks.push({ name: 'env_vars', ok: true });
+  }
+
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    checks.push({ name: 'supabase', ok: !sbErr });
+  } catch {
+    checks.push({ name: 'supabase', ok: false });
+  }
+
+  const memUsage = process.memoryUsage();
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+  checks.push({ name: 'memory', ok: memPercent < 90 });
+
+  const allOk = checks.every((c) => c.ok);
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ready' : 'not_ready',
+    checks,
   });
 });
 
@@ -4133,7 +4288,9 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
                 : 'Gmail connected in read-only mode (read emails only)',
           ]
         : [
-            isSpanishPrompt ? 'Google Calendar no conectado actualmente' : 'Google Calendar not connected',
+            isSpanishPrompt
+              ? 'Google Calendar no conectado actualmente'
+              : 'Google Calendar not connected',
             isSpanishPrompt ? 'Gmail no conectado actualmente' : 'Gmail not connected',
           ]),
     ];
@@ -6333,13 +6490,16 @@ async function startServer() {
           if (filePath.includes(path.join(staticPath, 'assets'))) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }
-          // index.html and sw.js should never be cached
+          // index.html, sw.js, version.json, and manifest must never be cached
           else if (
             filePath.endsWith('.html') ||
             filePath.endsWith('sw.js') ||
-            filePath.endsWith('version.json')
+            filePath.endsWith('version.json') ||
+            filePath.endsWith('manifest.webmanifest')
           ) {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
           }
         },
       })
@@ -6367,38 +6527,86 @@ async function startServer() {
       console.error(`❌ SERVER LISTEN ERROR:`, e);
       logToFile('LISTEN ERROR', { code: e.code, message: e.message });
     });
+
+    const shutdown = async (signal: string) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      console.log(`🛑 ${signal} received — starting graceful shutdown`);
+      logToFile(`GRACEFUL SHUTDOWN`, { signal });
+
+      const forceExitTimeout = setTimeout(() => {
+        console.error('⚠️ Forced shutdown after 15s — connections still active');
+        process.exit(1);
+      }, 15000);
+
+      server.close(() => {
+        console.log('✅ All connections closed');
+        clearTimeout(forceExitTimeout);
+
+        if (pgPool) {
+          pgPool
+            .end()
+            .then(() => {
+              console.log('✅ pg pool closed');
+              process.exit(0);
+            })
+            .catch(() => process.exit(1));
+        } else {
+          process.exit(0);
+        }
+      });
+    };
+
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+
+    return server;
   } catch (listenError: any) {
     console.error(`❌ CRITICAL: Failed to start listening:`, listenError);
+    return null;
   }
 }
 
+// Express error-handling middleware — catches unhandled errors in route handlers
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const errorMsg = `🔥 UNHANDLED ROUTE ERROR: ${err.message}`;
+  console.error(errorMsg, err.stack);
+  logToFile('ROUTE ERROR', {
+    method: req.method,
+    url: req.url,
+    message: err.message,
+    stack: err.stack,
+  });
+
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  res.status(err.status || 500).json({
+    error: 'Internal server error',
+    errorCode: 'UNHANDLED_ERROR',
+  });
+});
+
 // Global error handlers to prevent silent 503s
+let crashing = false;
 process.on('uncaughtException', (err) => {
   const errorMsg = `🔥 UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`;
   console.error(errorMsg);
   logToFile('UNCAUGHT EXCEPTION', { message: err.message, stack: err.stack });
+
+  if (!crashing) {
+    crashing = true;
+    console.error('💥 Process is in undefined state — exiting in 1s to allow log flush');
+    setTimeout(() => process.exit(1), 1000);
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   const errorMsg = `🔥 UNHANDLED REJECTION: ${reason}`;
   console.error(errorMsg);
   logToFile('UNHANDLED REJECTION', { reason: String(reason) });
-});
-
-process.on('SIGTERM', async () => {
-  if (pgPool) {
-    console.log('[SECURITY] Closing pg pool on SIGTERM...');
-    await pgPool.end();
-  }
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  if (pgPool) {
-    console.log('[SECURITY] Closing pg pool on SIGINT...');
-    await pgPool.end();
-  }
-  process.exit(0);
 });
 
 console.log('🚀 Finalizing server initialization...');

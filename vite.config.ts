@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       VitePWA({
         registerType: 'prompt',
-        includeAssets: ['assets/logo.jpg'],
+        includeAssets: ['assets/logo.jpg', 'version.json'],
         workbox: {
           cleanupOutdatedCaches: true,
           skipWaiting: true,
@@ -25,9 +25,28 @@ export default defineConfig(({ mode }) => {
               handler: 'NetworkFirst',
               options: {
                 cacheName: 'navigation-cache',
-                networkTimeoutSeconds: 10,
+                networkTimeoutSeconds: 5,
                 expiration: {
                   maxEntries: 1,
+                  maxAgeSeconds: 0,
+                },
+                cacheableResponse: {
+                  statuses: [200],
+                },
+              },
+            },
+            {
+              urlPattern: /\/version\.json$/,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'version-cache',
+                networkTimeoutSeconds: 3,
+                expiration: {
+                  maxEntries: 1,
+                  maxAgeSeconds: 0,
+                },
+                cacheableResponse: {
+                  statuses: [200],
                 },
               },
             },
