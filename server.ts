@@ -194,20 +194,30 @@ function logToFile(message: string, data?: any) {
   console.log(logEntry);
 }
 
-const SECURITY_V2 = process.env.MIMA_SECURITY_V2 !== 'false';
+const SECURITY_V2 = process.env.MIMA_SECURITY_V2 === 'true';
 
 if (SECURITY_V2) {
-  console.log('[SECURITY] Hardened mode enabled');
+  console.log('[SECURITY] Hardened mode enabled (MIMA_SECURITY_V2=true)');
 } else {
-  console.warn('[SECURITY] Legacy mode — NOT hardened. Do not use in production.');
+  console.warn('[SECURITY] Standard mode. Set MIMA_SECURITY_V2=true for hardened mode.');
 }
 
 const SESSION_SECRET = process.env.SESSION_SECRET;
-if (SECURITY_V2 && (!SESSION_SECRET || SESSION_SECRET.length < 32)) {
-  console.error('[FATAL] SESSION_SECRET missing or <32 chars. Server cannot start.');
-  process.exit(1);
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+  if (SECURITY_V2) {
+    console.error(
+      '[FATAL] SESSION_SECRET missing or <32 chars in hardened mode. Server cannot start.'
+    );
+    process.exit(1);
+  }
+  console.warn(
+    '[SECURITY] SESSION_SECRET missing or <32 chars — using generated secret. Set SESSION_SECRET for production.'
+  );
 }
-const EFFECTIVE_SESSION_SECRET = SESSION_SECRET || 'mima-session-fallback-secret';
+const EFFECTIVE_SESSION_SECRET =
+  SESSION_SECRET && SESSION_SECRET.length >= 32
+    ? SESSION_SECRET
+    : crypto.randomBytes(32).toString('hex');
 
 const requiredEnvVars = [
   'GEMINI_API_KEY',
@@ -398,8 +408,12 @@ if (SECURITY_V2 && process.env.SUPABASE_DB_URL) {
     console.error('[SECURITY] Unexpected pg pool error:', err.message);
   });
 } else if (SECURITY_V2 && !process.env.SUPABASE_DB_URL) {
-  console.error('[FATAL] SUPABASE_DB_URL is required when MIMA_SECURITY_V2 is enabled.');
+  console.error(
+    '[FATAL] SUPABASE_DB_URL is required when MIMA_SECURITY_V2=true. Server cannot start.'
+  );
   process.exit(1);
+} else if (!SECURITY_V2) {
+  console.log('[SESSION] Using MemoryStore (standard mode)');
 }
 
 if (SECURITY_V2 && pgPool) {
