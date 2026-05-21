@@ -180,6 +180,14 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    }
+  }, [input]);
   const persistedMessageIdsRef = useRef<Set<string>>(new Set());
   const isPersistingRef = useRef(false);
   const preloadInFlightRef = useRef<Set<string>>(new Set());
@@ -578,10 +586,23 @@ export default function Chat() {
   );
 
   const handleSend = async () => {
+    if (isRecording) {
+      const text = await stopRecording();
+      if (text) setInput(text);
+      return;
+    }
+
     await sendMessage({
       text: input,
       attachments: selectedAttachments,
     });
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void handleSend();
+    }
   };
 
   const handleDailyBriefing = async () => {
@@ -1078,7 +1099,7 @@ export default function Chat() {
                 )}
 
                 <div
-                  className={`p-4 rounded-2xl shadow-sm leading-relaxed text-[15px] ${
+                  className={`p-4 rounded-2xl shadow-sm leading-relaxed text-[15px] break-words whitespace-pre-wrap ${
                     isUser
                       ? 'bg-primary text-white rounded-tr-sm shadow-primary/20'
                       : 'bg-surface-highlight text-slate-100 rounded-tl-sm'
@@ -1203,37 +1224,42 @@ export default function Chat() {
                 ))}
               </div>
             )}
-            <input
-              className="w-full bg-transparent border-none focus:ring-0 text-white placeholder:text-text-secondary h-12 px-4 py-3 rounded-[24px] outline-none"
-              placeholder={t('chat.input_placeholder')}
-              type="text"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && handleSend()}
-              disabled={isLoading}
-            />
-            <button
-              onClick={handleMicClick}
-              disabled={isLoading || isTranscribing}
-              className={`mr-2 w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
-                isRecording
-                  ? 'text-red-500 bg-red-500/10 animate-pulse'
-                  : isTranscribing
-                    ? 'text-primary animate-spin'
-                    : 'text-text-secondary hover:text-primary'
-              }`}
-            >
-              {isTranscribing ? (
-                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Mic className="w-5 h-5" />
-              )}
-            </button>
+            <div className="flex items-end w-full">
+              <textarea
+                ref={textareaRef}
+                className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder:text-text-secondary py-3 px-4 resize-none max-h-[160px] min-h-[44px] leading-relaxed outline-none"
+                placeholder={t('chat.input_placeholder')}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading}
+                rows={1}
+              />
+              <div className="flex items-center justify-center h-11 pr-2">
+                <button
+                  onClick={handleMicClick}
+                  disabled={isLoading || isTranscribing}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
+                    isRecording
+                      ? 'text-red-500 bg-red-500/10 animate-pulse'
+                      : isTranscribing
+                        ? 'text-primary animate-spin'
+                        : 'text-text-secondary hover:text-primary'
+                  }`}
+                >
+                  {isTranscribing ? (
+                    <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Mic className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
 
           <button
             onClick={handleSend}
-            disabled={isLoading || (!input.trim() && selectedAttachments.length === 0)}
+            disabled={isLoading || isTranscribing || (!isRecording && !input.trim() && selectedAttachments.length === 0)}
             className="flex-shrink-0 w-12 h-12 mb-0 flex items-center justify-center rounded-full bg-primary hover:bg-primary-dark text-white shadow-lg shadow-primary/30 transition-all active:scale-95 group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowUp className="w-6 h-6 group-hover:hidden" />

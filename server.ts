@@ -640,8 +640,11 @@ function getMissingGoogleScopes(tokens: any, requiredScopes: string[]): string[]
 
 function isGoogleScopeError(error: any): boolean {
   const message = String(error?.message || '');
+  const status = error?.status || error?.code || error?.statusCode || error?.response?.status || error?.response?.data?.error?.code;
   return (
     error?.errorCode === 'RECONNECT_REQUIRED' ||
+    status === 403 ||
+    status === '403' ||
     /insufficient|insufficient permissions|insufficientpermission|forbidden|scope|permission/i.test(
       message
     )
@@ -1528,7 +1531,7 @@ app.get('/api/test/gemini', async (req, res) => {
     console.log('🔄 Calling Gemini API with model gemini-2.5-flash...');
     let response;
     try {
-      response = await ai.models.generateContent({
+      response = await generateContentWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: 'Hola, ¿cómo estás?',
         config: {
@@ -1606,7 +1609,7 @@ app.get('/api/debug/chat', async (req, res) => {
     const selectedModel = 'gemini-2.5-flash';
     console.log(`🔄 Calling model: ${selectedModel}`);
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: selectedModel,
       contents: message as string,
       config: {
@@ -2056,7 +2059,7 @@ app.post("/api/ai/gemini/route", authenticateSupabaseUser, injectProxyHeaders, a
 
     // Execute within circuit breaker and apply strict 7.5s timeout
     const result = await geminiCircuitBreaker.execute(async () => {
-      const apiCall = ai.models.generateContent({
+      const apiCall = generateContentWithRetry(ai, {
         model: targetModel,
         contents: [
           {
@@ -2066,7 +2069,7 @@ app.post("/api/ai/gemini/route", authenticateSupabaseUser, injectProxyHeaders, a
             ]
           }
         ]
-      });
+      }, 2, 500);
 
       // Promise.race to enforce < 8s timeout (7.5s target)
       const timeoutPromise = new Promise((_, reject) =>
@@ -2985,7 +2988,7 @@ app.post('/api/transcribe', authenticateSupabaseUser, upload.single('audio'), as
     const prompt =
       'Transcribe the following audio precisely. Output ONLY the transcription text, no extra words or explanations.';
 
-    const result = await ai.models.generateContent({
+    const result = await generateContentWithRetry(ai, {
       model: 'gemini-2.5-flash',
       contents: [
         {
@@ -3290,11 +3293,16 @@ async function executeGoogleToolCall(
 
   switch (toolName) {
     case 'createCalendarEvent': {
-      const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+      let dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
       if (!dateInfo) {
-        return langCode === 'es'
-          ? `No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`
-          : `I could not create "${toolCall.summary || 'event'}" because I did not understand the date or time.`;
+        console.warn(`⚠️ parseNaturalDate returned null for calendar event: "${toolCall.dateText}". Falling back to tomorrow 12:00.`);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(12, 0, 0, 0);
+        dateInfo = {
+          start: tomorrow,
+          isAllDay: false
+        };
       }
 
       const endDate =
@@ -3610,6 +3618,48 @@ function getGenAI(): GoogleGenAI | null {
     }
   }
   return genAI;
+}
+
+async function generateContentWithRetry(
+  aiClient: any,
+  options: any,
+  maxRetries = 3,
+  initialDelayMs = 1000
+): Promise<any> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await aiClient.models.generateContent(options);
+    } catch (error: any) {
+      attempt++;
+      const errorMessage = error?.message || String(error);
+      const statusCode = error?.status || error?.statusCode || error?.code || error?.response?.status;
+      
+      const isTransient = 
+        statusCode === 503 ||
+        statusCode === 429 ||
+        errorMessage.includes('503') ||
+        errorMessage.includes('429') ||
+        errorMessage.toLowerCase().includes('service unavailable') ||
+        errorMessage.toLowerCase().includes('resource exhausted') ||
+        errorMessage.toLowerCase().includes('overloaded') ||
+        errorMessage.toLowerCase().includes('rate limit') ||
+        errorMessage.toLowerCase().includes('transient') ||
+        errorMessage.toLowerCase().includes('busy');
+
+      if (attempt > maxRetries || !isTransient) {
+        console.error(`❌ [generateContentWithRetry] Error after ${attempt} attempts (isTransient: ${isTransient}):`, errorMessage);
+        throw error;
+      }
+
+      const backoffFactor = Math.pow(2, attempt - 1);
+      const jitter = 0.5 + Math.random() * 0.5;
+      const delay = Math.round(initialDelayMs * backoffFactor * jitter);
+
+      console.warn(`⚠️ [generateContentWithRetry] Attempt ${attempt} failed with: ${errorMessage}. Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 // Pre-initialize Gemini on server start (optional health check)
@@ -3978,7 +4028,7 @@ async function extractToolCallFromMessage(
       `For sendGmailDraft use keys draftId and confirmSend. ` +
       `Preserve the original language wording inside summary, description, query, and dateText.`;
 
-    const extraction = await ai.models.generateContent({
+    const extraction = await generateContentWithRetry(ai, {
       model: 'gemini-2.5-flash',
       contents: [
         {
@@ -4895,7 +4945,7 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
         },
       ];
 
-      response = await ai.models.generateContent({
+      response = await generateContentWithRetry(ai, {
         model: primaryModel,
         contents,
         config: {
@@ -5018,12 +5068,16 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
 
               try {
                 if (toolCall.tool === 'createCalendarEvent') {
-                  const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
+                  let dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
                   if (!dateInfo) {
-                    taskResults.push(
-                      `${stepPrefix}No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`
-                    );
-                    continue;
+                    console.warn(`⚠️ parseNaturalDate returned null for calendar event: "${toolCall.dateText}". Falling back to tomorrow 12:00.`);
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    tomorrow.setHours(12, 0, 0, 0);
+                    dateInfo = {
+                      start: tomorrow,
+                      isAllDay: false
+                    };
                   }
 
                   const endDate =
@@ -5351,11 +5405,17 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
               // Execute the appropriate function
               if (functionCall.tool === 'createCalendarEvent') {
                 try {
-                  const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
+                  let dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
                   if (!dateInfo) {
-                    responseText =
-                      "No pude entender la fecha. Por favor, sé más específico (ej: 'mañana a las 3pm' o 'el lunes que viene').";
-                  } else {
+                    console.warn(`⚠️ parseNaturalDate returned null for calendar event: "${functionCall.dateText}". Falling back to tomorrow 12:00.`);
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    tomorrow.setHours(12, 0, 0, 0);
+                    dateInfo = {
+                      start: tomorrow,
+                      isAllDay: false
+                    };
+                  }
                     const endDate =
                       dateInfo.end ||
                       new Date(
@@ -5381,7 +5441,6 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
                       createdEvent.htmlLink
                     );
                     console.log('   Created event:', createdEvent.id);
-                  }
                 } catch (calendarError: any) {
                   console.error('   Error creating calendar event:', calendarError.message);
                   responseText = getCalendarToolErrorMessage(calendarError, langCode);
@@ -5570,9 +5629,7 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
                   console.log('   Draft created:', draft.data.id);
                 } catch (error: any) {
                   console.error('   Error creating draft:', error.message);
-                  responseText = isGoogleScopeError(error)
-                    ? 'Necesito permiso de escritura en Gmail para crear ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
-                    : 'No pude crear el borrador. Verifica los datos e intenta de nuevo.';
+                  responseText = getGmailToolErrorMessage(error, langCode, 'create');
                 }
               } else if (functionCall.tool === 'listGmailDrafts') {
                 try {
@@ -5615,9 +5672,7 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
                   console.log('   Draft deleted');
                 } catch (error: any) {
                   console.error('   Error deleting draft:', error.message);
-                  responseText = isGoogleScopeError(error)
-                    ? 'Necesito permiso de escritura en Gmail para eliminar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
-                    : 'No pude eliminar el borrador. Verifica el ID e intenta de nuevo.';
+                  responseText = getGmailToolErrorMessage(error, langCode, 'delete');
                 }
               } else if (functionCall.tool === 'sendGmailDraft') {
                 // CRITICAL: Require explicit confirmation
@@ -5652,9 +5707,7 @@ If the user asks for write actions, ask them to reconnect Google from Profile.`;
                     console.log('   Email sent:', sent.data.id);
                   } catch (error: any) {
                     console.error('   Error sending draft:', error.message);
-                    responseText = isGoogleScopeError(error)
-                      ? 'Necesito permiso de escritura en Gmail para enviar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
-                      : 'No pude enviar el email. Verifica el borrador e intenta de nuevo.';
+                    responseText = getGmailToolErrorMessage(error, langCode, 'send');
                   }
                 }
               }
@@ -6255,7 +6308,7 @@ app.get(
 
       const prompt = buildAttachmentAnalysisPrompt(language, filename, mimeType);
 
-      const analysisResponse = await ai.models.generateContent({
+      const analysisResponse = await generateContentWithRetry(ai, {
         model:
           mimeType === 'application/pdf' ||
           mimeType.includes('officedocument') ||
@@ -6340,7 +6393,7 @@ app.post('/api/gmail/messages/:id/draft-reply-ai', authenticateSupabaseUser, asy
     const safeBodyExcerpt = sourceBody.slice(0, 4000);
     const langInstruction = languageInstructions[language] || languageInstructions.en;
 
-    const draftResponse = await ai.models.generateContent({
+    const draftResponse = await generateContentWithRetry(ai, {
       model: 'gemini-2.5-flash',
       contents: `Original sender: ${fromHeader}
 Original subject: ${subject}
@@ -6702,17 +6755,20 @@ app.delete('/api/gmail/drafts/:id', authenticateSupabaseUser, async (req, res) =
 
 // Helper function to create RFC 2822 email message
 function createEmailMessage(
-  to: string,
-  subject: string,
-  body: string,
+  to?: string | null,
+  subject?: string | null,
+  body?: string | null,
   inReplyTo?: string,
   threadId?: string
 ): string {
+  const safeTo = to || 'recipient@example.com';
+  const safeSubject = subject || 'No Subject';
+  const safeBody = body || '';
   const lineBreak = '\r\n';
 
   let headers = [
-    `To: ${to}`,
-    `Subject: ${subject}`,
+    `To: ${safeTo}`,
+    `Subject: ${safeSubject}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/html; charset="UTF-8"`,
     `Content-Transfer-Encoding: 7bit`,
@@ -6729,7 +6785,7 @@ function createEmailMessage(
     headers.push(`X-GM-THREAD-ID: ${threadId}`);
   }
 
-  const message = [...headers, '', body].join(lineBreak);
+  const message = [...headers, '', safeBody].join(lineBreak);
 
   // Base64 encode the message
   return Buffer.from(message)

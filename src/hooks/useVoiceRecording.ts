@@ -55,6 +55,10 @@ export const useVoiceRecording = () => {
 
       mediaRecorderRef.current.onstop = async () => {
         setIsRecording(false);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         
         try {
