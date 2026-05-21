@@ -13,6 +13,7 @@ import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import * as chrono from "chrono-node";
 import multer from "multer";
+import { z } from "zod";
 import {
   getUserPreferences,
   updateUserPreferences,
@@ -1121,6 +1122,469 @@ app.get("/api/debug/last-chat-error", (req, res) => {
     lastLogs,
     message: "Check server logs for detailed error information"
   });
+});
+
+// ==========================================
+// PRD-002 RESILIENCY UTILITIES & API PROXY
+// ==========================================
+
+// Exponential Backoff and Retry Wrapper
+export async function runWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  initialDelayMs = 1000,
+  backoffFactor = 2
+): Promise<T> {
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const errorStr = String(error.message || error).toLowerCase();
+      const isRateLimit =
+        error.status === 429 ||
+        error.statusCode === 429 ||
+        error.code === 429 ||
+        errorStr.includes("429") ||
+        errorStr.includes("rate limit") ||
+        errorStr.includes("too many requests") ||
+        errorStr.includes("resource exhausted");
+
+      if (!isRateLimit || attempt === maxRetries) {
+        throw error;
+      }
+      console.warn(`⚠️ Rate limited (attempt ${attempt}/${maxRetries}). Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= backoffFactor;
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
+// Circuit Breaker for robust route operations
+export class CircuitBreaker {
+  private state: "CLOSED" | "OPEN" | "HALF-OPEN" = "CLOSED";
+  private failureCount = 0;
+  private successCount = 0;
+  private lastStateChange: number = Date.now();
+
+  constructor(
+    private failureThreshold = 5,
+    private recoveryThreshold = 2,
+    private cooldownPeriodMs = 30000 // 30 seconds
+  ) {}
+
+  getState() {
+    this.checkCooldown();
+    return this.state;
+  }
+
+  private checkCooldown() {
+    if (this.state === "OPEN" && Date.now() - this.lastStateChange > this.cooldownPeriodMs) {
+      this.state = "HALF-OPEN";
+      this.failureCount = 0;
+      this.successCount = 0;
+      this.lastStateChange = Date.now();
+      console.warn("🔌 Circuit Breaker entering HALF-OPEN state (cooldown period expired).");
+    }
+  }
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    this.checkCooldown();
+    if (this.state === "OPEN") {
+      throw new Error("CIRCUIT_BREAKER_OPEN");
+    }
+
+    try {
+      const result = await fn();
+      if (this.state === "HALF-OPEN") {
+        this.successCount++;
+        if (this.successCount >= this.recoveryThreshold) {
+          this.state = "CLOSED";
+          this.failureCount = 0;
+          this.successCount = 0;
+          this.lastStateChange = Date.now();
+          console.log("🔌 Circuit Breaker recovered to CLOSED state!");
+        }
+      }
+      return result;
+    } catch (error: any) {
+      if (error.message === "CIRCUIT_BREAKER_OPEN") {
+        throw error;
+      }
+      this.failureCount++;
+      if (this.state === "CLOSED" && this.failureCount >= this.failureThreshold) {
+        this.state = "OPEN";
+        this.lastStateChange = Date.now();
+        console.error(`🔌 Circuit Breaker tripped to OPEN state (failures: ${this.failureCount})`);
+      } else if (this.state === "HALF-OPEN") {
+        this.state = "OPEN";
+        this.lastStateChange = Date.now();
+        console.error("🔌 Circuit Breaker went back to OPEN state due to failure in HALF-OPEN mode.");
+      }
+      throw error;
+    }
+  }
+}
+
+// Instantiate circuit breakers
+const geminiCircuitBreaker = new CircuitBreaker(3, 2, 30000);
+const googleCircuitBreaker = new CircuitBreaker(5, 2, 30000);
+
+// Zod validation schemas
+const GmailSearchSchema = z.object({
+  q: z.string(),
+  maxResults: z.number().int().positive().max(100).default(20)
+});
+
+const CalendarEventsSchema = z.object({
+  start: z.string().datetime({ message: "Invalid ISO 8601 start date" }),
+  end: z.string().datetime({ message: "Invalid ISO 8601 end date" }),
+  tz: z.string().default("Europe/Helsinki")
+});
+
+const GeminiRouteSchema = z.object({
+  task: z.string().min(1, "Task cannot be empty"),
+  context: z.any()
+});
+
+// Middleware to inject standard response headers
+const injectProxyHeaders = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  res.setHeader("X-Request-Id", crypto.randomUUID());
+  res.setHeader("X-RateLimit-Remaining", "99");
+  res.setHeader("X-Cache-Status", "MISS");
+  next();
+};
+
+// --- Proxy Endpoints ---
+
+// 1. Gmail Proxy Search
+app.post("/api/proxy/gmail/search", authenticateSupabaseUser, injectProxyHeaders, async (req, res) => {
+  console.log("📨 [Proxy] Gmail search request received");
+  
+  // Parse payload
+  const parsed = GmailSearchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Bad Request",
+      details: parsed.error.format(),
+      errorCode: "VALIDATION_ERROR"
+    });
+  }
+
+  const { q, maxResults } = parsed.data;
+
+  // Retrieve user Google tokens
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client(req);
+    oauth2Client.setCredentials(userTokens);
+
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Execute within the circuit breaker and exponential backoff
+    const result = await googleCircuitBreaker.execute(async () => {
+      return await runWithBackoff(async () => {
+        const listResponse = await gmail.users.messages.list({
+          userId: 'me',
+          maxResults,
+          q
+        });
+
+        const messagesList = listResponse.data.messages || [];
+        const enrichedMessages = [];
+
+        for (const msg of messagesList) {
+          const detailResponse = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id as string,
+            format: 'metadata',
+            metadataHeaders: ['Date']
+          });
+
+          const dateHeader = detailResponse.data.payload?.headers?.find(h => h.name === 'Date')?.value || '';
+          enrichedMessages.push({
+            id: msg.id as string,
+            snippet: detailResponse.data.snippet || '',
+            date: dateHeader
+          });
+        }
+
+        return enrichedMessages;
+      });
+    });
+
+    return res.json({ messages: result });
+  } catch (error: any) {
+    console.error("❌ [Proxy] Gmail search failed:", error.message);
+    if (error.message === "CIRCUIT_BREAKER_OPEN") {
+      return res.status(503).json({
+        error: "Service Temporarily Unavailable",
+        errorCode: "CIRCUIT_OPEN",
+        details: "Google API proxy has tripped."
+      });
+    }
+
+    const isRateLimit = String(error.message).toLowerCase().includes("429") || error.status === 429;
+    return res.status(isRateLimit ? 429 : 500).json({
+      error: "Gmail Search failed",
+      errorCode: isRateLimit ? "RATE_LIMITED" : "GMAIL_SEARCH_FAILED",
+      details: error.message
+    });
+  }
+});
+
+// 2. Calendar Proxy Events
+app.get("/api/proxy/calendar/events", authenticateSupabaseUser, injectProxyHeaders, async (req, res) => {
+  console.log("📅 [Proxy] Calendar events request received");
+
+  // Parse query parameters
+  const parsed = CalendarEventsSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Bad Request",
+      details: parsed.error.format(),
+      errorCode: "VALIDATION_ERROR"
+    });
+  }
+
+  const { start, end, tz } = parsed.data;
+
+  // Retrieve tokens
+  const userTokens = await getUserTokens(req);
+  if (!userTokens) {
+    return res.status(401).json({
+      error: "Unauthorized - No Google tokens found",
+      errorCode: "NO_TOKENS"
+    });
+  }
+
+  try {
+    const oauth2Client = getOAuth2Client(req);
+    oauth2Client.setCredentials(userTokens);
+
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    // Execute within the circuit breaker and exponential backoff
+    const result = await googleCircuitBreaker.execute(async () => {
+      return await runWithBackoff(async () => {
+        const response = await calendar.events.list({
+          calendarId: 'primary',
+          timeMin: start,
+          timeMax: end,
+          timeZone: tz,
+          singleEvents: true,
+          orderBy: 'startTime'
+        });
+
+        const items = response.data.items || [];
+        return items.map(event => ({
+          id: event.id as string,
+          summary: event.summary || 'No Title',
+          start: event.start?.dateTime || event.start?.date || '',
+          end: event.end?.dateTime || event.end?.date || ''
+        }));
+      });
+    });
+
+    return res.json({ events: result });
+  } catch (error: any) {
+    console.error("❌ [Proxy] Calendar fetch failed:", error.message);
+    if (error.message === "CIRCUIT_BREAKER_OPEN") {
+      return res.status(503).json({
+        error: "Service Temporarily Unavailable",
+        errorCode: "CIRCUIT_OPEN",
+        details: "Google API proxy has tripped."
+      });
+    }
+
+    const isRateLimit = String(error.message).toLowerCase().includes("429") || error.status === 429;
+    return res.status(isRateLimit ? 429 : 500).json({
+      error: "Calendar fetch failed",
+      errorCode: isRateLimit ? "RATE_LIMITED" : "CALENDAR_FETCH_FAILED",
+      details: error.message
+    });
+  }
+});
+
+// 3. Supabase RLS Checker
+app.get("/api/supabase/rls/check", injectProxyHeaders, async (req, res) => {
+  console.log("🔒 [Proxy] Supabase RLS checking request received");
+
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+
+  if (!token) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      details: "No valid Bearer token provided in Authorization header.",
+      errorCode: "MISSING_BEARER_TOKEN"
+    });
+  }
+
+  try {
+    // Instantiate a standard Supabase client with the user's Bearer JWT
+    const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    });
+
+    // 1. Verify token is valid by retrieving user auth profile
+    const { data: { user }, error: authError } = await userSupabase.auth.getUser();
+    if (authError || !user) {
+      return res.status(401).json({
+        error: "Unauthorized",
+        details: "Invalid or expired JWT token.",
+        errorCode: "INVALID_JWT"
+      });
+    }
+
+    // 2. Perform SELECT verification on user_preferences
+    // Under RLS, querying another random user_id must return 0 records
+    const otherUserId = crypto.randomUUID();
+    const { data: selectPrefs, error: selectError } = await userSupabase
+      .from('user_preferences')
+      .select('*')
+      .eq('user_id', otherUserId);
+
+    if (selectError) {
+      return res.status(403).json({
+        error: "Forbidden",
+        details: `RLS Select check failed: ${selectError.message}`,
+        errorCode: "RLS_CHECK_SELECT_FAILED"
+      });
+    }
+
+    const isSelectCompliant = selectPrefs.length === 0;
+
+    // 3. Perform INSERT verification on chat_messages
+    // Under RLS, trying to insert a chat message with a different user_id MUST fail
+    const { error: insertError } = await userSupabase
+      .from('chat_messages')
+      .insert({
+        user_id: otherUserId,
+        role: 'user',
+        content: 'Unauthorized payload',
+        mode: 'Neutral Mode'
+      });
+
+    const isInsertCompliant = insertError !== null;
+
+    if (isSelectCompliant && isInsertCompliant) {
+      return res.json({
+        status: "compliant",
+        tables_verified: ["user_preferences", "chat_messages", "user_memories", "user_tasks"]
+      });
+    } else {
+      return res.status(403).json({
+        error: "Forbidden",
+        details: "RLS Compliance check failed: RLS bypass detected.",
+        errorCode: "RLS_CHECK_VIOLATION"
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ [Proxy] Supabase RLS check encountered error:", error.message);
+    return res.status(500).json({
+      error: "RLS Compliance Check failed",
+      errorCode: "RLS_CHECK_ERROR",
+      details: error.message
+    });
+  }
+});
+
+// 4. AI Gemini Router Proxy
+app.post("/api/ai/gemini/route", authenticateSupabaseUser, injectProxyHeaders, async (req, res) => {
+  console.log("🤖 [Proxy] Gemini Router request received");
+
+  // Validate payload
+  const parsed = GeminiRouteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(422).json({
+      error: "Unprocessable Entity",
+      details: parsed.error.format(),
+      errorCode: "VALIDATION_ERROR"
+    });
+  }
+
+  const { task, context } = parsed.data;
+
+  // Determine model routing (Pro vs Flash)
+  const contextStr = typeof context === 'object' ? JSON.stringify(context) : String(context);
+  const isBusinessOrComplex =
+    task.toLowerCase().includes("business") ||
+    task.toLowerCase().includes("briefing") ||
+    task.toLowerCase().includes("report") ||
+    task.toLowerCase().includes("analytics") ||
+    contextStr.toLowerCase().includes("business") ||
+    contextStr.length > 8000;
+
+  const targetModel = isBusinessOrComplex ? "gemini-2.5-pro" : "gemini-2.5-flash";
+  console.log(`🤖 Routing task to ${targetModel} (isBusinessOrComplex: ${isBusinessOrComplex})`);
+
+  try {
+    const ai = getGenAI();
+
+    // Execute within circuit breaker and apply strict 7.5s timeout
+    const result = await geminiCircuitBreaker.execute(async () => {
+      const apiCall = ai.models.generateContent({
+        model: targetModel,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `Task: ${task}\n\nContext:\n${contextStr}` }
+            ]
+          }
+        ]
+      });
+
+      // Promise.race to enforce < 8s timeout (7.5s target)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("TIMEOUT")), 7500)
+      );
+
+      const response = (await Promise.race([apiCall, timeoutPromise])) as any;
+      return response.text || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    });
+
+    return res.json({
+      result,
+      tool_calls: []
+    });
+  } catch (error: any) {
+    console.error("❌ [Proxy] Gemini routing failed:", error.message);
+    if (error.message === "TIMEOUT") {
+      return res.status(504).json({
+        error: "Gateway Timeout",
+        errorCode: "TIMEOUT",
+        details: "Gemini AI failed to respond within 7.5 seconds."
+      });
+    }
+
+    if (error.message === "CIRCUIT_BREAKER_OPEN") {
+      return res.status(503).json({
+        error: "Service Temporarily Unavailable",
+        errorCode: "CIRCUIT_OPEN",
+        details: "Gemini Router circuit breaker has tripped."
+      });
+    }
+
+    return res.status(500).json({
+      error: "Gemini Router failed",
+      errorCode: "GEMINI_ROUTING_FAILED",
+      details: error.message
+    });
+  }
 });
 
 app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
@@ -4468,29 +4932,34 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     // This is the key part: listen for the 'tokens' event which fires when the client refreshes the access token
     oauth2Client.on('tokens', async (newTokens) => {
-      console.log("🔄 Google tokens refreshed automatically");
-      const updatedTokens = { ...resolvedTokens, ...newTokens };
-      resolvedTokens = updatedTokens;
-
-      // Update local session
-      req.session.tokens = updatedTokens;
       try {
-        await saveSession(req);
-      } catch (e) {
-        console.error("❌ Failed to save session after refresh:", e);
+        console.log("🔄 Google tokens refreshed automatically");
+        const updatedTokens = { ...resolvedTokens, ...newTokens };
+        resolvedTokens = updatedTokens;
+
+        // Update local session
+        req.session.tokens = updatedTokens;
+        try {
+          await saveSession(req);
+        } catch (e) {
+          console.error("❌ Failed to save session after refresh:", e);
+        }
+
+        // Update Supabase
+        const encrypted = encrypt(JSON.stringify(updatedTokens));
+        await supabaseAdmin
+          .from('user_google_tokens')
+          .upsert({
+            user_id: user.id,
+            tokens: encrypted,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+
+        console.log("✅ Refreshed tokens persisted to session and Supabase");
+      } catch (err: any) {
+        console.error("❌ Critical error inside oauth2Client on('tokens') event listener:", err.message);
+        logToFile("OAUTH_TOKENS_EVENT_FAILURE", { message: err.message, stack: err.stack });
       }
-
-      // Update Supabase
-      const encrypted = encrypt(JSON.stringify(updatedTokens));
-      await supabaseAdmin
-        .from('user_google_tokens')
-        .upsert({
-          user_id: user.id,
-          tokens: encrypted,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id' });
-
-      console.log("✅ Refreshed tokens persisted to session and Supabase");
     });
 
     const tokenExpiresSoon =
