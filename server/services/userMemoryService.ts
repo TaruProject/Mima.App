@@ -1,11 +1,16 @@
-import { createHash } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+import { createHash } from 'node:crypto';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-function getSupabase() {
-  return createClient(
-    process.env.VITE_SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-  );
+let supabaseUrl = '';
+let supabaseServiceKey = '';
+
+export function initUserMemoryService(url: string, key: string) {
+  supabaseUrl = url;
+  supabaseServiceKey = key;
+}
+
+function getSupabase(): SupabaseClient {
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
 
 export interface UserMemory {
@@ -25,7 +30,9 @@ function buildMemoryKey(memoryText: string, category: string = 'general') {
 
 function isMissingRelationError(error: any): boolean {
   const message = String(error?.message || '').toLowerCase();
-  return error?.code === '42P01' || message.includes('relation') || message.includes('does not exist');
+  return (
+    error?.code === '42P01' || message.includes('relation') || message.includes('does not exist')
+  );
 }
 
 export async function getUserMemories(userId: string, limit: number = 20): Promise<UserMemory[]> {
@@ -55,24 +62,25 @@ export async function getUserMemories(userId: string, limit: number = 20): Promi
 export async function saveUserMemory(
   userId: string,
   memoryText: string,
-  category: string = 'general',
+  category: string = 'general'
 ): Promise<boolean> {
   try {
     const supabase = getSupabase();
     const trimmedText = memoryText.trim();
     if (!trimmedText) return false;
 
-    const { error } = await supabase
-      .from('user_memories')
-      .upsert({
+    const { error } = await supabase.from('user_memories').upsert(
+      {
         user_id: userId,
         memory_key: buildMemoryKey(trimmedText, category),
         memory_text: trimmedText,
         category,
         updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'memory_key'
-      });
+      },
+      {
+        onConflict: 'memory_key',
+      }
+    );
 
     if (error) {
       if (!isMissingRelationError(error)) {
@@ -110,10 +118,7 @@ export async function forgetUserMemories(userId: string, query: string): Promise
     const ids = matches?.map((match) => match.id).filter(Boolean) || [];
     if (ids.length === 0) return 0;
 
-    const { error } = await supabase
-      .from('user_memories')
-      .delete()
-      .in('id', ids);
+    const { error } = await supabase.from('user_memories').delete().in('id', ids);
 
     if (error) {
       if (!isMissingRelationError(error)) {

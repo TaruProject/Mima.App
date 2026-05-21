@@ -34,6 +34,27 @@
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
 
   # NOTE: CSP Header is now set by Express server (server.ts) to avoid conflicts
+
+  # Service worker: NEVER cache — must always be fetched from server
+  <FilesMatch "service-worker\.js$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # version.json: NEVER cache — used for PWA update detection
+  <FilesMatch "version\.json$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # index.html: NEVER cache — SPA entry point
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
 </IfModule>
 
 # Disable server signature for security
@@ -51,4 +72,9 @@ ServerSignature Off
   ExpiresByType image/png "access plus 1 year"
   ExpiresByType text/css "access plus 1 month"
   ExpiresByType application/javascript "access plus 1 month"
+
+  # Override: never cache service worker, version.json, and index.html
+  <FilesMatch "^(service-worker\.js|version\.json|index\.html)$">
+    ExpiresActive Off
+  </FilesMatch>
 </IfModule>

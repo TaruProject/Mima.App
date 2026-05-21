@@ -1,49 +1,179 @@
-import dotenv from "dotenv";
+import dotenv from 'dotenv';
 dotenv.config();
 
-import express from "express";
-// Vite is imported dynamically in startServer() to save memory in production
-import session from "express-session";
-import { google } from "googleapis";
-import path from "path";
-import { fileURLToPath } from "url";
-import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
-import fs from "fs";
-import { GoogleGenAI } from "@google/genai";
-import * as chrono from "chrono-node";
-import multer from "multer";
-import { z } from "zod";
+import express from 'express';
+import session from 'express-session';
+import { google } from 'googleapis';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
+import { GoogleGenAI } from '@google/genai';
+import * as chrono from 'chrono-node';
+import multer from 'multer';
+import pg from 'pg';
+import connectPgSimple from 'connect-pg-simple';
+import { z } from 'zod';
+
 import {
   getUserPreferences,
   updateUserPreferences,
   getChatHistory,
   saveChatMessage,
-  clearChatHistory
-} from "./src/services/userPreferencesService.js";
+  clearChatHistory,
+  initUserPreferencesService,
+} from './server/services/userPreferencesService.js';
 import {
   formatUserMemoriesSummary,
   forgetUserMemories,
   getUserMemories,
   saveUserMemory,
-} from "./src/services/userMemoryService.js";
+  initUserMemoryService,
+} from './server/services/userMemoryService.js';
 import {
   completeUserTasks,
   formatUserTasksSummary,
   getUserTasks,
   saveUserTask,
-} from "./src/services/userTaskService.js";
-import {
-  buildSystemPrompt,
-  getMimaStyle,
-  normalizeStyleId,
-  type MimaStyleId,
-} from "./src/config/mimaStyles.js";
-import {
-  BUILD_ID,
-  BUILD_TIMESTAMP,
-  BUILD_VERSION,
-} from "./src/generated/buildInfo.js";
+  initUserTaskService,
+} from './server/services/userTaskService.js';
+import { getMimaStyle, normalizeStyleId, type MimaStyleId } from './src/config/mimaStyles.js';
+import { getSystemPrompt, type SupportedLanguage } from './server/prompts/systemPrompts.js';
+
+function getLocalizedPromptLabels(language: SupportedLanguage) {
+  if (language === 'es') {
+    return {
+      contextTitle: 'CONTEXTO ACTUAL:',
+      dateTimeLabel: 'Fecha y hora',
+      userLabel: 'Usuario',
+      timezoneLabel: 'Zona horaria',
+      eventsLabel: 'Eventos proximos hoy',
+      capabilitiesTitle: 'CAPACIDADES DISPONIBLES:',
+      globalRulesTitle: 'REGLAS GLOBALES MIMA - NO NEGOCIABLES:',
+    };
+  }
+
+  if (language === 'fi') {
+    return {
+      contextTitle: 'NYKYINEN KONTEXTI:',
+      dateTimeLabel: 'Paivamaara ja aika',
+      userLabel: 'Kayttaja',
+      timezoneLabel: 'Aikavyohyke',
+      eventsLabel: 'Paivan tulevat tapahtumat',
+      capabilitiesTitle: 'KAYTOSSA OLEVAT KYVYT:',
+      globalRulesTitle: 'MIMAN GLOBAALIT SAANNOT - EI NEUVOTELTAVISSA:',
+    };
+  }
+
+  if (language === 'sv') {
+    return {
+      contextTitle: 'AKTUELL KONTEXT:',
+      dateTimeLabel: 'Datum och tid',
+      userLabel: 'Anvandare',
+      timezoneLabel: 'Tidszon',
+      eventsLabel: 'Kommande handelser idag',
+      capabilitiesTitle: 'TILLGANGLIGA FUNKTIONER:',
+      globalRulesTitle: 'GLOBALA MIMA-REGLER - EJ FORHANDLINGSBARA:',
+    };
+  }
+
+  return {
+    contextTitle: 'CURRENT CONTEXT:',
+    dateTimeLabel: 'Date and time',
+    userLabel: 'User',
+    timezoneLabel: 'Time zone',
+    eventsLabel: 'Upcoming events today',
+    capabilitiesTitle: 'AVAILABLE CAPABILITIES:',
+    globalRulesTitle: 'GLOBAL MIMA RULES - NON NEGOTIABLE:',
+  };
+}
+
+function getLocalizedGlobalRules(language: SupportedLanguage): string[] {
+  if (language === 'es') {
+    return [
+      'Nunca envies un correo sin mostrar borrador y recibir confirmacion explicita.',
+      'Nunca elimines eventos sin confirmacion explicita del usuario.',
+      'Si una herramienta no esta disponible, comunicalo claramente.',
+      'Los datos del usuario siempre tienen prioridad sobre suposiciones.',
+      'Si una accion puede ser irreversible, confirma antes de ejecutar.',
+      'Responde en el idioma seleccionado por el usuario.',
+      'Si el estilo cambia, adaptate de inmediato sin comentarlo.',
+      'Si hay archivos adjuntos, analizalos antes de responder.',
+      'Con adjuntos, incluye hallazgos clave, detalles, dudas y siguientes pasos.',
+    ];
+  }
+
+  if (language === 'fi') {
+    return [
+      'Ala koskaan laheta sahkopostia ilman luonnosta ja nimenomaista vahvistusta.',
+      'Ala koskaan poista kalenteritapahtumaa ilman nimenomaista vahvistusta.',
+      'Jos tyokalu ei ole saatavilla, kerro se selkeasti.',
+      'Kayttajan antamat tiedot ovat aina oletuksia vahvempia.',
+      'Jos toiminto voi olla peruuttamaton, vahvista ennen suoritusta.',
+      'Vastaa kayttajan valitsemalla kielella.',
+      'Jos tyyli muuttuu, sopeudu heti ilman erillista kommenttia.',
+      'Jos liitteita on mukana, analysoi ne ennen vastausta.',
+      'Liitteiden kanssa anna havainnot, yksityiskohdat, avoimet kysymykset ja jatkoaskeleet.',
+    ];
+  }
+
+  if (language === 'sv') {
+    return [
+      'Skicka aldrig e-post utan utkast och uttrycklig bekraftelse.',
+      'Radera aldrig kalenderhandelser utan uttrycklig bekraftelse.',
+      'Om ett verktyg inte ar tillgangligt, sag det tydligt.',
+      'Anvandarens uppgifter har alltid foretrade framfor antaganden.',
+      'Om en atgard kan vara oaterkallelig, bekrafta innan utforande.',
+      'Svara pa anvandarens valda sprak.',
+      'Om stil laget andras, anpassa dig direkt utan att kommentera det.',
+      'Om bilagor finns, analysera dem innan du svarar.',
+      'Med bilagor: ge nyckelfynd, detaljer, fragetecken och nasta steg.',
+    ];
+  }
+
+  return [
+    'Never send an email without showing a draft and explicit user confirmation.',
+    'Never delete calendar events without explicit user confirmation.',
+    'If a tool is unavailable, say so clearly.',
+    'User-provided names, dates, times, and contacts always win over assumptions.',
+    'If an action may be irreversible, confirm before executing.',
+    'Reply in the selected user language.',
+    'When style changes, adapt immediately without announcing it.',
+    'If files are attached, analyze them before responding.',
+    'With attachments, include key findings, relevant details, doubts, and next steps.',
+  ];
+}
+
+function buildLocalizedSystemPrompt(
+  language: SupportedLanguage,
+  mode: string,
+  context: any
+): string {
+  const basePrompt = getSystemPrompt(language, normalizeStyleId(mode));
+  const labels = getLocalizedPromptLabels(language);
+  const globalRules = getLocalizedGlobalRules(language);
+
+  return [
+    basePrompt,
+    '',
+    labels.contextTitle,
+    `- ${labels.dateTimeLabel}: ${context.currentDateTime}`,
+    `- ${labels.userLabel}: ${context.userName}`,
+    `- ${labels.timezoneLabel}: ${context.timezone}`,
+    `- ${labels.eventsLabel}: ${context.todayEvents}`,
+    '',
+    labels.capabilitiesTitle,
+    ...context.capabilities.map((item: string) => `- ${item}`),
+    ...(context.extraInstructions?.length > 0 ? ['', ...context.extraInstructions] : []),
+    '',
+    labels.globalRulesTitle,
+    ...globalRules.map((rule, index) => `${index + 1}. ${rule}`),
+  ]
+    .join('\n')
+    .trim();
+}
+import { BUILD_ID, BUILD_TIMESTAMP, BUILD_VERSION } from './src/generated/buildInfo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,12 +196,32 @@ function logToFile(message: string, data?: any) {
   console.log(logEntry);
 }
 
-// Environment variables validation - deferred until after dotenv loads completely
-let envValidationComplete = false;
-let envValidationResult = { valid: false, missing: [] as string[], critical: [] as string[] };
+const SECURITY_V2 = process.env.MIMA_SECURITY_V2 === 'true';
+
+if (SECURITY_V2) {
+  console.log('[SECURITY] Hardened mode enabled (MIMA_SECURITY_V2=true)');
+} else {
+  console.warn('[SECURITY] Standard mode. Set MIMA_SECURITY_V2=true for hardened mode.');
+}
+
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+  if (SECURITY_V2) {
+    console.error(
+      '[FATAL] SESSION_SECRET missing or <32 chars in hardened mode. Server cannot start.'
+    );
+    process.exit(1);
+  }
+  console.warn(
+    '[SECURITY] SESSION_SECRET missing or <32 chars — using generated secret. Set SESSION_SECRET for production.'
+  );
+}
+const EFFECTIVE_SESSION_SECRET =
+  SESSION_SECRET && SESSION_SECRET.length >= 32
+    ? SESSION_SECRET
+    : crypto.randomBytes(32).toString('hex');
 
 const requiredEnvVars = [
-  'SESSION_SECRET',
   'GEMINI_API_KEY',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
@@ -79,27 +229,24 @@ const requiredEnvVars = [
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'APP_URL'
+  'APP_URL',
 ];
 
-const criticalVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
+let envValidationComplete = false;
+let envValidationResult = { valid: false, missing: [] as string[], critical: [] as string[] };
 
-// Validate after a short delay to ensure dotenv has loaded completely
 setTimeout(() => {
-  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-  const missingCritical = missingVars.filter(v => criticalVars.includes(v));
+  const missingVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 
   envValidationResult = {
-    valid: missingCritical.length === 0,
+    valid: missingVars.length === 0,
     missing: missingVars,
-    critical: missingCritical
+    critical: [],
   };
   envValidationComplete = true;
 
-  if (missingCritical.length > 0) {
-    console.error('❌ CRITICAL: Missing required environment variables:', missingCritical.join(', '));
-  } else if (missingVars.length > 0) {
-    console.warn('⚠️  WARNING: Some optional variables are missing:', missingVars.join(', '));
+  if (missingVars.length > 0) {
+    console.warn('⚠️  WARNING: Some env vars are missing:', missingVars.join(', '));
   } else {
     console.log('✅ All environment variables loaded successfully');
   }
@@ -108,14 +255,18 @@ setTimeout(() => {
 const app = express();
 
 // Immediate ping endpoint before anything else can fail
-app.get("/api/ping", (req, res) => res.status(200).send("pong"));
+app.get('/api/ping', (req, res) => res.status(200).send('pong'));
 
 // Port 3000 as fallback. Hostinger may provide a numeric port or a Unix Socket string.
 const PORT = process.env.PORT || 3000;
 
 // Determine environment explicitly
-const IS_HOSTINGER = !!process.env.HOSTINGER_ENV || !!process.env.HOSTINGER || process.env.USER === 'u482312211'; // Common Hostinger user pattern
-const IS_PROD = process.env.NODE_ENV === 'production' || IS_HOSTINGER || (!!process.env.PORT && process.env.PORT !== '3000');
+const IS_HOSTINGER =
+  !!process.env.HOSTINGER_ENV || !!process.env.HOSTINGER || process.env.USER === 'u482312211'; // Common Hostinger user pattern
+const IS_PROD =
+  process.env.NODE_ENV === 'production' ||
+  IS_HOSTINGER ||
+  (!!process.env.PORT && process.env.PORT !== '3000');
 
 // Log environment detection IMMEDIATELY
 console.log('═══════════════════════════════════════════');
@@ -125,42 +276,93 @@ console.log('🔍 Environment detection:', {
   NODE_ENV: process.env.NODE_ENV || 'not set',
   PORT: process.env.PORT || 'not set',
   IS_HOSTINGER,
-  IS_PROD
+  IS_PROD,
 });
 
-// Safe initialization of encryption key
 let ENCRYPTION_KEY: Buffer;
 try {
-  const secret = process.env.SESSION_SECRET || 'mima-default-fallback-secret-32-chars-long';
-  ENCRYPTION_KEY = crypto.scryptSync(secret, 'salt', 32);
+  if (SECURITY_V2) {
+    const DEPLOYMENT_SALT = crypto.scryptSync(
+      EFFECTIVE_SESSION_SECRET,
+      'mima-encryption-salt-v2',
+      16
+    );
+    ENCRYPTION_KEY = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, DEPLOYMENT_SALT, 32);
+  } else {
+    ENCRYPTION_KEY = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, 'salt', 32);
+  }
 } catch (err) {
-  console.error("❌ Failed to initialize encryption key:", err);
-  ENCRYPTION_KEY = Buffer.alloc(32, 'a'); // Last resort fallback
+  console.error('❌ Failed to initialize encryption key:', err);
+  if (SECURITY_V2) {
+    process.exit(1);
+  }
+  ENCRYPTION_KEY = Buffer.alloc(32, 'a');
 }
-const IV_LENGTH = 16;
-const SERVER_STARTED_AT = BUILD_TIMESTAMP;
-const SERVER_DEPLOY_ID = BUILD_ID;
 
-function encrypt(text: string) {
-  const iv = crypto.randomBytes(IV_LENGTH);
+const GCM_IV_LENGTH = 12;
+const CBC_IV_LENGTH = 16;
+
+function encryptGCM(text: string): string {
+  const iv = crypto.randomBytes(GCM_IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8');
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decryptGCM(ciphertext: string): string {
+  const parts = ciphertext.split(':');
+  if (parts.length === 2) {
+    return decryptCBC(ciphertext);
+  }
+  const iv = Buffer.from(parts[0], 'hex');
+  const authTag = Buffer.from(parts[1], 'hex');
+  const encrypted = Buffer.from(parts[2], 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  decipher.setAuthTag(authTag);
+  let decrypted = decipher.update(encrypted);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+function encryptCBC(text: string): string {
+  const iv = crypto.randomBytes(CBC_IV_LENGTH);
   const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
 }
 
-function decrypt(text: string) {
-  const textParts = text.split(':');
+function decryptCBC(ciphertext: string): string {
+  const textParts = ciphertext.split(':');
   const iv = Buffer.from(textParts.shift()!, 'hex');
   const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  const legacyKey = crypto.scryptSync(EFFECTIVE_SESSION_SECRET, 'salt', 32);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', legacyKey, iv);
   let decrypted = decipher.update(encryptedText);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
 }
 
+function encrypt(text: string): string {
+  return SECURITY_V2 ? encryptGCM(text) : encryptCBC(text);
+}
+
+function decrypt(text: string): string {
+  return SECURITY_V2 ? decryptGCM(text) : decryptCBC(text);
+}
+
+const SERVER_STARTED_AT = BUILD_TIMESTAMP;
+const SERVER_DEPLOY_ID = BUILD_ID;
+const MIN_SUPPORTED_VERSION = process.env.MIN_SUPPORTED_VERSION || BUILD_VERSION;
+
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+
+initUserPreferencesService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+initUserMemoryService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+initUserTaskService(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
 
 // NOTE: Panic middleware removed - env validation now happens asynchronously
 // Errors are reported via /api/health and /api/health-detailed endpoints instead of 503
@@ -170,38 +372,94 @@ app.set('trust proxy', 1); // Required for secure cookies behind proxy
 
 // CSP headers - Unified for all environments
 app.use((req, res, next) => {
+  const isDev = !IS_PROD;
   const cspDirectives = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com",
+    isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com http://localhost:*"
+      : "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://*.google.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
-    "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
+    isDev
+      ? "font-src 'self' https://fonts.gstatic.com data: https://r2cdn.perplexity.ai"
+      : "font-src 'self' https://fonts.gstatic.com data:",
+    isDev
+      ? "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com ws://localhost:* http://localhost:*"
+      : "connect-src 'self' https://api.google.com https://generativelanguage.googleapis.com https://*.supabase.co https://api.elevenlabs.io https://*.googleapis.com https://accounts.google.com",
     "img-src 'self' data: https: blob:",
     "media-src 'self' data: blob:",
     "worker-src 'self' blob:",
-    "frame-src 'self' https://accounts.google.com https://*.google.com"
+    "frame-src 'self' https://accounts.google.com https://*.google.com",
   ];
 
   res.setHeader('Content-Security-Policy', cspDirectives.join('; '));
   next();
 });
 
-// Session configuration optimized for Hostinger
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'mima-session-fallback-secret',
-  resave: false,
-  saveUninitialized: false,
-  name: 'mima.session', // Specific cookie name to avoid conflicts
-  cookie: {
-    secure: IS_PROD, // Require HTTPS in production
-    sameSite: IS_PROD ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    httpOnly: true // Security: prevent XSS access to cookie
-  }
-}));
+let pgPool: pg.Pool | null = null;
 
-// Log session configuration on startup
-console.log('🔧 Session configuration:');
+if (SECURITY_V2 && process.env.SUPABASE_DB_URL) {
+  pgPool = new pg.Pool({
+    connectionString: process.env.SUPABASE_DB_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  pgPool.on('error', (err) => {
+    console.error('[SECURITY] Unexpected pg pool error:', err.message);
+  });
+} else if (SECURITY_V2 && !process.env.SUPABASE_DB_URL) {
+  console.error(
+    '[FATAL] SUPABASE_DB_URL is required when MIMA_SECURITY_V2=true. Server cannot start.'
+  );
+  process.exit(1);
+} else if (!SECURITY_V2) {
+  console.log('[SESSION] Using MemoryStore (standard mode)');
+}
+
+if (SECURITY_V2 && pgPool) {
+  const PgSessionStore = connectPgSimple(session);
+  app.use(
+    session({
+      store: new PgSessionStore({
+        pool: pgPool,
+        tableName: 'session',
+        schemaName: 'public',
+        pruneSessionInterval: 900,
+        ttl: 7 * 24 * 60 * 60,
+      }),
+      secret: EFFECTIVE_SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      name: 'mima.session',
+      cookie: {
+        secure: IS_PROD,
+        sameSite: IS_PROD ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+      },
+    })
+  );
+  console.log('🔧 Session configuration: PostgreSQL store (7d TTL)');
+} else {
+  app.use(
+    session({
+      secret: EFFECTIVE_SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      name: 'mima.session',
+      cookie: {
+        secure: IS_PROD,
+        sameSite: IS_PROD ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+      },
+    })
+  );
+  console.log('🔧 Session configuration: MemoryStore (24h TTL) — legacy mode');
+}
+
 console.log('   - Cookie secure:', IS_PROD);
 console.log('   - Cookie sameSite:', IS_PROD ? 'none' : 'lax');
 console.log('   - Cookie httpOnly: true');
@@ -236,7 +494,7 @@ async function saveSession(req: express.Request, maxRetries = 3): Promise<void> 
       console.error(`❌ Session save error (attempt ${attempt}/${maxRetries}):`, err.message);
 
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 500 * attempt)); // Staggered retry
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt)); // Staggered retry
       }
     }
   }
@@ -247,15 +505,19 @@ async function saveSession(req: express.Request, maxRetries = 3): Promise<void> 
 }
 
 // Configure multer for memory storage
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  }
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
 });
 
 // Middleware to authenticate Supabase users
-const authenticateSupabaseUser = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const authenticateSupabaseUser = async (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => {
   const authHeader = req.headers.authorization;
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
@@ -264,41 +526,50 @@ const authenticateSupabaseUser = async (req: express.Request, res: express.Respo
   try {
     // 1. Try Token Authentication (Standard)
     if (token) {
-      const { data: { user }, error } = await supabase.auth.getUser(token);
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser(token);
       if (!error && user) {
         (req as any).user = user;
         return next();
       }
-      console.warn("⚠️ Token auth failed, trying session fallback...");
+      console.warn('⚠️ Token auth failed, trying session fallback...');
     }
 
     // 2. Try Session Fallback (If headers are stripped by proxy)
     const sessionUserId = req.session.userId;
     if (sessionUserId) {
-      console.log("🔄 Authenticating via session userId:", sessionUserId);
-      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
-      const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(sessionUserId);
-      
+      console.log('🔄 Authenticating via session userId:', sessionUserId);
+      const supabaseAdmin = createClient(
+        supabaseUrl,
+        process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+      );
+      const {
+        data: { user },
+        error,
+      } = await supabaseAdmin.auth.admin.getUserById(sessionUserId);
+
       if (!error && user) {
         (req as any).user = user;
         return next();
       }
     }
 
-    console.error("❌ Auth failed: No valid token or session");
-    return res.status(401).json({ 
-      error: "Unauthorized", 
-      details: "No valid authentication found. If you are seeing this, try logging in again." 
+    console.error('❌ Auth failed: No valid token or session');
+    return res.status(401).json({
+      error: 'Unauthorized',
+      details: 'No valid authentication found. If you are seeing this, try logging in again.',
     });
   } catch (err) {
-    console.error("❌ Unexpected auth error:", err);
-    return res.status(500).json({ error: "Internal server error during authentication" });
+    console.error('❌ Unexpected auth error:', err);
+    return res.status(500).json({ error: 'Internal server error during authentication' });
   }
 };
 
 const getOAuth2Client = (req?: express.Request) => {
   // Use the custom domain as the primary one
-  const customDomain = "https://me.mima-app.com";
+  const customDomain = 'https://me.mima-app.com';
 
   // Use the custom domain if we are on it, otherwise fallback to APP_URL (preview)
   let baseUrl = customDomain;
@@ -310,10 +581,10 @@ const getOAuth2Client = (req?: express.Request) => {
       baseUrl = process.env.APP_URL || `https://${host}`;
     }
   } else if (!IS_PROD) {
-    baseUrl = process.env.APP_URL || "http://localhost:3000";
+    baseUrl = process.env.APP_URL || 'http://localhost:3000';
   }
 
-  const redirectUri = `${baseUrl.replace(/\/$/, "")}/api/auth/callback/google`;
+  const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/auth/callback/google`;
 
   console.log(`Using redirectUri: ${redirectUri}`);
 
@@ -331,15 +602,15 @@ const GOOGLE_REQUIRED_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/userinfo.profile'
+  'https://www.googleapis.com/auth/userinfo.profile',
 ];
 
 const GOOGLE_WRITE_SCOPES: Record<GoogleServiceName, string[]> = {
   calendar: ['https://www.googleapis.com/auth/calendar'],
   gmail: [
     'https://www.googleapis.com/auth/gmail.compose',
-    'https://www.googleapis.com/auth/gmail.send'
-  ]
+    'https://www.googleapis.com/auth/gmail.send',
+  ],
 };
 
 const GOOGLE_SCOPE_VERSION = 1;
@@ -371,7 +642,9 @@ function isGoogleScopeError(error: any): boolean {
   const message = String(error?.message || '');
   return (
     error?.errorCode === 'RECONNECT_REQUIRED' ||
-    /insufficient|insufficient permissions|insufficientpermission|forbidden|scope|permission/i.test(message)
+    /insufficient|insufficient permissions|insufficientpermission|forbidden|scope|permission/i.test(
+      message
+    )
   );
 }
 
@@ -388,7 +661,7 @@ async function resolveGrantedGoogleScopes(tokens: any, req?: express.Request): P
     const tokenInfo: any = await oauth2Client.getTokenInfo(tokens.access_token);
     return normalizeGoogleScopes(tokenInfo?.scopes ?? tokenInfo?.scope ?? existingScopes);
   } catch (error: any) {
-    console.warn("⚠️ Failed to resolve granted Google scopes:", error.message);
+    console.warn('⚠️ Failed to resolve granted Google scopes:', error.message);
     return existingScopes;
   }
 }
@@ -411,18 +684,24 @@ function googleScopeMetadataChanged(previousTokens: any, nextTokens: any): boole
     return true;
   }
 
-  const previousScopes = normalizeGoogleScopes(previousTokens?.granted_scopes ?? previousTokens?.scope).sort();
+  const previousScopes = normalizeGoogleScopes(
+    previousTokens?.granted_scopes ?? previousTokens?.scope
+  ).sort();
   const nextScopes = normalizeGoogleScopes(nextTokens?.granted_scopes ?? nextTokens?.scope).sort();
   return JSON.stringify(previousScopes) !== JSON.stringify(nextScopes);
 }
 
-async function persistGoogleTokens(userId: string, tokens: any, req?: express.Request): Promise<void> {
+async function persistGoogleTokens(
+  userId: string,
+  tokens: any,
+  req?: express.Request
+): Promise<void> {
   if (req) {
     req.session.tokens = tokens;
     try {
       await saveSession(req);
     } catch (sessionError) {
-      console.warn("⚠️ Failed to persist Google tokens in session:", sessionError);
+      console.warn('⚠️ Failed to persist Google tokens in session:', sessionError);
     }
   }
 
@@ -430,23 +709,31 @@ async function persistGoogleTokens(userId: string, tokens: any, req?: express.Re
     return;
   }
 
-  const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+  const supabaseAdmin = createClient(
+    supabaseUrl,
+    process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+  );
   const encryptedTokens = encrypt(JSON.stringify(tokens));
 
-  const { error } = await supabaseAdmin
-    .from('user_google_tokens')
-    .upsert({
+  const { error } = await supabaseAdmin.from('user_google_tokens').upsert(
+    {
       user_id: userId,
       tokens: encryptedTokens,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id' });
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  );
 
   if (error) {
     throw new Error(`Database upsert failed: ${error.message}`);
   }
 }
 
-async function ensureGoogleWriteAccess(tokens: any, serviceName: GoogleServiceName, req?: express.Request): Promise<any> {
+async function ensureGoogleWriteAccess(
+  tokens: any,
+  serviceName: GoogleServiceName,
+  req?: express.Request
+): Promise<any> {
   const enrichedTokens = await attachGoogleScopeMetadata(tokens, req);
   const missingScopes = getMissingGoogleScopes(enrichedTokens, GOOGLE_WRITE_SCOPES[serviceName]);
 
@@ -478,7 +765,8 @@ function getGoogleAccessState(tokens: any) {
 
 function shouldHandlePermissionFollowUp(message: string, history: any[] = []): boolean {
   const normalizedMessage = message.trim().toLowerCase();
-  const followUpPattern = /\b(ya se lo di|ya lo di|ya di el permiso|ya reconecte|ya reconecté|already gave it|already granted|already reconnected|i already did|i already gave permission)\b/i;
+  const followUpPattern =
+    /\b(ya se lo di|ya lo di|ya di el permiso|ya reconecte|ya reconecté|already gave it|already granted|already reconnected|i already did|i already gave permission)\b/i;
 
   if (followUpPattern.test(normalizedMessage)) {
     return true;
@@ -493,12 +781,14 @@ function shouldHandlePermissionFollowUp(message: string, history: any[] = []): b
     .find((entry: any) => entry?.role === 'assistant' || entry?.role === 'model');
 
   const assistantText = String(lastAssistantMessage?.content || '').toLowerCase();
-  return /permiso de escritura|write permission|reconnect google|reconecta google|read-only|solo lectura/.test(assistantText);
+  return /permiso de escritura|write permission|reconnect google|reconecta google|read-only|solo lectura/.test(
+    assistantText
+  );
 }
 
 function getPermissionStatusFollowUpMessage(
   langCode: string,
-  accessState: ReturnType<typeof getGoogleAccessState>,
+  accessState: ReturnType<typeof getGoogleAccessState>
 ): string {
   const stillMissingCalendar = !accessState.hasCalendarWrite;
   const stillMissingGmail = !accessState.hasGmailWrite;
@@ -506,26 +796,34 @@ function getPermissionStatusFollowUpMessage(
   const messages: Record<string, { both: string; calendar: string; gmail: string; ok: string }> = {
     en: {
       both: 'I still see Google Calendar and Gmail without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
-      calendar: 'I still see Google Calendar without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
-      gmail: 'I still see Gmail without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
+      calendar:
+        'I still see Google Calendar without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
+      gmail:
+        'I still see Gmail without write access on the server. I cannot assume the permission changed just from the chat. Please reconnect Google from Profile and try again after the app confirms it.',
       ok: 'The server already sees Google with write access. You can try the action again now.',
     },
     es: {
       both: 'Sigo viendo Google Calendar y Gmail sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
-      calendar: 'Sigo viendo Google Calendar sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
-      gmail: 'Sigo viendo Gmail sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
+      calendar:
+        'Sigo viendo Google Calendar sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
+      gmail:
+        'Sigo viendo Gmail sin permiso de escritura en el servidor. No puedo asumir desde el chat que el permiso ya cambio. Reconecta Google desde Perfil y vuelve a intentarlo cuando la app lo confirme.',
       ok: 'El servidor ya ve Google con permiso de escritura. Puedes volver a intentar la accion ahora.',
     },
     fi: {
       both: 'Palvelin nayttaa edelleen Google Calendarin ja Gmailin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
-      calendar: 'Palvelin nayttaa edelleen Google Calendarin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
-      gmail: 'Palvelin nayttaa edelleen Gmailin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
+      calendar:
+        'Palvelin nayttaa edelleen Google Calendarin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
+      gmail:
+        'Palvelin nayttaa edelleen Gmailin ilman kirjoitusoikeutta. En voi olettaa chatin perusteella, etta oikeus jo muuttui. Yhdista Google uudelleen Profiilista ja yrita sitten uudestaan, kun sovellus vahvistaa sen.',
       ok: 'Palvelin naykee jo Googlen kirjoitusoikeudella. Voit yrittää toimintoa nyt uudelleen.',
     },
     sv: {
       both: 'Servern visar fortfarande Google Calendar och Gmail utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
-      calendar: 'Servern visar fortfarande Google Calendar utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
-      gmail: 'Servern visar fortfarande Gmail utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
+      calendar:
+        'Servern visar fortfarande Google Calendar utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
+      gmail:
+        'Servern visar fortfarande Gmail utan skrivbehorighet. Jag kan inte anta via chatten att behorigheten redan andrades. Anslut Google pa nytt fran Profil och forsok igen nar appen har bekräftat det.',
       ok: 'Servern ser redan Google med skrivbehorighet. Du kan prova atgarden igen nu.',
     },
   };
@@ -538,7 +836,9 @@ function getPermissionStatusFollowUpMessage(
 }
 
 function isMemoryRecallIntent(message: string): boolean {
-  return /\b(what do you remember about me|what do you remember|que recuerdas de mi|que recuerdas de mí|recuerdas de mi|recuerdas de mí|mita muistat minusta|vad minns du om mig)\b/i.test(message);
+  return /\b(what do you remember about me|what do you remember|que recuerdas de mi|que recuerdas de mí|recuerdas de mi|recuerdas de mí|mita muistat minusta|vad minns du om mig)\b/i.test(
+    message
+  );
 }
 
 function extractForgetMemoryQuery(message: string): string | null {
@@ -627,25 +927,33 @@ function getMemoryForgetMessage(langCode: string, deletedCount: number): string 
 }
 
 function isDailyBriefingIntent(message: string): boolean {
-  return /\b(dame mi resumen del dia|dame mi resumen del día|resumen del dia|resumen del día|briefing del dia|briefing del día|summary of my day|daily briefing|what do i have today|que tengo hoy|qué tengo hoy|mita minulla on tanaan|vad har jag idag)\b/i.test(message);
+  return /\b(dame mi resumen del dia|dame mi resumen del día|resumen del dia|resumen del día|briefing del dia|briefing del día|summary of my day|daily briefing|what do i have today|que tengo hoy|qué tengo hoy|mita minulla on tanaan|vad har jag idag)\b/i.test(
+    message
+  );
 }
 
 function isGreetingIntent(message: string): boolean {
-  return /^\s*(hola|hello|hi|hey|good morning|good afternoon|good evening|buenos dias|buenas tardes|buenas noches|hei|moi|huomenta|god morgon|hej|hejsan)\s*[.!?]*\s*$/i.test(message);
+  return /^\s*(hola|hello|hi|hey|good morning|good afternoon|good evening|buenos dias|buenas tardes|buenas noches|hei|moi|huomenta|god morgon|hej|hejsan)\s*[.!?]*\s*$/i.test(
+    message
+  );
 }
 
 function isSameDayInTimeZone(dateA: Date, dateB: Date, timeZone: string): boolean {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
   });
 
   return formatter.format(dateA) === formatter.format(dateB);
 }
 
-function shouldSendAutomaticBriefing(message: string, lastDailyBriefingAt: string | null | undefined, timeZone: string): boolean {
+function shouldSendAutomaticBriefing(
+  message: string,
+  lastDailyBriefingAt: string | null | undefined,
+  timeZone: string
+): boolean {
   if (!isGreetingIntent(message)) {
     return false;
   }
@@ -682,7 +990,7 @@ function extractTaskCompletionQuery(message: string): string | null {
   for (const pattern of patterns) {
     const match = message.trim().match(pattern);
     if (match?.[1]) {
-      return match[1].trim().replace(/[.!?]+$/, "");
+      return match[1].trim().replace(/[.!?]+$/, '');
     }
   }
 
@@ -690,10 +998,14 @@ function extractTaskCompletionQuery(message: string): string | null {
 }
 
 function isTaskListIntent(message: string): boolean {
-  return /\b(my tasks|my to-?dos|what are my tasks|what do i need to do|mis tareas|mis pendientes|que tareas tengo|quÃ© tareas tengo|que pendientes tengo|mis recordatorios|tehtavani|avoimet tehtavat|mina tehtavia|mina tehtavat|mina uppgifter|mina att gora|mina att-gora)\b/i.test(message);
+  return /\b(my tasks|my to-?dos|what are my tasks|what do i need to do|mis tareas|mis pendientes|que tareas tengo|quÃ© tareas tengo|que pendientes tengo|mis recordatorios|tehtavani|avoimet tehtavat|mina tehtavia|mina tehtavat|mina uppgifter|mina att gora|mina att-gora)\b/i.test(
+    message
+  );
 }
 
-function extractTaskCreationPayload(message: string): { title: string; dueAt: string | null } | null {
+function extractTaskCreationPayload(
+  message: string
+): { title: string; dueAt: string | null } | null {
   const trimmedMessage = message.trim();
   const patterns = [
     /\bremember to\s+(.+)$/i,
@@ -714,19 +1026,19 @@ function extractTaskCreationPayload(message: string): { title: string; dueAt: st
     const match = trimmedMessage.match(pattern);
     if (!match?.[1]) continue;
 
-    const rawTaskText = match[1].trim().replace(/[.!?]+$/, "");
+    const rawTaskText = match[1].trim().replace(/[.!?]+$/, '');
     const parsed = chrono.parse(rawTaskText, new Date(), { forwardDate: true });
     const firstMatch = parsed[0];
     const dueAt = firstMatch?.start?.date()?.toISOString() || null;
-    const matchedDateText = firstMatch?.text || "";
+    const matchedDateText = firstMatch?.text || '';
 
     let title = matchedDateText
-      ? rawTaskText.replace(matchedDateText, " ").replace(/\s+/g, " ").trim()
+      ? rawTaskText.replace(matchedDateText, ' ').replace(/\s+/g, ' ').trim()
       : rawTaskText;
 
     title = title
-      .replace(/^(to|que|att|que tengo que|jag ska)\s+/i, "")
-      .replace(/\b(on|at|para|for)\s*$/i, "")
+      .replace(/^(to|que|att|que tengo que|jag ska)\s+/i, '')
+      .replace(/\b(on|at|para|for)\s*$/i, '')
       .trim();
 
     if (!title) {
@@ -741,37 +1053,54 @@ function extractTaskCreationPayload(message: string): { title: string; dueAt: st
 
 function getTaskSavedMessage(langCode: string, title: string, dueAt: string | null): string {
   const dueText = dueAt
-    ? new Date(dueAt).toLocaleString(langCode === "es" ? "es-ES" : langCode === "fi" ? "fi-FI" : langCode === "sv" ? "sv-SE" : "en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+    ? new Date(dueAt).toLocaleString(
+        langCode === 'es'
+          ? 'es-ES'
+          : langCode === 'fi'
+            ? 'fi-FI'
+            : langCode === 'sv'
+              ? 'sv-SE'
+              : 'en-US',
+        {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }
+      )
     : null;
 
-  if (langCode === "es") {
-    return dueText ? `Listo. Guardare esta tarea: ${title} (${dueText}).` : `Listo. Guardare esta tarea: ${title}.`;
+  if (langCode === 'es') {
+    return dueText
+      ? `Listo. Guardare esta tarea: ${title} (${dueText}).`
+      : `Listo. Guardare esta tarea: ${title}.`;
   }
-  if (langCode === "fi") {
-    return dueText ? `Selva. Tallensin tehtavan: ${title} (${dueText}).` : `Selva. Tallensin tehtavan: ${title}.`;
+  if (langCode === 'fi') {
+    return dueText
+      ? `Selva. Tallensin tehtavan: ${title} (${dueText}).`
+      : `Selva. Tallensin tehtavan: ${title}.`;
   }
-  if (langCode === "sv") {
-    return dueText ? `Klart. Jag sparade uppgiften: ${title} (${dueText}).` : `Klart. Jag sparade uppgiften: ${title}.`;
+  if (langCode === 'sv') {
+    return dueText
+      ? `Klart. Jag sparade uppgiften: ${title} (${dueText}).`
+      : `Klart. Jag sparade uppgiften: ${title}.`;
   }
-  return dueText ? `Done. I saved this task: ${title} (${dueText}).` : `Done. I saved this task: ${title}.`;
+  return dueText
+    ? `Done. I saved this task: ${title} (${dueText}).`
+    : `Done. I saved this task: ${title}.`;
 }
 
 function getTaskCompletedMessage(langCode: string, completedCount: number): string {
   if (completedCount === 0) {
-    if (langCode === "es") return "No encontre una tarea abierta que coincida con eso.";
-    if (langCode === "fi") return "En loytanyt siihen sopivaa avointa tehtavaa.";
-    if (langCode === "sv") return "Jag hittade ingen oppen uppgift som matchar det.";
+    if (langCode === 'es') return 'No encontre una tarea abierta que coincida con eso.';
+    if (langCode === 'fi') return 'En loytanyt siihen sopivaa avointa tehtavaa.';
+    if (langCode === 'sv') return 'Jag hittade ingen oppen uppgift som matchar det.';
     return "I couldn't find an open task matching that.";
   }
 
-  if (langCode === "es") return `He marcado ${completedCount} tarea(s) como hechas.`;
-  if (langCode === "fi") return `Merkitsin ${completedCount} tehtavaa valmiiksi.`;
-  if (langCode === "sv") return `Jag markerade ${completedCount} uppgift(er) som klara.`;
+  if (langCode === 'es') return `He marcado ${completedCount} tarea(s) como hechas.`;
+  if (langCode === 'fi') return `Merkitsin ${completedCount} tehtavaa valmiiksi.`;
+  if (langCode === 'sv') return `Jag markerade ${completedCount} uppgift(er) som klara.`;
   return `I marked ${completedCount} task(s) as done.`;
 }
 
@@ -792,112 +1121,212 @@ async function buildDailyBriefingText({
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
   const todayEvents = await listCalendarEvents(
     userTokens,
-    today.toISOString().split("T")[0],
-    tomorrow.toISOString().split("T")[0],
-    10,
+    today.toISOString().split('T')[0],
+    tomorrow.toISOString().split('T')[0],
+    10
   );
 
   const oauth2Client = getOAuth2Client(req);
   oauth2Client.setCredentials(userTokens);
-  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   const unreadResponse = await gmail.users.messages.list({
-    userId: "me",
+    userId: 'me',
     maxResults: 3,
-    q: "is:unread",
+    q: 'is:unread',
   });
 
   const unreadSummaries: string[] = [];
   for (const unreadMessage of unreadResponse.data.messages || []) {
     const messageData = await gmail.users.messages.get({
-      userId: "me",
+      userId: 'me',
       id: unreadMessage.id as string,
-      format: "metadata",
-      metadataHeaders: ["Subject", "From", "Date"],
+      format: 'metadata',
+      metadataHeaders: ['Subject', 'From', 'Date'],
     });
     const headers = messageData.data.payload?.headers || [];
-    const subject = headers.find((header) => header.name === "Subject")?.value || "No Subject";
-    const from = headers.find((header) => header.name === "From")?.value || "Unknown sender";
+    const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+    const from = headers.find((header) => header.name === 'From')?.value || 'Unknown sender';
     unreadSummaries.push(`- ${from} - ${subject}`);
   }
 
-  const greeting = langCode === "es"
-    ? `Buenos ${today.getHours() < 12 ? "dias" : today.getHours() < 20 ? "dias" : "dias"}.`
-    : langCode === "fi"
-      ? "Huomenta."
-      : langCode === "sv"
-        ? "God morgon."
-        : "Good morning.";
+  const greeting =
+    langCode === 'es'
+      ? `Buenos ${today.getHours() < 12 ? 'dias' : today.getHours() < 20 ? 'dias' : 'dias'}.`
+      : langCode === 'fi'
+        ? 'Huomenta.'
+        : langCode === 'sv'
+          ? 'God morgon.'
+          : 'Good morning.';
 
-  const eventSection = todayEvents.length > 0
-    ? todayEvents.map((event: any) => `- ${formatCalendarEventLine(event, langCode)}`).join("\n")
-    : (langCode === "es" ? "No tienes eventos hoy." : langCode === "fi" ? "Sinulla ei ole tapahtumia tanaan." : langCode === "sv" ? "Du har inga handelser idag." : "You have no events today.");
+  const eventSection =
+    todayEvents.length > 0
+      ? todayEvents.map((event: any) => `- ${formatCalendarEventLine(event, langCode)}`).join('\n')
+      : langCode === 'es'
+        ? 'No tienes eventos hoy.'
+        : langCode === 'fi'
+          ? 'Sinulla ei ole tapahtumia tanaan.'
+          : langCode === 'sv'
+            ? 'Du har inga handelser idag.'
+            : 'You have no events today.';
 
-  const unreadSection = unreadSummaries.length > 0
-    ? unreadSummaries.join("\n")
-    : (langCode === "es" ? "No veo correos urgentes o no leidos importantes." : langCode === "fi" ? "En nae juuri nyt tarkeita lukemattomia sahkoposteja." : langCode === "sv" ? "Jag ser inga viktiga olasta e-postmeddelanden just nu." : "I do not see important unread emails right now.");
+  const unreadSection =
+    unreadSummaries.length > 0
+      ? unreadSummaries.join('\n')
+      : langCode === 'es'
+        ? 'No veo correos urgentes o no leidos importantes.'
+        : langCode === 'fi'
+          ? 'En nae juuri nyt tarkeita lukemattomia sahkoposteja.'
+          : langCode === 'sv'
+            ? 'Jag ser inga viktiga olasta e-postmeddelanden just nu.'
+            : 'I do not see important unread emails right now.';
 
-  const memorySection = userMemories.length > 0
-    ? formatUserMemoriesSummary(userMemories.slice(0, 3), langCode)
-    : (langCode === "es" ? "Sin recuerdos persistentes destacados." : langCode === "fi" ? "Ei korostettuja pysyvia muistoja." : langCode === "sv" ? "Inga viktiga sparade minnen just nu." : "No highlighted persistent memories.");
+  const memorySection =
+    userMemories.length > 0
+      ? formatUserMemoriesSummary(userMemories.slice(0, 3), langCode)
+      : langCode === 'es'
+        ? 'Sin recuerdos persistentes destacados.'
+        : langCode === 'fi'
+          ? 'Ei korostettuja pysyvia muistoja.'
+          : langCode === 'sv'
+            ? 'Inga viktiga sparade minnen just nu.'
+            : 'No highlighted persistent memories.';
 
-  const taskSection = userTasks.length > 0
-    ? formatUserTasksSummary(userTasks.slice(0, 5), langCode)
-    : (langCode === "es" ? "No tienes tareas abiertas." : langCode === "fi" ? "Avoimia tehtavia ei ole." : langCode === "sv" ? "Du har inga oppna uppgifter." : "You have no open tasks.");
+  const taskSection =
+    userTasks.length > 0
+      ? formatUserTasksSummary(userTasks.slice(0, 5), langCode)
+      : langCode === 'es'
+        ? 'No tienes tareas abiertas.'
+        : langCode === 'fi'
+          ? 'Avoimia tehtavia ei ole.'
+          : langCode === 'sv'
+            ? 'Du har inga oppna uppgifter.'
+            : 'You have no open tasks.';
 
-  if (langCode === "es") {
+  if (langCode === 'es') {
     return `${greeting}\n\nResumen de tu dia:\n\nAgenda de hoy:\n${eventSection}\n\nTareas abiertas:\n${taskSection}\n\nCorreos por revisar:\n${unreadSection}\n\nLo que recuerdo:\n${memorySection}`;
   }
-  if (langCode === "fi") {
+  if (langCode === 'fi') {
     return `${greeting}\n\nPaivan yhteenveto:\n\nTaman paivan aikataulu:\n${eventSection}\n\nAvoimet tehtavat:\n${taskSection}\n\nSahkopostit tarkistettavaksi:\n${unreadSection}\n\nMita muistan:\n${memorySection}`;
   }
-  if (langCode === "sv") {
+  if (langCode === 'sv') {
     return `${greeting}\n\nHar ar din dagsoversikt:\n\nDagens schema:\n${eventSection}\n\nOppna uppgifter:\n${taskSection}\n\nE-post att granska:\n${unreadSection}\n\nDet jag minns:\n${memorySection}`;
   }
   return `${greeting}\n\nHere is your day briefing:\n\nToday's schedule:\n${eventSection}\n\nOpen tasks:\n${taskSection}\n\nEmails to review:\n${unreadSection}\n\nWhat I remember:\n${memorySection}`;
 }
 
 // API routes FIRST
-app.get("/api/health", (req, res) => {
-  console.log("Health check requested");
-  res.json({
-    status: "ok",
-    env: {
-      hasGoogleId: !!process.env.GOOGLE_CLIENT_ID,
-      hasGoogleSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-      hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
-      hasGeminiKey: !!process.env.GEMINI_API_KEY,
-      appUrl: process.env.APP_URL,
-      nodeEnv: process.env.NODE_ENV,
-      envValidationComplete,
-      envValidation: envValidationComplete ? envValidationResult : 'pending'
+app.get('/api/health', async (req, res) => {
+  const memUsage = process.memoryUsage();
+  const memUsedMb = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const memTotalMb = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+
+  const checks: { name: string; ok: boolean; detail?: string }[] = [
+    {
+      name: 'env_vars',
+      ok: envValidationComplete && envValidationResult.valid,
+      detail: envValidationComplete
+        ? envValidationResult.valid
+          ? 'all present'
+          : `missing: ${envValidationResult.missing.join(',')}`
+        : 'pending',
+    },
+    {
+      name: 'gemini',
+      ok: geminiInitialized || !!process.env.GEMINI_API_KEY,
+      detail: geminiInitialized ? 'initialized' : geminiInitError || 'pending',
+    },
+    {
+      name: 'memory',
+      ok: memPercent < 90,
+      detail: `${memUsedMb}MB/${memTotalMb}MB (${memPercent}%)`,
+    },
+  ];
+
+  let supabaseOk = false;
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    supabaseOk = !sbErr;
+    checks.push({ name: 'supabase', ok: supabaseOk, detail: sbErr ? sbErr.message : 'connected' });
+  } catch {
+    checks.push({ name: 'supabase', ok: false, detail: 'connection failed' });
+  }
+
+  if (IS_PROD) {
+    let hasStatic = false;
+    const possiblePaths = [
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, 'public_html'),
+      path.join(__dirname, '../public_html'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'public_html'),
+    ];
+    for (const p of possiblePaths) {
+      if (fs.existsSync(path.join(p, 'index.html'))) {
+        hasStatic = true;
+        break;
+      }
     }
+    checks.push({
+      name: 'static_assets',
+      ok: hasStatic,
+      detail: hasStatic ? 'found' : 'index.html missing',
+    });
+  }
+
+  const allOk = checks.every((c) => c.ok);
+  const status = allOk ? 'ok' : 'degraded';
+
+  res.status(allOk ? 200 : 503).json({
+    status,
+    uptime: Math.round(process.uptime()),
+    version: BUILD_VERSION,
+    deployId: SERVER_DEPLOY_ID,
+    checks,
   });
 });
 
-app.get("/api/version", (req, res) => {
+app.get('/api/version', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({
-    appVersion: BUILD_VERSION,
+    version: BUILD_VERSION,
     deployId: SERVER_DEPLOY_ID,
+    minSupported: MIN_SUPPORTED_VERSION,
+    forceUpdate: true,
     startedAt: SERVER_STARTED_AT,
   });
 });
 
 // Detailed health check - works in production
-app.get("/api/health-detailed", (req, res) => {
-  const healthData = {
-    status: "ok",
+app.get('/api/health-detailed', async (req, res) => {
+  const memUsage = process.memoryUsage();
+  const memUsedMb = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const memTotalMb = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+
+  const healthData: Record<string, any> = {
+    status: 'ok',
     timestamp: new Date().toISOString(),
     server: {
       uptime: process.uptime(),
+      uptimeFormatted: `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
       nodeVersion: process.version,
-      platform: process.platform
+      platform: process.platform,
+      pid: process.pid,
+      memory: {
+        heapUsedMb: memUsedMb,
+        heapTotalMb: memTotalMb,
+        heapUsagePercent: memPercent,
+        rssMb: Math.round(memUsage.rss / 1024 / 1024),
+        externalMb: Math.round(memUsage.external / 1024 / 1024),
+      },
     },
     gemini: {
       initialized: geminiInitialized,
       initError: geminiInitError,
       apiKeyPresent: !!process.env.GEMINI_API_KEY,
-      apiKeyLength: process.env.GEMINI_API_KEY?.length || 0
     },
     environment: {
       nodeEnv: process.env.NODE_ENV,
@@ -906,52 +1335,142 @@ app.get("/api/health-detailed", (req, res) => {
       hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
       hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY,
       hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      hasDbUrl: !!process.env.SUPABASE_DB_URL,
       isHostinger: IS_HOSTINGER,
-      isProd: IS_PROD
+      isProd: IS_PROD,
+      securityV2: SECURITY_V2,
     },
     envValidation: {
       complete: envValidationComplete,
       valid: envValidationResult.valid,
       missing: envValidationResult.missing,
-      critical: envValidationResult.critical
-    }
+      critical: envValidationResult.critical,
+    },
   };
 
-  // If Gemini failed, mark as degraded
+  let supabaseOk = false;
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const start = Date.now();
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    const latencyMs = Date.now() - start;
+    healthData.supabase = { connected: !sbErr, latencyMs, error: sbErr?.message || null };
+    supabaseOk = !sbErr;
+  } catch (err: any) {
+    healthData.supabase = { connected: false, latencyMs: -1, error: err.message };
+  }
+
+  if (IS_PROD) {
+    const possiblePaths = [
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, 'public_html'),
+      path.join(__dirname, '../public_html'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'public_html'),
+    ];
+    let foundPath: string | null = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(path.join(p, 'index.html'))) {
+        foundPath = p;
+        break;
+      }
+    }
+    healthData.staticAssets = {
+      found: !!foundPath,
+      path: foundPath,
+      indexHtmlExists: !!foundPath,
+    };
+  }
+
   if (!geminiInitialized && geminiInitError) {
-    healthData.status = "degraded";
+    healthData.status = 'degraded';
   }
 
-  // If env validation failed, mark as error
   if (envValidationComplete && !envValidationResult.valid) {
-    healthData.status = "error";
+    healthData.status = 'error';
   }
 
-  res.json(healthData);
+  if (!supabaseOk) {
+    healthData.status = 'error';
+  }
+
+  if (memPercent >= 90) {
+    healthData.status = 'error';
+  } else if (memPercent >= 80) {
+    healthData.status = 'degraded';
+  }
+
+  const httpStatus =
+    healthData.status === 'ok' ? 200 : healthData.status === 'degraded' ? 200 : 503;
+  res.status(httpStatus).json(healthData);
 });
 
 // Environment variables status endpoint
-app.get("/api/health/env", (req, res) => {
+app.get('/api/health/env', (req, res) => {
   res.json({
     complete: envValidationComplete,
     valid: envValidationResult.valid,
     missing: envValidationResult.missing,
     critical: envValidationResult.critical,
-    all: requiredEnvVars.map(v => ({
+    all: requiredEnvVars.map((v) => ({
       name: v,
       present: !!process.env[v],
-      critical: criticalVars.includes(v)
-    }))
+      critical: ['GEMINI_API_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'].includes(v),
+    })),
+  });
+});
+
+let isShuttingDown = false;
+
+app.get('/api/health/liveness', (req, res) => {
+  if (isShuttingDown) {
+    res.status(503).json({ status: 'shutting_down' });
+    return;
+  }
+  res.status(200).json({ status: 'alive', uptime: Math.round(process.uptime()) });
+});
+
+app.get('/api/health/readiness', async (req, res) => {
+  if (isShuttingDown) {
+    res.status(503).json({ status: 'shutting_down' });
+    return;
+  }
+
+  const checks: { name: string; ok: boolean }[] = [];
+
+  if (!envValidationComplete || !envValidationResult.valid) {
+    checks.push({ name: 'env_vars', ok: false });
+  } else {
+    checks.push({ name: 'env_vars', ok: true });
+  }
+
+  try {
+    const sb = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const { error: sbErr } = await sb.from('profiles').select('id').limit(1);
+    checks.push({ name: 'supabase', ok: !sbErr });
+  } catch {
+    checks.push({ name: 'supabase', ok: false });
+  }
+
+  const memUsage = process.memoryUsage();
+  const memPercent = Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100);
+  checks.push({ name: 'memory', ok: memPercent < 90 });
+
+  const allOk = checks.every((c) => c.ok);
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ready' : 'not_ready',
+    checks,
   });
 });
 
 // Simple health check for Gemini configuration - Development only
-app.get("/api/test/gemini-config", (req, res) => {
+app.get('/api/test/gemini-config', (req, res) => {
   // Only allow in development
   if (IS_PROD) {
     return res.status(403).json({
-      error: "Endpoint disabled in production",
-      message: "For security reasons, this endpoint is only available in development"
+      error: 'Endpoint disabled in production',
+      message: 'For security reasons, this endpoint is only available in development',
     });
   }
 
@@ -959,129 +1478,130 @@ app.get("/api/test/gemini-config", (req, res) => {
   res.json({
     hasApiKey: !!apiKey,
     nodeEnv: process.env.NODE_ENV,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
 // Test endpoint for Gemini API - use this to verify the chat is working - Development only
-app.get("/api/test/gemini", async (req, res) => {
+app.get('/api/test/gemini', async (req, res) => {
   // Only allow in development
   if (IS_PROD) {
     return res.status(403).json({
-      status: "error",
-      message: "Endpoint disabled in production for security reasons"
+      status: 'error',
+      message: 'Endpoint disabled in production for security reasons',
     });
   }
 
-  console.log("🧪 Gemini test endpoint called");
+  console.log('🧪 Gemini test endpoint called');
 
   try {
     // Step 1: Check API key
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error("❌ GEMINI_API_KEY not set");
+      console.error('❌ GEMINI_API_KEY not set');
       return res.status(500).json({
-        status: "error",
-        step: "config",
-        message: "GEMINI_API_KEY environment variable is not set",
-        solution: "Add GEMINI_API_KEY to your environment variables in Hostinger"
+        status: 'error',
+        step: 'config',
+        message: 'GEMINI_API_KEY environment variable is not set',
+        solution: 'Add GEMINI_API_KEY to your environment variables in Hostinger',
       });
     }
-    console.log("✅ API key found");
+    console.log('✅ API key found');
 
     // Step 2: Initialize client
-    console.log("🔄 Initializing GoogleGenAI client...");
+    console.log('🔄 Initializing GoogleGenAI client...');
     let ai;
     try {
       ai = getGenAI();
-      console.log("✅ GoogleGenAI client initialized");
+      console.log('✅ GoogleGenAI client initialized');
     } catch (initError: any) {
-      console.error("❌ Failed to initialize GoogleGenAI:", initError);
+      console.error('❌ Failed to initialize GoogleGenAI:', initError);
       return res.status(500).json({
-        status: "error",
-        step: "initialization",
-        message: "Failed to initialize Gemini client",
-        error: initError.message
+        status: 'error',
+        step: 'initialization',
+        message: 'Failed to initialize Gemini client',
+        error: initError.message,
       });
     }
 
     // Step 3: Make API call
-    console.log("🔄 Calling Gemini API with model gemini-2.5-flash...");
+    console.log('🔄 Calling Gemini API with model gemini-2.5-flash...');
     let response;
     try {
       response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: "Hola, ¿cómo estás?",
+        model: 'gemini-2.5-flash',
+        contents: 'Hola, ¿cómo estás?',
         config: {
-          systemInstruction: "Eres Mima, un asistente personal. SIEMPRE responde en español.",
+          systemInstruction: 'Eres Mima, un asistente personal. SIEMPRE responde en español.',
         },
       });
-      console.log("✅ Gemini API responded");
+      console.log('✅ Gemini API responded');
     } catch (apiError: any) {
-      console.error("❌ Gemini API call failed:", apiError);
+      console.error('❌ Gemini API call failed:', apiError);
       return res.status(500).json({
-        status: "error",
-        step: "api_call",
-        message: "Gemini API call failed",
+        status: 'error',
+        step: 'api_call',
+        message: 'Gemini API call failed',
         error: apiError.message,
         details: apiError.stack,
-        model: "gemini-2.5-flash"
+        model: 'gemini-2.5-flash',
       });
     }
 
     // Step 4: Return success
-    console.log("✅ Gemini test completed successfully");
+    console.log('✅ Gemini test completed successfully');
     res.json({
-      status: "ok",
-      step: "complete",
-      message: "Gemini API is working correctly",
+      status: 'ok',
+      step: 'complete',
+      message: 'Gemini API is working correctly',
       response: response.text,
-      model: "gemini-2.5-flash"
+      model: 'gemini-2.5-flash',
     });
-
   } catch (error: any) {
-    console.error("❌ Unexpected error in Gemini test:", error);
+    console.error('❌ Unexpected error in Gemini test:', error);
     res.status(500).json({
-      status: "error",
-      step: "unknown",
-      message: "Unexpected error during Gemini test",
+      status: 'error',
+      step: 'unknown',
+      message: 'Unexpected error during Gemini test',
       error: error.message,
-      stack: error.stack
+      stack: error.stack,
     });
   }
 });
 
 // Debug endpoint for chat - test chat with specific parameters
 // Only available in development for security
-app.get("/api/debug/chat", async (req, res) => {
+app.get('/api/debug/chat', async (req, res) => {
   // Only allow in development
   if (IS_PROD) {
     return res.status(403).json({
-      status: "error",
-      message: "Endpoint disabled in production for security reasons"
+      status: 'error',
+      message: 'Endpoint disabled in production for security reasons',
     });
   }
 
   const { message = 'test', language = 'es', mode = 'Neutral' } = req.query;
 
-  console.log("🔍 Debug chat endpoint called");
+  console.log('🔍 Debug chat endpoint called');
 
   const debugInfo: any = {
     timestamp: new Date().toISOString(),
     geminiInitialized,
     geminiInitError,
     hasApiKey: !!process.env.GEMINI_API_KEY,
-    apiKeyFirstChars: process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'NOT SET',
+    apiKeyFirstChars: process.env.GEMINI_API_KEY
+      ? process.env.GEMINI_API_KEY.substring(0, 8) + '...'
+      : 'NOT SET',
     apiKeyLength: process.env.GEMINI_API_KEY?.length || 0,
     testParams: { message, language, mode },
-    languageInstructions: Object.keys(languageInstructions)
+    languageInstructions: Object.keys(languageInstructions),
   };
 
   try {
     // Test Gemini API
-    console.log("🔄 Testing Gemini API connection...");
+    console.log('🔄 Testing Gemini API connection...');
     const ai = getGenAI();
-    console.log("✅ Gemini client obtained");
+    console.log('✅ Gemini client obtained');
 
     const selectedModel = 'gemini-2.5-flash';
     console.log(`🔄 Calling model: ${selectedModel}`);
@@ -1091,7 +1611,7 @@ app.get("/api/debug/chat", async (req, res) => {
       contents: message as string,
       config: {
         systemInstruction: languageInstructions[language as string] || languageInstructions.en,
-        maxOutputTokens: 100
+        maxOutputTokens: 100,
       },
     });
 
@@ -1103,7 +1623,7 @@ app.get("/api/debug/chat", async (req, res) => {
 
     res.json(debugInfo);
   } catch (error: any) {
-    console.error("❌ Debug chat error:", error);
+    console.error('❌ Debug chat error:', error);
     debugInfo['error'] = error.message;
     debugInfo['errorStack'] = error.stack;
     debugInfo['errorDetails'] = JSON.stringify(error, null, 2);
@@ -1114,13 +1634,13 @@ app.get("/api/debug/chat", async (req, res) => {
 });
 
 // Endpoint to get last chat error - for debugging production issues
-app.get("/api/debug/last-chat-error", (req, res) => {
+app.get('/api/debug/last-chat-error', (req, res) => {
   // Return last OAuth log which may contain error info
   const lastLogs = oauthLogs.slice(-10);
   res.json({
     timestamp: new Date().toISOString(),
     lastLogs,
-    message: "Check server logs for detailed error information"
+    message: 'Check server logs for detailed error information',
   });
 });
 
@@ -1587,7 +2107,7 @@ app.post("/api/ai/gemini/route", authenticateSupabaseUser, injectProxyHeaders, a
   }
 });
 
-app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
+app.get('/api/auth/url', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     req.session.userId = user.id;
@@ -1596,11 +2116,11 @@ app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
     // Si no se guarda, la sesión se pierde cuando el usuario vuelve del callback
     try {
       await saveSession(req);
-      logToFile("SESSION SAVED", { userId: user.id, sessionID: req.sessionID });
+      logToFile('SESSION SAVED', { userId: user.id, sessionID: req.sessionID });
     } catch (err: any) {
       console.error('CRITICAL: Failed to save session before OAuth:', err);
-      logToFile("SESSION SAVE FAILED", { error: err.message, userId: user.id });
-      return res.status(500).json({ error: "Failed to save session" });
+      logToFile('SESSION SAVE FAILED', { error: err.message, userId: user.id });
+      return res.status(500).json({ error: 'Failed to save session' });
     }
 
     const oauth2Client = getOAuth2Client(req);
@@ -1608,17 +2128,20 @@ app.get("/api/auth/url", authenticateSupabaseUser, async (req, res) => {
       access_type: 'offline',
       scope: GOOGLE_REQUIRED_SCOPES,
       prompt: 'consent',
-      state: `google_auth:${user.id}`
+      state: `google_auth:${user.id}`,
     });
-    console.log("🔗 Generated Google Auth URL:", url);
+    console.log('🔗 Generated Google Auth URL:', url);
     res.json({ url });
   } catch (error) {
     console.error('❌ Error generating auth url:', error);
-    res.status(500).json({ error: "Failed to generate auth url", details: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({
+      error: 'Failed to generate auth url',
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
-app.get("/api/debug", (req, res) => {
+app.get('/api/debug', (req, res) => {
   res.json({
     timestamp: new Date().toISOString(),
     env: {
@@ -1629,15 +2152,15 @@ app.get("/api/debug", (req, res) => {
       hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
       hasGeminiKey: !!process.env.GEMINI_API_KEY,
       hasSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
-      hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY
+      hasSupabaseKey: !!process.env.VITE_SUPABASE_ANON_KEY,
     },
     headers: req.headers,
-    session: !!req.session
+    session: !!req.session,
   });
 });
 
 // OAuth Debug endpoint - check session status
-app.get("/api/oauth/debug", (req, res) => {
+app.get('/api/oauth/debug', (req, res) => {
   res.json({
     timestamp: new Date().toISOString(),
     sessionID: req.sessionID,
@@ -1646,12 +2169,12 @@ app.get("/api/oauth/debug", (req, res) => {
     sessionTokens: req.session?.tokens ? 'present' : 'absent',
     cookies: req.headers.cookie,
     userAgent: req.headers['user-agent'],
-    message: 'Use this endpoint to verify session persistence'
+    message: 'Use this endpoint to verify session persistence',
   });
 });
 
 // Read OAuth logs (for debugging)
-app.get("/api/oauth/logs", (req, res) => {
+app.get('/api/oauth/logs', (req, res) => {
   try {
     if (oauthLogs.length === 0) {
       res.setHeader('Content-Type', 'text/plain');
@@ -1661,13 +2184,16 @@ app.get("/api/oauth/logs", (req, res) => {
       res.send(oauthLogs.join('\n'));
     }
   } catch (e) {
-    res.status(500).json({ error: 'Cannot read logs', details: e instanceof Error ? e.message : 'Unknown error' });
+    res.status(500).json({
+      error: 'Cannot read logs',
+      details: e instanceof Error ? e.message : 'Unknown error',
+    });
   }
 });
 
 // Helper to get app URL
 function getAppUrl(req?: express.Request): string {
-  const customDomain = "https://me.mima-app.com";
+  const customDomain = 'https://me.mima-app.com';
   if (req) {
     const host = req.get('host');
     if (host && host.includes('mima-app.com')) {
@@ -1678,65 +2204,65 @@ function getAppUrl(req?: express.Request): string {
   return process.env.APP_URL || customDomain;
 }
 
-app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res) => {
+app.get(['/api/auth/callback/google', '/auth/callback/google'], async (req, res) => {
   const { code, error: googleError, state } = req.query;
   let userId = req.session.userId;
   const appUrl = getAppUrl(req);
 
   // Log to both console and file
   const logData = {
-    code: code ? "present" : "absent",
+    code: code ? 'present' : 'absent',
     googleError: googleError || null,
     state: state || null,
     sessionID: req.sessionID,
     hasSession: !!req.session,
     sessionUserId: userId || null,
-    cookies: req.headers.cookie ? "present" : "absent",
-    userAgent: req.headers['user-agent']
+    cookies: req.headers.cookie ? 'present' : 'absent',
+    userAgent: req.headers['user-agent'],
   };
 
-  logToFile("OAUTH CALLBACK RECEIVED", logData);
+  logToFile('OAUTH CALLBACK RECEIVED', logData);
 
-  console.log("═══════════════════════════════════════════");
-  console.log("🔑 OAUTH CALLBACK RECEIVED");
-  console.log("═══════════════════════════════════════════");
-  console.log("   Code:", code ? "✅ present" : "❌ absent");
-  console.log("   Error from Google:", googleError || "none");
-  console.log("   State:", state || "none");
-  console.log("   Session ID:", req.sessionID);
-  console.log("   Has session:", !!req.session);
-  console.log("   Session userId:", userId || "❌ NOT SET");
-  console.log("   App URL:", appUrl);
-  console.log("   Cookies received:", req.headers.cookie ? "✅ yes" : "❌ none");
+  console.log('═══════════════════════════════════════════');
+  console.log('🔑 OAUTH CALLBACK RECEIVED');
+  console.log('═══════════════════════════════════════════');
+  console.log('   Code:', code ? '✅ present' : '❌ absent');
+  console.log('   Error from Google:', googleError || 'none');
+  console.log('   State:', state || 'none');
+  console.log('   Session ID:', req.sessionID);
+  console.log('   Has session:', !!req.session);
+  console.log('   Session userId:', userId || '❌ NOT SET');
+  console.log('   App URL:', appUrl);
+  console.log('   Cookies received:', req.headers.cookie ? '✅ yes' : '❌ none');
 
   // Fallback for lost session: extract userId from state
   if (!userId && state && typeof state === 'string' && state.startsWith('google_auth:')) {
     userId = state.split(':')[1];
-    console.log("🔄 Recovered userId from state fallback:", userId);
+    console.log('🔄 Recovered userId from state fallback:', userId);
     req.session.userId = userId;
 
     // Save session immediately after recovery
     try {
       await saveSession(req);
-      console.log("✅ Session saved after userId recovery");
+      console.log('✅ Session saved after userId recovery');
     } catch (e) {
-      console.error("❌ Failed to save session after recovery:", e);
+      console.error('❌ Failed to save session after recovery:', e);
     }
   }
 
   // Helper function to redirect with error
   const redirectWithError = (message: string) => {
-    console.error("❌ OAUTH ERROR:", message);
-    logToFile("OAUTH ERROR", { message, sessionID: req.sessionID });
+    console.error('❌ OAUTH ERROR:', message);
+    logToFile('OAUTH ERROR', { message, sessionID: req.sessionID });
     const errorParam = encodeURIComponent(message);
-    console.log("   Redirecting to:", `${appUrl}/?error=google_auth_failed`);
+    console.log('   Redirecting to:', `${appUrl}/?error=google_auth_failed`);
     res.redirect(`${appUrl}/?error=google_auth_failed&error_description=${errorParam}`);
   };
 
   // Helper function to redirect with success
   const redirectWithSuccess = () => {
-    console.log("✅ OAUTH SUCCESS - Redirecting to app...");
-    logToFile("OAUTH SUCCESS", { sessionID: req.sessionID, userId });
+    console.log('✅ OAUTH SUCCESS - Redirecting to app...');
+    logToFile('OAUTH SUCCESS', { sessionID: req.sessionID, userId });
 
     // Redirect with success param - no delay needed if we awaited saveSession
     res.redirect(`${appUrl}/?google_connected=true`);
@@ -1748,42 +2274,48 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
   }
 
   if (!code) {
-    return redirectWithError("No authorization code provided by Google");
+    return redirectWithError('No authorization code provided by Google');
   }
 
   if (!userId) {
-    console.error("❌ CRITICAL: No userId in session or state");
-    console.error("   This usually means the session cookie was not sent by the browser");
-    console.error("   Possible causes:");
-    console.error("     - Cookie was blocked (secure/sameSite settings)");
-    console.error("     - Session expired");
-    console.error("     - Browser blocking third-party cookies");
-    return redirectWithError("Session expired or invalid. Please try again.");
+    console.error('❌ CRITICAL: No userId in session or state');
+    console.error('   This usually means the session cookie was not sent by the browser');
+    console.error('   Possible causes:');
+    console.error('     - Cookie was blocked (secure/sameSite settings)');
+    console.error('     - Session expired');
+    console.error('     - Browser blocking third-party cookies');
+    return redirectWithError('Session expired or invalid. Please try again.');
   }
 
   try {
-    console.log("🔄 Starting token exchange with Google...");
+    console.log('🔄 Starting token exchange with Google...');
 
     // Process tokens
     const oauth2Client = getOAuth2Client(req);
-    console.log("   OAuth2Client created with redirectUri");
+    console.log('   OAuth2Client created with redirectUri');
 
     const { tokens } = await oauth2Client.getToken(code as string);
-    console.log("✅ Tokens retrieved from Google:");
-    console.log("   - Access token:", tokens.access_token ? "✅ present" : "❌ missing");
-    console.log("   - Refresh token:", tokens.refresh_token ? "✅ present" : "⚠️  missing (will use existing if available)");
-    console.log("   - Expiry date:", tokens.expiry_date);
+    console.log('✅ Tokens retrieved from Google:');
+    console.log('   - Access token:', tokens.access_token ? '✅ present' : '❌ missing');
+    console.log(
+      '   - Refresh token:',
+      tokens.refresh_token ? '✅ present' : '⚠️  missing (will use existing if available)'
+    );
+    console.log('   - Expiry date:', tokens.expiry_date);
 
     let finalTokens = tokens;
 
     // Save tokens to Supabase
     if (supabaseUrl && supabaseAnonKey) {
-      console.log("💾 Saving tokens to Supabase...");
-      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+      console.log('💾 Saving tokens to Supabase...');
+      const supabaseAdmin = createClient(
+        supabaseUrl,
+        process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+      );
 
       // If we didn't get a refresh token, try to preserve the existing one
       if (!tokens.refresh_token) {
-        console.log("   No refresh token, checking for existing token in DB...");
+        console.log('   No refresh token, checking for existing token in DB...');
         const { data } = await supabaseAdmin
           .from('user_google_tokens')
           .select('tokens')
@@ -1795,13 +2327,13 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
             const existingTokens = JSON.parse(decrypt(data.tokens));
             if (existingTokens.refresh_token) {
               finalTokens = { ...existingTokens, ...tokens };
-              console.log("✅ Merged existing refresh token with new tokens");
+              console.log('✅ Merged existing refresh token with new tokens');
             }
           } catch (e) {
-            console.error("⚠️  Failed to decrypt existing tokens for merge:", e);
+            console.error('⚠️  Failed to decrypt existing tokens for merge:', e);
           }
         } else {
-          console.log("   No existing tokens found in DB");
+          console.log('   No existing tokens found in DB');
         }
       }
 
@@ -1809,66 +2341,67 @@ app.get(["/api/auth/callback/google", "/auth/callback/google"], async (req, res)
 
       // Save to session
       req.session.tokens = finalTokens;
-      console.log("   Tokens assigned to session");
+      console.log('   Tokens assigned to session');
 
       // IMPORTANT: Save session before redirect to ensure cookie is written
       try {
         await saveSession(req);
       } catch (err: any) {
-        console.error("❌ Session save error:", err);
+        console.error('❌ Session save error:', err);
         throw err;
       }
 
       // Encrypt and save to database
-      console.log("   Upserting to user_google_tokens table...");
+      console.log('   Upserting to user_google_tokens table...');
       await persistGoogleTokens(userId, finalTokens);
 
-      console.log("✅ Tokens saved to Supabase successfully");
+      console.log('✅ Tokens saved to Supabase successfully');
     } else {
       // Save to session only
-      console.log("   Supabase not configured, saving to session only");
+      console.log('   Supabase not configured, saving to session only');
       finalTokens = await attachGoogleScopeMetadata(finalTokens, req);
       req.session.tokens = finalTokens;
       try {
         await saveSession(req);
       } catch (err: any) {
-        console.error("❌ Session save error:", err);
+        console.error('❌ Session save error:', err);
         throw err;
       }
     }
 
-    console.log("═══════════════════════════════════════════");
-    console.log("✅ OAUTH FLOW COMPLETED SUCCESSFULLY");
-    console.log("═══════════════════════════════════════════");
+    console.log('═══════════════════════════════════════════');
+    console.log('✅ OAUTH FLOW COMPLETED SUCCESSFULLY');
+    console.log('═══════════════════════════════════════════');
     return redirectWithSuccess();
-
   } catch (err: any) {
     const errorDetails = {
       message: err.message,
       stack: err.stack,
       sessionID: req.sessionID,
-      userId: userId || null
+      userId: userId || null,
     };
-    logToFile("OAUTH EXCEPTION", errorDetails);
-    console.error("═══════════════════════════════════════════");
-    console.error("❌ OAUTH ERROR:");
-    console.error("   Message:", err.message);
-    console.error("   Stack:", err.stack);
-    console.error("═══════════════════════════════════════════");
+    logToFile('OAUTH EXCEPTION', errorDetails);
+    console.error('═══════════════════════════════════════════');
+    console.error('❌ OAUTH ERROR:');
+    console.error('   Message:', err.message);
+    console.error('   Stack:', err.stack);
+    console.error('═══════════════════════════════════════════');
     const errorMessage = err instanceof Error ? err.message : 'Unknown error during authentication';
     return redirectWithError(errorMessage);
   }
 });
 
-
-app.get("/api/auth/status", async (req, res) => {
+app.get('/api/auth/status', async (req, res) => {
   try {
     let userId: string | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader) {
       const token = authHeader.split(' ')[1];
       const supabase = createClient(supabaseUrl, supabaseAnonKey);
-      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser(token);
       if (!authError && user) {
         userId = user.id;
       }
@@ -1877,7 +2410,10 @@ app.get("/api/auth/status", async (req, res) => {
     let resolvedTokens = req.session.tokens ?? null;
 
     if (!resolvedTokens && userId) {
-      const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+      const supabaseAdmin = createClient(
+        supabaseUrl,
+        process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+      );
       const { data, error } = await supabaseAdmin
         .from('user_google_tokens')
         .select('tokens')
@@ -1885,14 +2421,24 @@ app.get("/api/auth/status", async (req, res) => {
         .single();
 
       if (error || !data || !data.tokens) {
-        return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
+        return res.json({
+          isConnected: false,
+          hasWriteAccess: false,
+          reconnectRequired: false,
+          missingScopes: [],
+        });
       }
 
       resolvedTokens = JSON.parse(decrypt(data.tokens));
     }
 
     if (!resolvedTokens) {
-      return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
+      return res.json({
+        isConnected: false,
+        hasWriteAccess: false,
+        reconnectRequired: false,
+        missingScopes: [],
+      });
     }
 
     const enrichedTokens = await attachGoogleScopeMetadata(resolvedTokens, req);
@@ -1904,7 +2450,7 @@ app.get("/api/auth/status", async (req, res) => {
 
     const missingScopes = getMissingGoogleScopes(enrichedTokens, [
       ...GOOGLE_WRITE_SCOPES.calendar,
-      ...GOOGLE_WRITE_SCOPES.gmail
+      ...GOOGLE_WRITE_SCOPES.gmail,
     ]);
 
     return res.json({
@@ -1914,43 +2460,51 @@ app.get("/api/auth/status", async (req, res) => {
       missingScopes,
     });
   } catch (error) {
-    console.error("Error checking token status in Supabase:", error);
-    return res.json({ isConnected: false, hasWriteAccess: false, reconnectRequired: false, missingScopes: [] });
+    console.error('Error checking token status in Supabase:', error);
+    return res.json({
+      isConnected: false,
+      hasWriteAccess: false,
+      reconnectRequired: false,
+      missingScopes: [],
+    });
   }
 });
 
-app.delete("/api/auth/google", authenticateSupabaseUser, async (req, res) => {
+app.delete('/api/auth/google', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     req.session.tokens = undefined;
 
-    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+    );
     const { error } = await supabaseAdmin
       .from('user_google_tokens')
       .delete()
       .eq('user_id', user.id);
 
     if (error) {
-      console.error("Failed to disconnect Google tokens:", error.message);
+      console.error('Failed to disconnect Google tokens:', error.message);
       return res.status(500).json({
-        error: "Failed to disconnect Google",
-        errorCode: "GOOGLE_DISCONNECT_FAILED",
+        error: 'Failed to disconnect Google',
+        errorCode: 'GOOGLE_DISCONNECT_FAILED',
       });
     }
 
     try {
       await saveSession(req);
     } catch (sessionError) {
-      console.warn("Failed to persist cleared Google session:", sessionError);
+      console.warn('Failed to persist cleared Google session:', sessionError);
     }
 
     return res.json({ success: true });
   } catch (error: any) {
-    console.error("Error disconnecting Google:", error);
+    console.error('Error disconnecting Google:', error);
     return res.status(500).json({
-      error: "Failed to disconnect Google",
+      error: 'Failed to disconnect Google',
       details: error.message,
-      errorCode: "GOOGLE_DISCONNECT_FAILED",
+      errorCode: 'GOOGLE_DISCONNECT_FAILED',
     });
   }
 });
@@ -1958,71 +2512,75 @@ app.delete("/api/auth/google", authenticateSupabaseUser, async (req, res) => {
 // ---- User Preferences Endpoints ----
 
 // Get user preferences
-app.get("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
+app.get('/api/user/preferences', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const preferences = await getUserPreferences(user.id);
-    
+
     if (!preferences) {
       console.warn(`⚠️ No preferences found for user ${user.id}, returning defaults`);
       return res.json({
         user_id: user.id,
         onboarding_done: false,
         voice_id: 'DODLEQrClDo8wCz460ld',
-        language: 'en'
+        language: 'en',
       });
     }
 
-    console.log(`✅ Preferences loaded for user ${user.id}:`, { onboarding_done: preferences.onboarding_done });
+    console.log(`✅ Preferences loaded for user ${user.id}:`, {
+      onboarding_done: preferences.onboarding_done,
+    });
     res.json(preferences);
   } catch (error: any) {
-    console.error("❌ Error fetching user preferences:", error);
-    res.status(500).json({ 
-      error: "Failed to fetch user preferences", 
+    console.error('❌ Error fetching user preferences:', error);
+    res.status(500).json({
+      error: 'Failed to fetch user preferences',
       details: error.message,
-      errorCode: "DB_PREFS_FETCH_FAILED"
+      errorCode: 'DB_PREFS_FETCH_FAILED',
     });
   }
 });
 
 // Update user preferences
-app.post("/api/user/preferences", authenticateSupabaseUser, async (req, res) => {
+app.post('/api/user/preferences', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const { onboarding_done, voice_id, language } = req.body;
     const success = await updateUserPreferences(user.id, {
       ...(onboarding_done !== undefined && { onboarding_done }),
       ...(voice_id !== undefined && { voice_id }),
-      ...(language !== undefined && { language })
+      ...(language !== undefined && { language }),
     });
 
     if (success) {
       res.json({ success: true });
     } else {
-      console.error("❌ Failed to update user preferences in database");
-      res.status(500).json({ error: "Failed to save preferences to database" });
+      console.error('❌ Failed to update user preferences in database');
+      res.status(500).json({ error: 'Failed to save preferences to database' });
     }
   } catch (error: any) {
-    console.error("❌ Error updating user preferences:", error);
-    res.status(500).json({ error: "Internal server error during preferences update", details: error.message });
+    console.error('❌ Error updating user preferences:', error);
+    res
+      .status(500)
+      .json({ error: 'Internal server error during preferences update', details: error.message });
   }
 });
 
 // Get chat history
-app.get("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
+app.get('/api/chat/history', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const limit = parseInt(req.query.limit as string) || 50;
     const messages = await getChatHistory(user.id, limit);
     res.json(messages);
   } catch (error: any) {
-    console.error("❌ Error fetching chat history:", error);
-    res.status(500).json({ error: "Failed to fetch chat history", details: error.message });
+    console.error('❌ Error fetching chat history:', error);
+    res.status(500).json({ error: 'Failed to fetch chat history', details: error.message });
   }
 });
 
 // Save chat message
-app.post("/api/chat/message", authenticateSupabaseUser, async (req, res) => {
+app.post('/api/chat/message', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const { role, content, mode, audio_data } = req.body;
@@ -2031,79 +2589,84 @@ app.post("/api/chat/message", authenticateSupabaseUser, async (req, res) => {
       role,
       content,
       mode,
-      audio_data
+      audio_data,
     });
 
     if (success) {
       res.json({ success: true });
     } else {
-      console.error("❌ Failed to save chat message to database");
-      res.status(500).json({ error: "Failed to save message to database" });
+      console.error('❌ Failed to save chat message to database');
+      res.status(500).json({ error: 'Failed to save message to database' });
     }
   } catch (error: any) {
-    console.error("❌ Error saving chat message:", error);
-    res.status(500).json({ error: "Internal server error during message save", details: error.message });
+    console.error('❌ Error saving chat message:', error);
+    res
+      .status(500)
+      .json({ error: 'Internal server error during message save', details: error.message });
   }
 });
 
 // Clear chat history
-app.delete("/api/chat/history", authenticateSupabaseUser, async (req, res) => {
+app.delete('/api/chat/history', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
     const success = await clearChatHistory(user.id);
     if (success) {
       res.json({ success: true });
     } else {
-      console.warn("Failed to clear chat history");
+      console.warn('Failed to clear chat history');
       res.status(500).json({ success: false, error: 'Failed to clear chat history' });
     }
   } catch (error: any) {
-    console.error("Error clearing chat history:", error);
-    res.status(500).json({ success: false, error: 'Failed to clear chat history', details: error.message });
+    console.error('Error clearing chat history:', error);
+    res
+      .status(500)
+      .json({ success: false, error: 'Failed to clear chat history', details: error.message });
   }
 });
 
-app.get("/api/user/tasks", authenticateSupabaseUser, async (req, res) => {
+app.get('/api/user/tasks', authenticateSupabaseUser, async (req, res) => {
   try {
     const user = (req as any).user;
-    const status = req.query.status === "completed" ? "completed" : "open";
+    const status = req.query.status === 'completed' ? 'completed' : 'open';
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
     const tasks = await getUserTasks(user.id, { status, limit });
     res.json(tasks);
   } catch (error: any) {
-    console.error("Error fetching user tasks:", error);
-    res.status(500).json({ error: "Failed to fetch tasks", details: error.message });
+    console.error('Error fetching user tasks:', error);
+    res.status(500).json({ error: 'Failed to fetch tasks', details: error.message });
   }
 });
 
 const ttsPreviewCache: Record<string, string> = {};
 
-app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
+app.get('/api/tts/preview', authenticateSupabaseUser, async (req, res) => {
   const { voiceId, text } = req.query;
   if (!voiceId || typeof voiceId !== 'string') {
-    return res.status(400).json({ error: "voiceId is required" });
+    return res.status(400).json({ error: 'voiceId is required' });
   }
 
   if (!process.env.ELEVENLABS_API_KEY) {
-    return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
+    return res.status(500).json({ error: 'ELEVENLABS_API_KEY is not configured' });
   }
 
   try {
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
-        'Accept': 'audio/mpeg',
+        Accept: 'audio/mpeg',
         'xi-api-key': process.env.ELEVENLABS_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        text: typeof text === 'string' && text.trim() ? text : "Hi, I am Mima. This is how I sound.",
+        text:
+          typeof text === 'string' && text.trim() ? text : 'Hi, I am Mima. This is how I sound.',
         model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.5
-        }
-      })
+          similarity_boost: 0.5,
+        },
+      }),
     });
 
     if (!response.ok) {
@@ -2119,28 +2682,57 @@ app.get("/api/tts/preview", authenticateSupabaseUser, async (req, res) => {
     res.setHeader('Content-Disposition', 'inline; filename="mima-preview.mp3"');
     res.send(audioBuffer);
   } catch (error) {
-    console.error("Preview TTS Error:", error);
-    res.status(500).json({ error: "Failed to generate preview audio" });
+    console.error('Preview TTS Error:', error);
+    res.status(500).json({ error: 'Failed to generate preview audio' });
   }
 });
 
-app.post("/api/tts", authenticateSupabaseUser, async (req, res) => {
-  const { text, voiceId } = req.body;
-  console.log("TTS request received", { textLength: text?.length, voiceId });
+const ALLOWED_TTS_VOICE_IDS = new Set([
+  'DODLEQrClDo8wCz460ld',
+  'L0yTtpRXzdyzQlzALhgD',
+  'd3MFdIuCfbAIwiu7jC4a',
+  'l4Coq6695JDX9xtLqXDE',
+  'EXAVITQu4vr4xnSDxMaL',
+  'FGY2WhTYpP6BYn95boSj',
+  'IKne3meq5a9ay67vC7pY',
+  'YSabzCJMvEHDduIDMdwV',
+  'c4ZwDxrFaobUF5e1KlEM',
+  'RiWFFlzYFZuu4lPMig3i',
+  'cLAH1kXlkAivJHxCW601',
+  'HqmZnnvy6tCQd8EGWKRT',
+  '1Iztu4UHnTb9SUjJcpS1',
+  'CaJslL1xziwefCeTNzHv',
+  'm7yTemJqdIqrcNleANfX',
+  'qBvury71WUJfVeT1STkG',
+]);
 
-  if (!process.env.ELEVENLABS_API_KEY) {
-    console.error("ELEVENLABS_API_KEY is missing");
-    return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured" });
+app.post('/api/tts', authenticateSupabaseUser, async (req, res) => {
+  const { text, voiceId } = req.body;
+  const requestStart = Date.now();
+  console.log('TTS request received', { textLength: text?.length, voiceId });
+
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text is required' });
   }
 
+  if (!process.env.ELEVENLABS_API_KEY) {
+    console.error('ELEVENLABS_API_KEY is missing');
+    return res.status(500).json({ error: 'ELEVENLABS_API_KEY is not configured' });
+  }
+
+  const selectedVoiceId =
+    voiceId && ALLOWED_TTS_VOICE_IDS.has(voiceId) ? voiceId : 'DODLEQrClDo8wCz460ld';
+
   try {
-    const selectedVoiceId = voiceId || "DODLEQrClDo8wCz460ld";
     console.log(`Calling ElevenLabs with voiceId: ${selectedVoiceId}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
       method: 'POST',
       headers: {
-        'Accept': 'audio/mpeg',
+        Accept: 'audio/mpeg',
         'xi-api-key': process.env.ELEVENLABS_API_KEY,
         'Content-Type': 'application/json',
       },
@@ -2149,27 +2741,57 @@ app.post("/api/tts", authenticateSupabaseUser, async (req, res) => {
         model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.5
-        }
-      })
+          similarity_boost: 0.5,
+        },
+      }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
+      clearTimeout(timeoutId);
       const errorText = await response.text();
       console.error(`ElevenLabs API error: ${response.status}`, errorText);
+      if (response.status === 429) {
+        return res.status(429).json({
+          error: 'Voice service rate limited. Please try again later.',
+          errorCode: 'TTS_RATE_LIMITED',
+        });
+      }
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
     const audioBuffer = Buffer.from(await response.arrayBuffer());
+    clearTimeout(timeoutId);
+
+    const generationTimeMs = Date.now() - requestStart;
+    console.log(
+      `TTS_PROXY_SUCCESS voiceId=${selectedVoiceId} size=${audioBuffer.length} time=${generationTimeMs}ms`
+    );
+
+    const etag =
+      '"' + crypto.createHash('md5').update(audioBuffer).digest('hex').slice(0, 16) + '"';
+
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', String(audioBuffer.length));
-    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Cache-Control', 'private, max-age=86400, stale-while-revalidate=3600');
+    res.setHeader('ETag', etag);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Disposition', 'inline; filename="mima-response.mp3"');
+    res.setHeader('X-Generation-Time-Ms', String(generationTimeMs));
     res.send(audioBuffer);
-  } catch (error) {
+  } catch (error: any) {
+    const generationTimeMs = Date.now() - requestStart;
+    if (error?.name === 'AbortError') {
+      console.error(`TTS_PROXY_TIMEOUT: ElevenLabs request aborted after ${generationTimeMs}ms`);
+      return res
+        .status(504)
+        .json({ error: 'Voice service timed out. Please try again.', errorCode: 'TTS_TIMEOUT' });
+    }
     console.error('TTS Error:', error);
-    res.status(500).json({ error: "Failed to generate speech", details: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({
+      error: 'Failed to generate speech',
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
@@ -2271,7 +2893,9 @@ function parseNaturalDate(
 ): { start: Date; end?: Date; isAllDay: boolean } | null {
   const refDate = options?.referenceDate || new Date();
   const candidates = Array.from(
-    new Set([dateText.trim(), normalizeDateTextForParsing(dateText, options?.language)].filter(Boolean))
+    new Set(
+      [dateText.trim(), normalizeDateTextForParsing(dateText, options?.language)].filter(Boolean)
+    )
   );
 
   for (const parser of getChronoParsers(options?.language)) {
@@ -2337,14 +2961,14 @@ async function createCalendarEvent(userTokens: any, eventData: CalendarEventData
 
 // ---- STT (Speech to Text) Endpoint ----
 
-app.post("/api/transcribe", authenticateSupabaseUser, upload.single('audio'), async (req, res) => {
+app.post('/api/transcribe', authenticateSupabaseUser, upload.single('audio'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: "No audio file provided" });
+    return res.status(400).json({ error: 'No audio file provided' });
   }
 
-  console.log("🎙️ Transcription request received", {
+  console.log('🎙️ Transcription request received', {
     size: req.file.size,
-    mimetype: req.file.mimetype
+    mimetype: req.file.mimetype,
   });
 
   try {
@@ -2353,41 +2977,44 @@ app.post("/api/transcribe", authenticateSupabaseUser, upload.single('audio'), as
     // Convert buffer to base64 for Gemini
     const audioData = {
       inlineData: {
-        data: req.file.buffer.toString("base64"),
-        mimeType: req.file.mimetype
-      }
+        data: req.file.buffer.toString('base64'),
+        mimeType: req.file.mimetype,
+      },
     };
 
-    const prompt = "Transcribe the following audio precisely. Output ONLY the transcription text, no extra words or explanations.";
+    const prompt =
+      'Transcribe the following audio precisely. Output ONLY the transcription text, no extra words or explanations.';
 
     const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: 'gemini-2.5-flash',
       contents: [
         {
           role: 'user',
-          parts: [
-            { text: prompt },
-            audioData
-          ]
-        }
-      ]
+          parts: [{ text: prompt }, audioData],
+        },
+      ],
     });
 
     const text = result.text;
 
-    console.log("✅ Transcription successful:", text);
+    console.log('✅ Transcription successful:', text);
     res.json({ text });
   } catch (error: any) {
-    console.error("❌ Transcription Error:", error);
+    console.error('❌ Transcription Error:', error);
     res.status(500).json({
-      error: "Failed to transcribe audio",
-      details: error.message
+      error: 'Failed to transcribe audio',
+      details: error.message,
     });
   }
 });
 
 // List calendar events
-async function listCalendarEvents(userTokens: any, startDate: string, endDate: string, maxResults: number = 10): Promise<any[]> {
+async function listCalendarEvents(
+  userTokens: any,
+  startDate: string,
+  endDate: string,
+  maxResults: number = 10
+): Promise<any[]> {
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -2405,7 +3032,11 @@ async function listCalendarEvents(userTokens: any, startDate: string, endDate: s
 }
 
 // Search calendar events by keyword
-async function searchCalendarEvents(userTokens: any, query: string, maxResults: number = 10): Promise<any[]> {
+async function searchCalendarEvents(
+  userTokens: any,
+  query: string,
+  maxResults: number = 10
+): Promise<any[]> {
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(userTokens);
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -2441,7 +3072,11 @@ async function deleteCalendarEvent(userTokens: any, eventId: string): Promise<vo
 }
 
 // Update a calendar event
-async function updateCalendarEvent(userTokens: any, eventId: string, updates: Partial<CalendarEventData>): Promise<any> {
+async function updateCalendarEvent(
+  userTokens: any,
+  eventId: string,
+  updates: Partial<CalendarEventData>
+): Promise<any> {
   const writableTokens = await ensureGoogleWriteAccess(userTokens, 'calendar');
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials(writableTokens);
@@ -2481,7 +3116,10 @@ async function updateCalendarEvent(userTokens: any, eventId: string, updates: Pa
 
 function formatCalendarEventLine(event: any, langCode: string): string {
   const start = event.start?.dateTime
-    ? new Date(event.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' })
+    ? new Date(event.start.dateTime).toLocaleTimeString(langCode, {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
     : 'Todo el dia';
 
   return `${start}: ${event.summary || 'Sin titulo'}`;
@@ -2536,22 +3174,32 @@ function formatCalendarCreationResponse(
   });
 
   if (styleId === 'zen') {
-    return htmlLink ? `Creado: ${summary} - ${dateText}\n[Ver en Google Calendar](${htmlLink})` : `Creado: ${summary} - ${dateText}`;
+    return htmlLink
+      ? `Creado: ${summary} - ${dateText}\n[Ver en Google Calendar](${htmlLink})`
+      : `Creado: ${summary} - ${dateText}`;
   }
 
   if (styleId === 'profesional') {
-    return htmlLink ? `Evento confirmado: "${summary}" - ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Evento confirmado: "${summary}" - ${dateText}.`;
+    return htmlLink
+      ? `Evento confirmado: "${summary}" - ${dateText}.\n[Ver en Google Calendar](${htmlLink})`
+      : `Evento confirmado: "${summary}" - ${dateText}.`;
   }
 
   if (styleId === 'creativo') {
-    return htmlLink ? `Listo, ya quedo agendado "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Listo, ya quedo agendado "${summary}" para ${dateText}.`;
+    return htmlLink
+      ? `Listo, ya quedo agendado "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})`
+      : `Listo, ya quedo agendado "${summary}" para ${dateText}.`;
   }
 
   if (styleId === 'familiar') {
-    return htmlLink ? `Listo, ya te apunte "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Listo, ya te apunte "${summary}" para ${dateText}.`;
+    return htmlLink
+      ? `Listo, ya te apunte "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})`
+      : `Listo, ya te apunte "${summary}" para ${dateText}.`;
   }
 
-  return htmlLink ? `Evento creado: "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})` : `Evento creado: "${summary}" para ${dateText}.`;
+  return htmlLink
+    ? `Evento creado: "${summary}" para ${dateText}.\n[Ver en Google Calendar](${htmlLink})`
+    : `Evento creado: "${summary}" para ${dateText}.`;
 }
 
 function formatCalendarUpdateResponse(styleId: MimaStyleId, summary: string): string {
@@ -2625,7 +3273,10 @@ function getUnsupportedGoogleToolMessage(langCode: string, toolName: string): st
   return `I cannot execute the action "${toolName}" yet through this path.`;
 }
 
-async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecutionContext): Promise<string> {
+async function executeGoogleToolCall(
+  toolCall: any,
+  context: GoogleToolExecutionContext
+): Promise<string> {
   const { userTokens, langCode, activeStyleId, activeStyle } = context;
   const toolName = String(toolCall?.tool || '');
 
@@ -2648,7 +3299,9 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
 
       const endDate =
         dateInfo.end ||
-        new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+        new Date(
+          dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+        );
 
       const eventData: CalendarEventData = {
         summary: toolCall.summary,
@@ -2674,19 +3327,39 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
         throw lastError || new Error('Unable to create calendar event');
       }
 
-      return formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink);
+      return formatCalendarCreationResponse(
+        activeStyleId,
+        langCode,
+        createdEvent.summary,
+        dateInfo.start,
+        createdEvent.htmlLink
+      );
     }
 
     case 'listCalendarEvents': {
       const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
       const startStr = (dateInfo?.start || new Date()).toISOString().split('T')[0];
       const endStr = (dateInfo?.end || dateInfo?.start || new Date()).toISOString().split('T')[0];
-      const events = await listCalendarEvents(userTokens, startStr, endStr, toolCall.maxResults || 10);
-      return formatCalendarListResponse(activeStyleId, langCode, toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'), events);
+      const events = await listCalendarEvents(
+        userTokens,
+        startStr,
+        endStr,
+        toolCall.maxResults || 10
+      );
+      return formatCalendarListResponse(
+        activeStyleId,
+        langCode,
+        toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'),
+        events
+      );
     }
 
     case 'searchCalendarEvents': {
-      const events = await searchCalendarEvents(userTokens, toolCall.query, toolCall.maxResults || 10);
+      const events = await searchCalendarEvents(
+        userTokens,
+        toolCall.query,
+        toolCall.maxResults || 10
+      );
       if (events.length === 0) {
         return langCode === 'es'
           ? `No encontre eventos que coincidan con "${toolCall.query}".`
@@ -2696,8 +3369,15 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
       return events
         .map((event: any, resultIndex: number) => {
           const start = event.start?.dateTime
-            ? new Date(event.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-            : (langCode === 'es' ? 'Todo el dia' : 'All day');
+            ? new Date(event.start.dateTime).toLocaleString(langCode, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : langCode === 'es'
+              ? 'Todo el dia'
+              : 'All day';
           return `${resultIndex + 1}. ${start}: ${event.summary} (ID: ${event.id})`;
         })
         .join('\n');
@@ -2720,7 +3400,11 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
             : 'I could not update the event because I did not understand the new date or time.';
         }
         updates.startDate = dateInfo.start;
-        updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+        updates.endDate =
+          dateInfo.end ||
+          new Date(
+            dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+          );
         updates.isAllDay = dateInfo.isAllDay;
       }
 
@@ -2783,17 +3467,19 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
         maxResults: toolCall.maxResults || 10,
       });
 
-      const drafts = await Promise.all((response.data.drafts || []).slice(0, toolCall.maxResults || 10).map(async (draft: any) => {
-        const draftData = await gmail.users.drafts.get({
-          userId: 'me',
-          id: draft.id!,
-        });
-        const headers = draftData.data.message?.payload?.headers || [];
-        return {
-          id: draft.id,
-          subject: headers.find((header) => header.name === 'Subject')?.value || 'No Subject',
-        };
-      }));
+      const drafts = await Promise.all(
+        (response.data.drafts || []).slice(0, toolCall.maxResults || 10).map(async (draft: any) => {
+          const draftData = await gmail.users.drafts.get({
+            userId: 'me',
+            id: draft.id!,
+          });
+          const headers = draftData.data.message?.payload?.headers || [];
+          return {
+            id: draft.id,
+            subject: headers.find((header) => header.name === 'Subject')?.value || 'No Subject',
+          };
+        })
+      );
 
       return formatGmailDraftListResponse(langCode, drafts);
     }
@@ -2838,10 +3524,12 @@ async function executeGoogleToolCall(toolCall: any, context: GoogleToolExecution
         },
       });
 
-      await gmail.users.drafts.delete({
-        userId: 'me',
-        id: toolCall.draftId,
-      }).catch(() => {});
+      await gmail.users.drafts
+        .delete({
+          userId: 'me',
+          id: toolCall.draftId,
+        })
+        .catch(() => {});
 
       if (langCode === 'es') return 'Email enviado correctamente.';
       if (langCode === 'fi') return 'Sahkoposti lahetettiin onnistuneesti.';
@@ -2866,8 +3554,8 @@ async function initializeGeminiClient(): Promise<GoogleGenAI | null> {
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    geminiInitError = "GEMINI_API_KEY is not configured";
-    console.error("❌ GEMINI CONFIG ERROR:", geminiInitError);
+    geminiInitError = 'GEMINI_API_KEY is not configured';
+    console.error('❌ GEMINI CONFIG ERROR:', geminiInitError);
     return null;
   }
 
@@ -2879,27 +3567,30 @@ async function initializeGeminiClient(): Promise<GoogleGenAI | null> {
 
       // Verify initialization worked
       if (!genAI) {
-        throw new Error("GoogleGenAI constructor returned null");
+        throw new Error('GoogleGenAI constructor returned null');
       }
 
       geminiInitialized = true;
       geminiInitError = null;
-      console.log("✅ Gemini AI client initialized successfully");
+      console.log('✅ Gemini AI client initialized successfully');
       return genAI;
     } catch (error: any) {
       geminiInitError = error.message;
-      console.error(`❌ GEMINI INIT ERROR (attempt ${attempt}/${MAX_INIT_ATTEMPTS}):`, error.message);
+      console.error(
+        `❌ GEMINI INIT ERROR (attempt ${attempt}/${MAX_INIT_ATTEMPTS}):`,
+        error.message
+      );
 
       if (attempt < MAX_INIT_ATTEMPTS) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s
         console.log(`⏳ Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
 
   // All attempts failed
-  console.error("❌ Gemini initialization failed after all attempts");
+  console.error('❌ Gemini initialization failed after all attempts');
   return null;
 }
 
@@ -2908,7 +3599,7 @@ function getGenAI(): GoogleGenAI | null {
     // First call - try to initialize synchronously
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      geminiInitError = "GEMINI_API_KEY is not configured";
+      geminiInitError = 'GEMINI_API_KEY is not configured';
       return null;
     }
     try {
@@ -2955,7 +3646,7 @@ function levenshteinDistance(a: string, b: string): number {
       matrix[i][j] = Math.min(
         matrix[i - 1][j] + 1,
         matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost,
+        matrix[i - 1][j - 1] + cost
       );
     }
   }
@@ -3044,7 +3735,9 @@ function resolveTimeZone(location: string): { timeZone: string; note?: string } 
   const supportedTimeZones = Intl.supportedValuesOf('timeZone');
   const matchedTimeZone = supportedTimeZones.find((timeZone) => {
     const cityName = normalizeLookupValue(timeZone.split('/').pop() || '');
-    return cityName === normalized || cityName.includes(normalized) || normalized.includes(cityName);
+    return (
+      cityName === normalized || cityName.includes(normalized) || normalized.includes(cityName)
+    );
   });
 
   if (matchedTimeZone) {
@@ -3153,7 +3846,10 @@ function extractToolPayload(text: string): string | null {
     return `{"tasks": ${arrayMatch[0].trim()}}`;
   }
 
-  if (trimmedText.startsWith('{') && (trimmedText.includes('"tool":') || trimmedText.includes('"tasks"'))) {
+  if (
+    trimmedText.startsWith('{') &&
+    (trimmedText.includes('"tool":') || trimmedText.includes('"tasks"'))
+  ) {
     return trimmedText;
   }
 
@@ -3322,8 +4018,7 @@ function getCalendarToolErrorMessage(error: any, langCode: string): string {
     isGoogleScopeError(error) ||
     /calendar usage limits/i.test(message);
   const isTokenError =
-    error?.status === 401 ||
-    /invalid_grant|expired or revoked|refresh token/i.test(message);
+    error?.status === 401 || /invalid_grant|expired or revoked|refresh token/i.test(message);
 
   if (isPermissionError) {
     const messages: Record<string, string> = {
@@ -3357,7 +4052,11 @@ function getCalendarToolErrorMessage(error: any, langCode: string): string {
   return messages[langCode] || messages.en;
 }
 
-function getGmailToolErrorMessage(error: any, langCode: string, action: 'read' | 'create' | 'delete' | 'send' | 'list' = 'read'): string {
+function getGmailToolErrorMessage(
+  error: any,
+  langCode: string,
+  action: 'read' | 'create' | 'delete' | 'send' | 'list' = 'read'
+): string {
   const message = String(error?.message || '');
   const isPermissionError =
     error?.status === 403 ||
@@ -3365,8 +4064,7 @@ function getGmailToolErrorMessage(error: any, langCode: string, action: 'read' |
     isGoogleScopeError(error) ||
     /insufficient|forbidden|scope|permission/i.test(message);
   const isTokenError =
-    error?.status === 401 ||
-    /invalid_grant|expired or revoked|refresh token/i.test(message);
+    error?.status === 401 || /invalid_grant|expired or revoked|refresh token/i.test(message);
 
   const actionLabels: Record<string, Record<typeof action, string>> = {
     en: {
@@ -3431,7 +4129,10 @@ function getGmailToolErrorMessage(error: any, langCode: string, action: 'read' |
   return messages[langCode] || messages.en;
 }
 
-function formatGmailReadResponse(langCode: string, email: { from: string; subject: string; date: string; bodyText: string }): string {
+function formatGmailReadResponse(
+  langCode: string,
+  email: { from: string; subject: string; date: string; bodyText: string }
+): string {
   const safeBody = email.bodyText.trim().slice(0, 1200);
 
   if (langCode === 'es') {
@@ -3446,7 +4147,10 @@ function formatGmailReadResponse(langCode: string, email: { from: string; subjec
   return `Email from: ${email.from}\nSubject: ${email.subject}\nDate: ${email.date}\n\n${safeBody}`;
 }
 
-function formatGmailDraftListResponse(langCode: string, drafts: Array<{ id?: string | null; subject: string }>): string {
+function formatGmailDraftListResponse(
+  langCode: string,
+  drafts: Array<{ id?: string | null; subject: string }>
+): string {
   if (drafts.length === 0) {
     if (langCode === 'es') return 'No tienes borradores guardados.';
     if (langCode === 'fi') return 'Sinulla ei ole tallennettuja luonnoksia.';
@@ -3454,7 +4158,9 @@ function formatGmailDraftListResponse(langCode: string, drafts: Array<{ id?: str
     return 'You do not have any saved drafts.';
   }
 
-  const lines = drafts.map((draft, index) => `${index + 1}. ${draft.subject} (ID: ${draft.id || 'n/a'})`).join('\n');
+  const lines = drafts
+    .map((draft, index) => `${index + 1}. ${draft.subject} (ID: ${draft.id || 'n/a'})`)
+    .join('\n');
 
   if (langCode === 'es') return `Borradores existentes:\n${lines}`;
   if (langCode === 'fi') return `Nykyiset luonnokset:\n${lines}`;
@@ -3469,31 +4175,60 @@ const languageInstructions: Record<string, string> = {
   en: 'Always respond in English.',
 };
 
+function toSupportedLanguage(language: unknown): SupportedLanguage {
+  if (typeof language !== 'string') return 'en';
+  const normalized = language.toLowerCase().slice(0, 2);
+  if (normalized === 'es' || normalized === 'fi' || normalized === 'sv' || normalized === 'en') {
+    return normalized;
+  }
+  return 'en';
+}
+
 // Model selection router - determines which Gemini model to use
 function selectModelForTask(
   message: string,
   mode?: string,
-  attachmentCount: number = 0,
+  attachmentCount: number = 0
 ): { model: string; reason: string; maxTokens: number } {
   const lowerMsg = message.toLowerCase();
   const activeStyleId = normalizeStyleId(mode);
 
   // Complex task indicators that need Pro model
   const complexIndicators = [
-    'analiza', 'análisis', 'analyze', 'analysis',
-    'compara', 'compare', 'comparación', 'comparison',
-    'investiga', 'investigate', 'research',
-    'explica detalladamente', 'explain in detail',
-    'paso a paso', 'step by step',
-    'estrategia', 'strategy', 'plan detallado',
-    'optimiza', 'optimize', 'mejora procesos',
-    'lean', 'six sigma', 'flujo de trabajo',
-    'reporte', 'report', 'informe',
-    'sintetiza', 'synthesize', 'resume largo'
+    'analiza',
+    'análisis',
+    'analyze',
+    'analysis',
+    'compara',
+    'compare',
+    'comparación',
+    'comparison',
+    'investiga',
+    'investigate',
+    'research',
+    'explica detalladamente',
+    'explain in detail',
+    'paso a paso',
+    'step by step',
+    'estrategia',
+    'strategy',
+    'plan detallado',
+    'optimiza',
+    'optimize',
+    'mejora procesos',
+    'lean',
+    'six sigma',
+    'flujo de trabajo',
+    'reporte',
+    'report',
+    'informe',
+    'sintetiza',
+    'synthesize',
+    'resume largo',
   ];
 
   // Check for complex task patterns
-  const isComplexTask = complexIndicators.some(indicator => lowerMsg.includes(indicator));
+  const isComplexTask = complexIndicators.some((indicator) => lowerMsg.includes(indicator));
   const isLongContext = message.length > 500;
   const isBusinessMode = activeStyleId === 'profesional';
   const hasAttachments = attachmentCount > 0;
@@ -3502,7 +4237,7 @@ function selectModelForTask(
     return {
       model: 'gemini-2.5-pro',
       reason: 'Attachment analysis requires deeper reasoning and more output budget',
-      maxTokens: 2500
+      maxTokens: 2500,
     };
   }
 
@@ -3510,7 +4245,7 @@ function selectModelForTask(
     return {
       model: 'gemini-2.5-pro',
       reason: 'Single attachment analysis prioritized for completeness',
-      maxTokens: 2200
+      maxTokens: 2200,
     };
   }
 
@@ -3519,7 +4254,7 @@ function selectModelForTask(
     return {
       model: 'gemini-2.5-pro',
       reason: 'Business mode + complex analysis task',
-      maxTokens: 2000
+      maxTokens: 2000,
     };
   }
 
@@ -3527,7 +4262,7 @@ function selectModelForTask(
     return {
       model: 'gemini-2.5-pro',
       reason: 'Complex analysis with long context',
-      maxTokens: 2000
+      maxTokens: 2000,
     };
   }
 
@@ -3535,28 +4270,36 @@ function selectModelForTask(
   return {
     model: 'gemini-2.5-flash',
     reason: 'Standard task - Flash sufficient',
-    maxTokens: 1000
+    maxTokens: 1000,
   };
 }
 
 // Debug endpoint to check environment status (safe, no keys revealed) - Development only
-app.get("/api/debug/env-status", (req, res) => {
+app.get('/api/debug/env-status', (req, res) => {
   if (IS_PROD) {
     return res.status(403).json({
-      error: "Endpoint disabled in production",
-      message: "For security reasons, this endpoint is only available in development"
+      error: 'Endpoint disabled in production',
+      message: 'For security reasons, this endpoint is only available in development',
     });
   }
 
   const status: Record<string, any> = {};
-  const requiredVars = ['GEMINI_API_KEY', 'SESSION_SECRET', 'GOOGLE_CLIENT_ID', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'APP_URL'];
+  const requiredVars = [
+    'GEMINI_API_KEY',
+    'SESSION_SECRET',
+    'GOOGLE_CLIENT_ID',
+    'VITE_SUPABASE_URL',
+    'VITE_SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'APP_URL',
+  ];
 
-  requiredVars.forEach(v => {
+  requiredVars.forEach((v) => {
     const val = process.env[v];
     status[v] = {
       exists: !!val,
       length: val ? val.length : 0,
-      prefix: val ? val.substring(0, 4) + '...' : undefined
+      prefix: val ? val.substring(0, 4) + '...' : undefined,
     };
   });
 
@@ -3566,15 +4309,15 @@ app.get("/api/debug/env-status", (req, res) => {
     vars: status,
     timestamp: new Date().toISOString(),
     static_dirs: {
-      dist: fs.existsSync(path.join(__dirname, "dist")),
-      public_html: fs.existsSync(path.join(__dirname, "public_html")),
+      dist: fs.existsSync(path.join(__dirname, 'dist')),
+      public_html: fs.existsSync(path.join(__dirname, 'public_html')),
       cwd: process.cwd(),
-      dirname: __dirname
-    }
+      dirname: __dirname,
+    },
   });
 });
 
-app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
+app.post('/api/chat', authenticateSupabaseUser, async (req, res) => {
   const { message, mode, language, history, timezone, attachments } = req.body;
   const user = (req as any).user;
   const userId = user.id;
@@ -3582,15 +4325,15 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
   const activeStyleId = activeStyle.id;
   const clientTimeZone = typeof timezone === 'string' && timezone.trim() ? timezone.trim() : 'UTC';
 
-  console.log("═══════════════════════════════════════════");
-  console.log("🤖 CHAT API REQUEST");
-  console.log("═══════════════════════════════════════════");
-  console.log("   Message:", message?.substring(0, 100));
-  console.log("   Mode:", activeStyleId);
-  console.log("   Language:", language || 'en');
-  console.log("   UserId:", userId);
-  console.log("   GEMINI_API_KEY set:", !!process.env.GEMINI_API_KEY);
-  console.log("   GEMINI_API_KEY length:", process.env.GEMINI_API_KEY?.length || 0);
+  console.log('═══════════════════════════════════════════');
+  console.log('🤖 CHAT API REQUEST');
+  console.log('═══════════════════════════════════════════');
+  console.log('   Message:', message?.substring(0, 100));
+  console.log('   Mode:', activeStyleId);
+  console.log('   Language:', language || 'en');
+  console.log('   UserId:', userId);
+  console.log('   GEMINI_API_KEY set:', !!process.env.GEMINI_API_KEY);
+  console.log('   GEMINI_API_KEY length:', process.env.GEMINI_API_KEY?.length || 0);
 
   // Log request timestamp for debugging
   const requestStart = Date.now();
@@ -3598,56 +4341,61 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
   try {
     const currentTimeLocation = typeof message === 'string' ? extractTimeLocation(message) : null;
     if (currentTimeLocation) {
+      const resolvedRequestLanguage = toSupportedLanguage(language);
       return res.json({
-        text: getLocalizedCurrentTimeResponse(currentTimeLocation, language || 'en')
+        text: getLocalizedCurrentTimeResponse(currentTimeLocation, resolvedRequestLanguage),
       });
     }
 
     if (!message || typeof message !== 'string') {
-      console.error("❌ Invalid message provided");
+      console.error('❌ Invalid message provided');
       return res.status(400).json({
-        error: "Message is required",
-        errorCode: "INVALID_MESSAGE"
+        error: 'Message is required',
+        errorCode: 'INVALID_MESSAGE',
       });
     }
 
     // Check Gemini initialization status first
     if (geminiInitError) {
-      console.error("❌ Gemini not initialized:", geminiInitError);
+      console.error('❌ Gemini not initialized:', geminiInitError);
       return res.status(503).json({
-        error: "AI service unavailable",
-        errorCode: "GEMINI_NOT_CONFIGURED",
-        details: geminiInitError
+        error: 'AI service unavailable',
+        errorCode: 'GEMINI_NOT_CONFIGURED',
+        details: geminiInitError,
       });
     }
 
     // Check if API key exists
     if (!process.env.GEMINI_API_KEY) {
-      console.error("❌ GEMINI_API_KEY is not set in environment variables");
+      console.error('❌ GEMINI_API_KEY is not set in environment variables');
       return res.status(503).json({
-        error: "AI service unavailable",
-        errorCode: "GEMINI_NOT_CONFIGURED",
-        details: "GEMINI_API_KEY environment variable is not set"
+        error: 'AI service unavailable',
+        errorCode: 'GEMINI_NOT_CONFIGURED',
+        details: 'GEMINI_API_KEY environment variable is not set',
       });
     }
 
     let ai;
     try {
       ai = getGenAI();
-      console.log("✅ Gemini AI client initialized");
+      console.log('✅ Gemini AI client initialized');
     } catch (error: any) {
-      console.error("❌ Failed to get Gemini client:", error.message);
+      console.error('❌ Failed to get Gemini client:', error.message);
       return res.status(503).json({
-        error: "AI service unavailable",
-        errorCode: "GEMINI_INIT_FAILED",
-        details: error.message
+        error: 'AI service unavailable',
+        errorCode: 'GEMINI_INIT_FAILED',
+        details: error.message,
       });
     }
 
-    const resolvedLangCode = language || 'en';
-    const resolvedLangInstruction = languageInstructions[resolvedLangCode] || languageInstructions.en;
-    const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+    );
     const userPreferences = userId ? await getUserPreferences(userId) : null;
+    const resolvedLangCode = toSupportedLanguage(userPreferences?.language || language);
+    const resolvedLangInstruction =
+      languageInstructions[resolvedLangCode] || languageInstructions.en;
 
     const normalizedAttachments = Array.isArray(attachments)
       ? attachments.filter((attachment: any) => attachment?.data && attachment?.mimeType)
@@ -3663,7 +4411,14 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       calendarMissingScopes: [...GOOGLE_WRITE_SCOPES.calendar],
       gmailMissingScopes: [...GOOGLE_WRITE_SCOPES.gmail],
     };
-    let todayEventsSummary = resolvedLangCode === 'es' ? 'No disponible' : 'Not available';
+    let todayEventsSummary =
+      resolvedLangCode === 'es'
+        ? 'No disponible'
+        : resolvedLangCode === 'fi'
+          ? 'Ei saatavilla'
+          : resolvedLangCode === 'sv'
+            ? 'Inte tillganglig'
+            : 'Not available';
 
     if (userId) {
       const tokenResult = await supabaseAdmin
@@ -3685,14 +4440,23 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
             userTokens,
             today.toISOString().split('T')[0],
             tomorrow.toISOString().split('T')[0],
-            5,
+            5
           );
 
-          todayEventsSummary = todayEvents.length > 0
-            ? todayEvents.map((event: any) => formatCalendarEventLine(event, resolvedLangCode)).join(' | ')
-            : (resolvedLangCode === 'es' ? 'Sin eventos proximos hoy' : 'No upcoming events today');
+          todayEventsSummary =
+            todayEvents.length > 0
+              ? todayEvents
+                  .map((event: any) => formatCalendarEventLine(event, resolvedLangCode))
+                  .join(' | ')
+              : resolvedLangCode === 'es'
+                ? 'Sin eventos proximos hoy'
+                : resolvedLangCode === 'fi'
+                  ? 'Ei tulevia tapahtumia tanaan'
+                  : resolvedLangCode === 'sv'
+                    ? 'Inga kommande handelser idag'
+                    : 'No upcoming events today';
         } catch (tokenError: any) {
-          console.error("Could not prepare user context from Google tokens:", tokenError.message);
+          console.error('Could not prepare user context from Google tokens:', tokenError.message);
           userTokens = null;
         }
       }
@@ -3714,13 +4478,18 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
 
     if (isMemoryRecallIntent(message)) {
       return res.json({
-        text: getMemoryRecallMessage(resolvedLangCode, formatUserMemoriesSummary(userMemories, resolvedLangCode)),
+        text: getMemoryRecallMessage(
+          resolvedLangCode,
+          formatUserMemoriesSummary(userMemories, resolvedLangCode)
+        ),
       });
     }
 
     const memoryStatements = extractMemoryStatements(message);
     if (userId && memoryStatements.length > 0) {
-      await Promise.all(memoryStatements.map((memoryStatement) => saveUserMemory(userId, memoryStatement)));
+      await Promise.all(
+        memoryStatements.map((memoryStatement) => saveUserMemory(userId, memoryStatement))
+      );
       userMemories = await getUserMemories(userId, 12);
 
       if (/\b(remember that|recuerda que|muista etta|kom ihag att)\b/i.test(message)) {
@@ -3752,11 +4521,19 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
       });
       userTasks = await getUserTasks(userId, { status: 'open', limit: 8 });
       return res.json({
-        text: getTaskSavedMessage(resolvedLangCode, taskCreationPayload.title, taskCreationPayload.dueAt),
+        text: getTaskSavedMessage(
+          resolvedLangCode,
+          taskCreationPayload.title,
+          taskCreationPayload.dueAt
+        ),
       });
     }
 
-    if (userId && userTokens && shouldSendAutomaticBriefing(message, userPreferences?.last_daily_briefing_at, clientTimeZone)) {
+    if (
+      userId &&
+      userTokens &&
+      shouldSendAutomaticBriefing(message, userPreferences?.last_daily_briefing_at, clientTimeZone)
+    ) {
       try {
         const briefingText = await buildDailyBriefingText({
           langCode: resolvedLangCode,
@@ -3768,7 +4545,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
         await updateUserPreferences(userId, { last_daily_briefing_at: new Date().toISOString() });
         return res.json({ text: briefingText });
       } catch (briefingError: any) {
-        console.error("Failed to build automatic daily briefing:", briefingError.message);
+        console.error('Failed to build automatic daily briefing:', briefingError.message);
       }
     }
 
@@ -3786,7 +4563,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
         }
         return res.json({ text: briefingText });
       } catch (briefingError: any) {
-        console.error("Failed to build daily briefing:", briefingError.message);
+        console.error('Failed to build daily briefing:', briefingError.message);
       }
     }
 
@@ -3798,7 +4575,7 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
           userTokens,
           today.toISOString().split('T')[0],
           tomorrow.toISOString().split('T')[0],
-          10,
+          10
         );
 
         const oauth2Client = getOAuth2Client(req);
@@ -3816,244 +4593,265 @@ app.post("/api/chat", authenticateSupabaseUser, async (req, res) => {
             userId: 'me',
             id: unreadMessage.id as string,
             format: 'metadata',
-            metadataHeaders: ['Subject', 'From', 'Date']
+            metadataHeaders: ['Subject', 'From', 'Date'],
           });
           const headers = messageData.data.payload?.headers || [];
-          const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+          const subject =
+            headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
           const from = headers.find((header) => header.name === 'From')?.value || 'Unknown sender';
           unreadSummaries.push(`- ${from} — ${subject}`);
         }
 
-        const greeting = resolvedLangCode === 'es'
-          ? `Buenos ${today.getHours() < 12 ? 'dias' : today.getHours() < 20 ? 'dias' : 'dias'}.`
-          : resolvedLangCode === 'fi'
-            ? 'Huomenta.'
-            : resolvedLangCode === 'sv'
-              ? 'God morgon.'
-              : 'Good morning.';
+        const greeting =
+          resolvedLangCode === 'es'
+            ? `Buenos ${today.getHours() < 12 ? 'dias' : today.getHours() < 20 ? 'dias' : 'dias'}.`
+            : resolvedLangCode === 'fi'
+              ? 'Huomenta.'
+              : resolvedLangCode === 'sv'
+                ? 'God morgon.'
+                : 'Good morning.';
 
-        const eventSection = todayEvents.length > 0
-          ? todayEvents.map((event: any) => `- ${formatCalendarEventLine(event, resolvedLangCode)}`).join('\n')
-          : (resolvedLangCode === 'es' ? 'No tienes eventos hoy.' : 'You have no events today.');
+        const eventSection =
+          todayEvents.length > 0
+            ? todayEvents
+                .map((event: any) => `- ${formatCalendarEventLine(event, resolvedLangCode)}`)
+                .join('\n')
+            : resolvedLangCode === 'es'
+              ? 'No tienes eventos hoy.'
+              : 'You have no events today.';
 
-        const unreadSection = unreadSummaries.length > 0
-          ? unreadSummaries.join('\n')
-          : (resolvedLangCode === 'es' ? 'No veo correos urgentes o no leidos importantes.' : 'I do not see important unread emails right now.');
+        const unreadSection =
+          unreadSummaries.length > 0
+            ? unreadSummaries.join('\n')
+            : resolvedLangCode === 'es'
+              ? 'No veo correos urgentes o no leidos importantes.'
+              : 'I do not see important unread emails right now.';
 
-        const memorySection = userMemories.length > 0
-          ? formatUserMemoriesSummary(userMemories.slice(0, 3), resolvedLangCode)
-          : (resolvedLangCode === 'es' ? 'Sin recordatorios persistentes destacados.' : 'No highlighted persistent reminders.');
+        const memorySection =
+          userMemories.length > 0
+            ? formatUserMemoriesSummary(userMemories.slice(0, 3), resolvedLangCode)
+            : resolvedLangCode === 'es'
+              ? 'Sin recordatorios persistentes destacados.'
+              : 'No highlighted persistent reminders.';
 
-        const briefingText = resolvedLangCode === 'es'
-          ? `${greeting}\n\nResumen de tu dia:\n\nAgenda de hoy:\n${eventSection}\n\nCorreos por revisar:\n${unreadSection}\n\nLo que recuerdo:\n${memorySection}`
-          : `${greeting}\n\nHere is your day briefing:\n\nToday's schedule:\n${eventSection}\n\nEmails to review:\n${unreadSection}\n\nWhat I remember:\n${memorySection}`;
+        const briefingText =
+          resolvedLangCode === 'es'
+            ? `${greeting}\n\nResumen de tu dia:\n\nAgenda de hoy:\n${eventSection}\n\nCorreos por revisar:\n${unreadSection}\n\nLo que recuerdo:\n${memorySection}`
+            : `${greeting}\n\nHere is your day briefing:\n\nToday's schedule:\n${eventSection}\n\nEmails to review:\n${unreadSection}\n\nWhat I remember:\n${memorySection}`;
 
         return res.json({ text: briefingText });
       } catch (briefingError: any) {
-        console.error("Failed to build daily briefing:", briefingError.message);
+        console.error('Failed to build daily briefing:', briefingError.message);
       }
     }
 
     // INTELLIGENT MODEL ROUTING
     const modelSelection = selectModelForTask(message, activeStyleId, normalizedAttachments.length);
-    console.log("🧠 Model selected:", modelSelection.model);
-    console.log("   Reason:", modelSelection.reason);
+    console.log('🧠 Model selected:', modelSelection.model);
+    console.log('   Reason:', modelSelection.reason);
 
-    // System prompt with explicit language instruction
-    let modeInstruction = "Eres Mima, un asistente personal inteligente, directo y objetivo. Ayudas con tareas de calendario, correos y organización personal.";
-    if (mode === "Business Mode") {
-      modeInstruction = "Eres Mima, un Experto en Lean Management. Identificas desperdicio de tiempo. Predices flujos de trabajo lógicos. Asesoras sobre eficiencia. Evitas charlas innecesarias.";
-    } else if (mode === "Family Mode") {
-      modeInstruction = "Eres Mima, un Organizador Familiar. Sugieres rutinas para las tardes. Recuerdas necesidades familiares. Generas sensación de logro. Reduces prisa y conflicto.";
-    } else if (mode === "Zen Mode") {
-      modeInstruction = "Eres Mima, un Coach de Bienestar. Priorizas el bienestar humano. Recuerdas pausas, hidratación y descanso. Fomentas el equilibrio.";
-    }
-
-    const langCode = language || 'en';
+    const langCode = resolvedLangCode;
     const langInstruction = languageInstructions[langCode] || languageInstructions.en;
+    const isSpanishPrompt = langCode === 'es';
 
-    // CALENDAR TOOLS INSTRUCTIONS for function calling
-    let calendarToolsInstruction = userTokens ? `
-
+    let calendarToolsInstruction = userTokens
+      ? isSpanishPrompt
+        ? `
 CALENDAR TOOLS:
-Tienes acceso al calendario del usuario. Para crear eventos, responde EXACTAMENTE con este formato JSON:
-{"tool": "createCalendarEvent", "summary": "Título del evento", "dateText": "mañana a las 3pm", "description": "Descripción opcional"}
+Si el usuario pide crear/listar/buscar/actualizar/eliminar eventos, responde SOLO con JSON de herramienta.
+Usa estos formatos:
+{"tool": "createCalendarEvent", "summary": "...", "dateText": "...", "description": "..."}
+{"tool": "listCalendarEvents", "dateText": "...", "maxResults": 10}
+{"tool": "searchCalendarEvents", "query": "...", "maxResults": 10}
+{"tool": "updateCalendarEvent", "eventId": "...", "summary": "...", "dateText": "..."}
+{"tool": "deleteCalendarEvent", "eventId": "..."}`
+        : `
+CALENDAR TOOLS:
+If the user asks to create/list/search/update/delete events, return ONLY tool JSON.
+Use these formats:
+{"tool": "createCalendarEvent", "summary": "...", "dateText": "...", "description": "..."}
+{"tool": "listCalendarEvents", "dateText": "...", "maxResults": 10}
+{"tool": "searchCalendarEvents", "query": "...", "maxResults": 10}
+{"tool": "updateCalendarEvent", "eventId": "...", "summary": "...", "dateText": "..."}
+{"tool": "deleteCalendarEvent", "eventId": "..."}`
+      : '';
 
-Para ver eventos:
-{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
-
-Para buscar eventos por nombre:
-{"tool": "searchCalendarEvents", "query": "reunión", "maxResults": 10}
-
-Para eliminar eventos (primero busca si no tienes el ID):
-{"tool": "deleteCalendarEvent", "eventId": "id_del_evento"}
-
-Para actualizar eventos:
-{"tool": "updateCalendarEvent", "eventId": "id_del_evento", "summary": "Nuevo título", "dateText": "pasado mañana a las 5pm"}
-
-IMPORTANTE: Si el usuario dice "elimina mi reunión de mañana", PRIMERO busca con searchCalendarEvents, luego elimina.
-Si el usuario pide crear/ver/modificar/eliminar un evento, DEBES responder SOLO con el JSON de la herramienta, sin texto adicional.
-Si NO es una petición de calendario, responde normalmente.` : '';
-
-    // GMAIL TOOLS INSTRUCTIONS for function calling
-    let gmailToolsInstruction = userTokens ? `
-
+    let gmailToolsInstruction = userTokens
+      ? isSpanishPrompt
+        ? `
 GMAIL TOOLS (BORRADORES SEGUROS):
-Tienes acceso a Gmail del usuario. IMPORTANTE: NUNCA envíes emails automáticamente. Siempre crea borradores que el usuario debe revisar y aprobar antes de enviar.
-
-Para leer un email completo (cuando el usuario quiere ver el contenido):
-{"tool": "readGmailMessage", "messageId": "id_del_email"}
-
-Para crear un borrador de respuesta (SAFE - no se envía):
-{"tool": "createGmailDraft", "to": "email@ejemplo.com", "subject": "Re: Asunto original", "body": "<p>Cuerpo del email en HTML</p>", "inReplyTo": "message-id-original", "threadId": "thread-id-opcional"}
-
-Para ver lista de borradores existentes:
+Nunca envies correos sin confirmacion explicita.
+Usa estos formatos:
+{"tool": "readGmailMessage", "messageId": "..."}
+{"tool": "createGmailDraft", "to": "...", "subject": "...", "body": "<p>...</p>", "inReplyTo": "...", "threadId": "..."}
 {"tool": "listGmailDrafts"}
-
-Para eliminar un borrador:
-{"tool": "deleteGmailDraft", "draftId": "id_del_borrador"}
-
-Para ENVIAR un borrador (SOLO con confirmación explícita del usuario):
-{"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
-
-REGLAS IMPORTANTES DE GMAIL:
-1. NUNCA envíes emails sin confirmación explícita del usuario
-2. Siempre crea borradores primero
-3. Cuando el usuario diga "responde este email", crea un borrador y dile que lo revise
-4. El borrador se envía SOLO si el usuario dice explícitamente "envía el borrador" o "sí, envíalo"
-5. Usa HTML simple en el cuerpo (<p>, <br>, <b>, etc.)
-6. Para respuestas, usa "Re: " en el asunto y mantén el threadId original
-
-EJEMPLO DE FLUJO SEGURO:
-Usuario: "Responde este email diciendo que estaré allí"
-Tú: {"tool": "createGmailDraft", "to": "persona@ejemplo.com", "subject": "Re: Reunión", "body": "<p>Hola,<br>Estaré allí. Saludos.</p>", "inReplyTo": "message-id-original"}
-Tú (después): "He creado un borrador. ¿Quieres que lo envíe?"
-Usuario: "Sí, envíalo"
-Tú: {"tool": "sendGmailDraft", "draftId": "id_del_borrador", "confirmSend": true}
-
-Si NO es una petición de Gmail, responde normalmente.` : '';
+{"tool": "deleteGmailDraft", "draftId": "..."}
+{"tool": "sendGmailDraft", "draftId": "...", "confirmSend": true}`
+        : `
+GMAIL TOOLS (SAFE DRAFTS):
+Never send emails without explicit user confirmation.
+Use these formats:
+{"tool": "readGmailMessage", "messageId": "..."}
+{"tool": "createGmailDraft", "to": "...", "subject": "...", "body": "<p>...</p>", "inReplyTo": "...", "threadId": "..."}
+{"tool": "listGmailDrafts"}
+{"tool": "deleteGmailDraft", "draftId": "..."}
+{"tool": "sendGmailDraft", "draftId": "...", "confirmSend": true}`
+      : '';
 
     if (userTokens && !googleAccessState.hasCalendarWrite) {
-      calendarToolsInstruction = `
-
+      calendarToolsInstruction = isSpanishPrompt
+        ? `
 CALENDAR STATUS:
-Google Calendar del usuario esta conectado solo en modo lectura. Puedes consultar o buscar eventos, pero NO puedes crear, editar ni eliminar nada hasta que el usuario reconecte Google desde Perfil.
-Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
-
-Para ver eventos:
-{"tool": "listCalendarEvents", "dateText": "esta semana", "maxResults": 10}
-
-Para buscar eventos por nombre:
-{"tool": "searchCalendarEvents", "query": "reunion", "maxResults": 10}
-
-Si el usuario pide crear, editar o eliminar eventos, responde de forma breve explicando que Google Calendar sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+Google Calendar esta en modo lectura. Puedes consultar y buscar, pero no crear/editar/eliminar.
+Si el usuario pide escritura, indicale reconectar Google desde Perfil.`
+        : `
+CALENDAR STATUS:
+Google Calendar is read-only. You can list and search, but cannot create/update/delete.
+If the user asks for write actions, ask them to reconnect Google from Profile.`;
     }
 
     if (userTokens && !googleAccessState.hasGmailWrite) {
-      gmailToolsInstruction = `
-
+      gmailToolsInstruction = isSpanishPrompt
+        ? `
 GMAIL STATUS:
-Gmail del usuario esta conectado solo en modo lectura. Puedes leer correos, pero NO puedes crear, editar ni enviar borradores hasta que el usuario reconecte Google desde Perfil.
-Si el usuario dice que ya dio el permiso, NO asumas que es cierto. Solo puedes considerar que hay escritura cuando el servidor lo confirma.
-
-Para leer un email completo:
-{"tool": "readGmailMessage", "messageId": "id_del_email"}
-
-Si el usuario pide crear, editar o enviar borradores, responde de forma breve explicando que Gmail sigue sin permiso de escritura y que debe reconectar Google desde Perfil.`;
+Gmail esta en modo lectura. Puedes leer correos, pero no crear/enviar borradores.
+Si el usuario pide escritura, indicale reconectar Google desde Perfil.`
+        : `
+GMAIL STATUS:
+Gmail is read-only. You can read emails, but cannot create/send drafts.
+If the user asks for write actions, ask them to reconnect Google from Profile.`;
     }
 
-    // CRITICAL: Explicit system prompt with language enforcement
-    const systemInstruction = `${modeInstruction}\n\n${langInstruction}\n\n${calendarToolsInstruction}\n\n` +
-      `STRICT INSTRUCTIONS:\n` +
-      `1. You MUST ALWAYS respond in the user's selected language: ${langCode}.\n` +
-      `2. Do not use any other language unless explicitly asked by the user.\n` +
-      `3. If you use a tool (JSON format), that's the only thing you should return.\n` +
-      `4. Maintain the persona: ${mode || 'Neutral'}.`;
-
-    const enhancedSystemInstruction = `${systemInstruction}\n` +
-      `5. You are multilingual and can communicate naturally in the user's requested language.\n` +
-      `6. If the user asks whether you can speak another language, the answer is yes.\n` +
-      `7. If the user asks for the current time in a city or country, return ONLY this JSON format: {"tool":"getCurrentTime","location":"City or Country"}.\n` +
-      `8. If the user asks to create, update, delete, search, or list calendar events, prefer the calendar tool JSON formats.\n` +
-      `9. Current server time (UTC) is ${new Date().toISOString()}.`;
-
-    console.log("📝 System prompt prepared (length:", systemInstruction.length, ")");
-    console.log("📝 Language instruction:", langInstruction);
-    console.log("📝 Model to use:", modelSelection.model);
-    console.log("📝 Max tokens:", modelSelection.maxTokens);
+    console.log('📝 Language instruction:', langInstruction);
+    console.log('📝 Model to use:', modelSelection.model);
+    console.log('📝 Max tokens:', modelSelection.maxTokens);
 
     const capabilities = [
-      'Consultas de informacion general',
+      isSpanishPrompt ? 'Consultas de informacion general' : 'General information queries',
       ...(normalizedAttachments.length > 0
-        ? [`Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`]
+        ? [
+            isSpanishPrompt
+              ? `Analisis profundo de ${normalizedAttachments.length} archivo(s) adjunto(s) del usuario`
+              : `Deep analysis of ${normalizedAttachments.length} attached file(s)`,
+          ]
         : []),
-      ...(userMemories.length > 0 ? ['Memoria persistente del usuario para preferencias y contexto frecuente'] : []),
-      ...(userTasks.length > 0 ? ['Gestion ligera de tareas abiertas y pendientes del usuario'] : []),
+      ...(userMemories.length > 0
+        ? [
+            isSpanishPrompt
+              ? 'Memoria persistente del usuario para preferencias y contexto frecuente'
+              : 'Persistent memory for user preferences and recurring context',
+          ]
+        : []),
+      ...(userTasks.length > 0
+        ? [
+            isSpanishPrompt
+              ? 'Gestion ligera de tareas abiertas y pendientes del usuario'
+              : 'Light task management for open and pending tasks',
+          ]
+        : []),
       ...(userTokens
         ? [
             googleAccessState.hasCalendarWrite
-              ? 'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)'
-              : 'Google Calendar conectado solo en lectura (solo consultar y buscar eventos)',
+              ? isSpanishPrompt
+                ? 'Gestion de Google Calendar (crear, editar, eliminar y consultar eventos)'
+                : 'Google Calendar management (create, update, delete, list events)'
+              : isSpanishPrompt
+                ? 'Google Calendar conectado solo en lectura (solo consultar y buscar eventos)'
+                : 'Google Calendar connected in read-only mode (list/search only)',
             googleAccessState.hasGmailWrite
-              ? 'Redaccion y respuesta de correos via Gmail en modo borrador'
-              : 'Gmail conectado solo en lectura (solo leer correos)',
+              ? isSpanishPrompt
+                ? 'Redaccion y respuesta de correos via Gmail en modo borrador'
+                : 'Gmail drafting and reply flows with safe draft-first policy'
+              : isSpanishPrompt
+                ? 'Gmail conectado solo en lectura (solo leer correos)'
+                : 'Gmail connected in read-only mode (read emails only)',
           ]
         : [
-            'Google Calendar no conectado actualmente',
-            'Gmail no conectado actualmente',
+            isSpanishPrompt
+              ? 'Google Calendar no conectado actualmente'
+              : 'Google Calendar not connected',
+            isSpanishPrompt ? 'Gmail no conectado actualmente' : 'Gmail not connected',
           ]),
     ];
 
-    const finalSystemInstruction = buildSystemPrompt(activeStyleId, {
-      currentDateTime: new Date().toLocaleString(langCode, {
-        timeZone: clientTimeZone,
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      userName: user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario',
-      timezone: clientTimeZone,
-      todayEvents: todayEventsSummary,
-      capabilities,
-      extraInstructions: [
-        `IDIOMA: ${langInstruction}`,
-        ...(userMemories.length > 0
-          ? [
-              'MEMORIA DEL USUARIO:',
-              formatUserMemoriesSummary(userMemories, resolvedLangCode),
-            ]
-          : []),
-        ...(userTasks.length > 0
-          ? [
-              'TAREAS ABIERTAS DEL USUARIO:',
-              formatUserTasksSummary(userTasks, resolvedLangCode),
-            ]
-          : []),
-        'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.',
-        'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.',
-        'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.',
-        'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.',
-        'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.',
-        'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.',
-        ...(normalizedAttachments.length > 0
-          ? [
-              `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`,
-              'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.',
-              'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.',
-            ]
-          : []),
-        ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
-        ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
-        `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`,
-      ],
-    });
+    const finalSystemInstruction = buildLocalizedSystemPrompt(
+      resolvedLangCode as SupportedLanguage,
+      activeStyleId,
+      {
+        currentDateTime: new Date().toLocaleString(langCode, {
+          timeZone: clientTimeZone,
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        userName:
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email ||
+          (isSpanishPrompt ? 'Usuario' : 'User'),
+        timezone: clientTimeZone,
+        todayEvents: todayEventsSummary,
+        capabilities,
+        extraInstructions: [
+          `${isSpanishPrompt ? 'IDIOMA' : 'LANGUAGE'}: ${langInstruction}`,
+          ...(userMemories.length > 0
+            ? [
+                isSpanishPrompt ? 'MEMORIA DEL USUARIO:' : 'USER MEMORY:',
+                formatUserMemoriesSummary(userMemories, resolvedLangCode),
+              ]
+            : []),
+          ...(userTasks.length > 0
+            ? [
+                isSpanishPrompt ? 'TAREAS ABIERTAS DEL USUARIO:' : 'OPEN USER TASKS:',
+                formatUserTasksSummary(userTasks, resolvedLangCode),
+              ]
+            : []),
+          isSpanishPrompt
+            ? 'Si usas una herramienta, devuelve SOLO el JSON de la herramienta y nada mas.'
+            : 'If you use a tool, return ONLY the tool JSON and nothing else.',
+          isSpanishPrompt
+            ? 'Si el usuario pregunta por la hora actual en una ciudad o pais, devuelve SOLO {"tool":"getCurrentTime","location":"City or Country"}.'
+            : 'If the user asks for current time in a city or country, return ONLY {"tool":"getCurrentTime","location":"City or Country"}.',
+          isSpanishPrompt
+            ? 'Si el usuario pregunta si puedes hablar en otro idioma, la respuesta es si.'
+            : 'If the user asks whether you can speak another language, the answer is yes.',
+          isSpanishPrompt
+            ? 'Nunca afirmes que Google ya tiene permiso de escritura solo porque el usuario lo diga. Solo puedes afirmarlo si el estado real del servidor lo confirma en este turno.'
+            : 'Never claim Google write access based only on user statements. Confirm it from server state in this turn.',
+          isSpanishPrompt
+            ? 'Si el usuario comparte un hecho personal claro o una preferencia estable, intenta recordarlo para futuras conversaciones.'
+            : 'If the user shares a stable personal fact or preference, remember it for future turns.',
+          isSpanishPrompt
+            ? 'Si el usuario menciona tareas o pendientes, ten en cuenta las tareas abiertas guardadas para dar continuidad y contexto.'
+            : 'If the user mentions tasks, consider stored open tasks for continuity and context.',
+          ...(normalizedAttachments.length > 0
+            ? [
+                isSpanishPrompt
+                  ? `El usuario adjunto ${normalizedAttachments.length} archivo(s). Debes analizarlos antes de responder.`
+                  : `The user attached ${normalizedAttachments.length} file(s). Analyze them before responding.`,
+                isSpanishPrompt
+                  ? 'Si hay archivos adjuntos, entrega una respuesta completa: resumen, hallazgos clave, detalles relevantes, riesgos o dudas, y siguientes pasos utiles.'
+                  : 'With attachments, provide a complete response: summary, key findings, relevant details, risks/questions, and next steps.',
+                isSpanishPrompt
+                  ? 'No des una respuesta superficial ni ignores archivos adjuntos aunque el mensaje del usuario sea corto.'
+                  : 'Do not provide a superficial response and do not ignore attachments, even when the user message is short.',
+              ]
+            : []),
+          ...(calendarToolsInstruction ? [calendarToolsInstruction] : []),
+          ...(gmailToolsInstruction ? [gmailToolsInstruction] : []),
+          isSpanishPrompt
+            ? `El estilo activo es ${activeStyleId}. Mantente fiel a ese estilo sin comentarlo.`
+            : `Active style is ${activeStyleId}. Stay faithful to this style without announcing it.`,
+        ],
+      }
+    );
 
     // Call Gemini API with selected model
-    console.log("🔄 Calling Gemini API...");
-    console.log("🔄 Model:", modelSelection.model);
-    console.log("🔄 Contents:", message.substring(0, 100));
+    console.log('🔄 Calling Gemini API...');
+    console.log('🔄 Model:', modelSelection.model);
+    console.log('🔄 Contents:', message.substring(0, 100));
 
     let response;
     try {
@@ -4065,8 +4863,9 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         userParts.push({
           text: [
             'ATTACHMENT MANIFEST:',
-            ...normalizedAttachments.map((attachment: any, index: number) =>
-              `${index + 1}. ${attachment.name || `attachment-${index + 1}`} | ${attachment.mimeType} | ${attachment.size || 0} bytes`
+            ...normalizedAttachments.map(
+              (attachment: any, index: number) =>
+                `${index + 1}. ${attachment.name || `attachment-${index + 1}`} | ${attachment.mimeType} | ${attachment.size || 0} bytes`
             ),
             'Analyze every attachment mentioned above before answering.',
           ].join('\n'),
@@ -4106,19 +4905,19 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         },
       });
 
-      console.log("✅ Gemini API response received");
-      console.log("   Response text length:", response.text?.length || 0);
-      console.log("   Response text preview:", response.text?.substring(0, 100));
+      console.log('✅ Gemini API response received');
+      console.log('   Response text length:', response.text?.length || 0);
+      console.log('   Response text preview:', response.text?.substring(0, 100));
 
       if (!response.text) {
-        console.error("❌ Gemini returned empty response");
-        console.error("   Full response:", JSON.stringify(response, null, 2));
-        throw new Error("Empty response from Gemini API");
+        console.error('❌ Gemini returned empty response');
+        console.error('   Full response:', JSON.stringify(response, null, 2));
+        throw new Error('Empty response from Gemini API');
       }
     } catch (apiError: any) {
-      console.error("❌ Gemini API call failed:", apiError.message);
-      console.error("   Error details:", JSON.stringify(apiError, null, 2));
-      console.error("   Error stack:", apiError.stack);
+      console.error('❌ Gemini API call failed:', apiError.message);
+      console.error('   Error details:', JSON.stringify(apiError, null, 2));
+      console.error('   Error stack:', apiError.stack);
 
       // Re-throw with more context
       throw new Error(`Gemini API error: ${apiError.message}`);
@@ -4132,15 +4931,20 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
         // Try to parse as JSON function call - allow for markdown blocks
         let trimmedText = extractToolPayload(responseText) || '';
         if (!trimmedText) {
-          const extractedToolCall = await extractToolCallFromMessage(ai, message, langCode, !!userTokens);
+          const extractedToolCall = await extractToolCallFromMessage(
+            ai,
+            message,
+            langCode,
+            !!userTokens
+          );
           if (extractedToolCall) {
             trimmedText = extractedToolCall;
-            console.log("Fallback extracted tool call:", trimmedText);
+            console.log('Fallback extracted tool call:', trimmedText);
           }
         }
 
         if (trimmedText) {
-          console.log("🔧 Detected function call, parsing...");
+          console.log('🔧 Detected function call, parsing...');
           const functionCall = JSON.parse(trimmedText);
           const toolCalls = normalizeToolCalls(functionCall);
 
@@ -4167,7 +4971,9 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                 const normalizedToolName = toolName.toLowerCase();
                 const errorMessage = normalizedToolName.includes('calendar')
                   ? getCalendarToolErrorMessage(error, resolvedLangCode)
-                  : normalizedToolName.includes('gmail') || normalizedToolName.includes('draft') || toolName === 'readGmailMessage'
+                  : normalizedToolName.includes('gmail') ||
+                      normalizedToolName.includes('draft') ||
+                      toolName === 'readGmailMessage'
                     ? getGmailToolErrorMessage(
                         error,
                         resolvedLangCode,
@@ -4198,7 +5004,8 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
             console.log(`🔁 Executing sequential tool plan with ${toolCalls.length} tasks`);
 
             if (!userTokens) {
-              responseText = "Necesitas conectar tu cuenta de Google primero para ejecutar esas acciones. Ve a la seccion de Calendario o Gmail para conectarla.";
+              responseText =
+                'Necesitas conectar tu cuenta de Google primero para ejecutar esas acciones. Ve a la seccion de Calendario o Gmail para conectarla.';
               res.json({ text: responseText });
               return;
             }
@@ -4213,13 +5020,18 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                 if (toolCall.tool === 'createCalendarEvent') {
                   const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
                   if (!dateInfo) {
-                    taskResults.push(`${stepPrefix}No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`);
+                    taskResults.push(
+                      `${stepPrefix}No pude crear "${toolCall.summary || 'evento'}" porque no entendi la fecha u hora.`
+                    );
                     continue;
                   }
 
                   const endDate =
                     dateInfo.end ||
-                    new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+                    new Date(
+                      dateInfo.start.getTime() +
+                        activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+                    );
 
                   const eventData: CalendarEventData = {
                     summary: toolCall.summary,
@@ -4242,34 +5054,60 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   }
 
                   if (lastError || !createdEvent) {
-                    taskResults.push(`${stepPrefix}${getCalendarToolErrorMessage(lastError, langCode)}`);
+                    taskResults.push(
+                      `${stepPrefix}${getCalendarToolErrorMessage(lastError, langCode)}`
+                    );
                     continue;
                   }
 
-                  taskResults.push(`${stepPrefix}${formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink)}`);
+                  taskResults.push(
+                    `${stepPrefix}${formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink)}`
+                  );
                   continue;
                 }
 
                 if (toolCall.tool === 'listCalendarEvents') {
                   const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
                   const startStr = (dateInfo?.start || new Date()).toISOString().split('T')[0];
-                  const endStr = (dateInfo?.end || dateInfo?.start || new Date()).toISOString().split('T')[0];
-                  const events = await listCalendarEvents(userTokens, startStr, endStr, toolCall.maxResults || 10);
-                  taskResults.push(`${stepPrefix}${formatCalendarListResponse(activeStyleId, langCode, toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'), events)}`);
+                  const endStr = (dateInfo?.end || dateInfo?.start || new Date())
+                    .toISOString()
+                    .split('T')[0];
+                  const events = await listCalendarEvents(
+                    userTokens,
+                    startStr,
+                    endStr,
+                    toolCall.maxResults || 10
+                  );
+                  taskResults.push(
+                    `${stepPrefix}${formatCalendarListResponse(activeStyleId, langCode, toolCall.dateText || (langCode === 'es' ? 'hoy' : 'today'), events)}`
+                  );
                   continue;
                 }
 
                 if (toolCall.tool === 'searchCalendarEvents') {
-                  const events = await searchCalendarEvents(userTokens, toolCall.query, toolCall.maxResults || 10);
+                  const events = await searchCalendarEvents(
+                    userTokens,
+                    toolCall.query,
+                    toolCall.maxResults || 10
+                  );
                   taskResults.push(
                     events.length === 0
                       ? `${stepPrefix}${langCode === 'es' ? `No encontre eventos que coincidan con "${toolCall.query}".` : `I could not find events matching "${toolCall.query}".`}`
-                      : `${stepPrefix}${events.map((event: any, resultIndex: number) => {
-                          const start = event.start?.dateTime
-                            ? new Date(event.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : (langCode === 'es' ? 'Todo el dia' : 'All day');
-                          return `${resultIndex + 1}. ${start}: ${event.summary} (ID: ${event.id})`;
-                        }).join('\n')}`
+                      : `${stepPrefix}${events
+                          .map((event: any, resultIndex: number) => {
+                            const start = event.start?.dateTime
+                              ? new Date(event.start.dateTime).toLocaleString(langCode, {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : langCode === 'es'
+                                ? 'Todo el dia'
+                                : 'All day';
+                            return `${resultIndex + 1}. ${start}: ${event.summary} (ID: ${event.id})`;
+                          })
+                          .join('\n')}`
                   );
                   continue;
                 }
@@ -4287,16 +5125,29 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   if (toolCall.dateText) {
                     const dateInfo = parseNaturalDate(toolCall.dateText, { language: langCode });
                     if (!dateInfo) {
-                      taskResults.push(`${stepPrefix}${langCode === 'es' ? 'No pude actualizar el evento porque no entendi la nueva fecha u hora.' : 'I could not update the event because I did not understand the new date or time.'}`);
+                      taskResults.push(
+                        `${stepPrefix}${langCode === 'es' ? 'No pude actualizar el evento porque no entendi la nueva fecha u hora.' : 'I could not update the event because I did not understand the new date or time.'}`
+                      );
                       continue;
                     }
                     updates.startDate = dateInfo.start;
-                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+                    updates.endDate =
+                      dateInfo.end ||
+                      new Date(
+                        dateInfo.start.getTime() +
+                          activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+                      );
                     updates.isAllDay = dateInfo.isAllDay;
                   }
 
-                  const updatedEvent = await updateCalendarEvent(userTokens, toolCall.eventId, updates);
-                  taskResults.push(`${stepPrefix}${formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary)}`);
+                  const updatedEvent = await updateCalendarEvent(
+                    userTokens,
+                    toolCall.eventId,
+                    updates
+                  );
+                  taskResults.push(
+                    `${stepPrefix}${formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary)}`
+                  );
                   continue;
                 }
 
@@ -4308,16 +5159,19 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   const message = await gmail.users.messages.get({
                     userId: 'me',
                     id: toolCall.messageId,
-                    format: 'full'
+                    format: 'full',
                   });
 
                   const headers = message.data.payload?.headers || [];
-                  const subject = headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
+                  const subject =
+                    headers.find((header) => header.name === 'Subject')?.value || 'No Subject';
                   const from = headers.find((header) => header.name === 'From')?.value || 'Unknown';
                   const date = headers.find((header) => header.name === 'Date')?.value || '';
                   const bodyText = extractBody(message.data.payload) || message.data.snippet || '';
 
-                  taskResults.push(`${stepPrefix}${formatGmailReadResponse(langCode, { from, subject, date, bodyText })}`);
+                  taskResults.push(
+                    `${stepPrefix}${formatGmailReadResponse(langCode, { from, subject, date, bodyText })}`
+                  );
                   continue;
                 }
 
@@ -4338,11 +5192,13 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   await gmail.users.drafts.create({
                     userId: 'me',
                     requestBody: {
-                      message: { raw }
-                    }
+                      message: { raw },
+                    },
                   });
 
-                  taskResults.push(`${stepPrefix}${formatDraftCreatedResponse(activeStyleId, toolCall.to, toolCall.subject)}`);
+                  taskResults.push(
+                    `${stepPrefix}${formatDraftCreatedResponse(activeStyleId, toolCall.to, toolCall.subject)}`
+                  );
                   continue;
                 }
 
@@ -4354,22 +5210,30 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
 
                   const response = await gmail.users.drafts.list({
                     userId: 'me',
-                    maxResults: toolCall.maxResults || 10
+                    maxResults: toolCall.maxResults || 10,
                   });
 
-                  const drafts = await Promise.all((response.data.drafts || []).slice(0, toolCall.maxResults || 10).map(async (draft: any) => {
-                    const draftData = await gmail.users.drafts.get({
-                      userId: 'me',
-                      id: draft.id!,
-                    });
-                    const headers = draftData.data.message?.payload?.headers || [];
-                    return {
-                      id: draft.id,
-                      subject: headers.find((header) => header.name === 'Subject')?.value || 'No Subject',
-                    };
-                  }));
+                  const drafts = await Promise.all(
+                    (response.data.drafts || [])
+                      .slice(0, toolCall.maxResults || 10)
+                      .map(async (draft: any) => {
+                        const draftData = await gmail.users.drafts.get({
+                          userId: 'me',
+                          id: draft.id!,
+                        });
+                        const headers = draftData.data.message?.payload?.headers || [];
+                        return {
+                          id: draft.id,
+                          subject:
+                            headers.find((header) => header.name === 'Subject')?.value ||
+                            'No Subject',
+                        };
+                      })
+                  );
 
-                  taskResults.push(`${stepPrefix}${formatGmailDraftListResponse(langCode, drafts)}`);
+                  taskResults.push(
+                    `${stepPrefix}${formatGmailDraftListResponse(langCode, drafts)}`
+                  );
                   continue;
                 }
 
@@ -4381,16 +5245,20 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
 
                   await gmail.users.drafts.delete({
                     userId: 'me',
-                    id: toolCall.draftId
+                    id: toolCall.draftId,
                   });
 
-                  taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Borrador eliminado correctamente.' : langCode === 'fi' ? 'Luonnos poistettiin onnistuneesti.' : langCode === 'sv' ? 'Utkastet raderades.' : 'Draft deleted successfully.'}`);
+                  taskResults.push(
+                    `${stepPrefix}${langCode === 'es' ? 'Borrador eliminado correctamente.' : langCode === 'fi' ? 'Luonnos poistettiin onnistuneesti.' : langCode === 'sv' ? 'Utkastet raderades.' : 'Draft deleted successfully.'}`
+                  );
                   continue;
                 }
 
                 if (toolCall.tool === 'sendGmailDraft') {
                   if (!toolCall.confirmSend) {
-                    taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Necesito confirmacion explicita para enviar ese borrador.' : langCode === 'fi' ? 'Tarvitsen nimenomaisen vahvistuksen luonnoksen lahettamiseen.' : langCode === 'sv' ? 'Jag behover en uttrycklig bekraftelse for att skicka utkastet.' : 'I need explicit confirmation to send that draft.'}`);
+                    taskResults.push(
+                      `${stepPrefix}${langCode === 'es' ? 'Necesito confirmacion explicita para enviar ese borrador.' : langCode === 'fi' ? 'Tarvitsen nimenomaisen vahvistuksen luonnoksen lahettamiseen.' : langCode === 'sv' ? 'Jag behover en uttrycklig bekraftelse for att skicka utkastet.' : 'I need explicit confirmation to send that draft.'}`
+                    );
                     continue;
                   }
 
@@ -4402,26 +5270,34 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   await gmail.users.drafts.send({
                     userId: 'me',
                     requestBody: {
-                      id: toolCall.draftId
-                    }
+                      id: toolCall.draftId,
+                    },
                   });
 
-                  await gmail.users.drafts.delete({
-                    userId: 'me',
-                    id: toolCall.draftId
-                  }).catch(() => {});
+                  await gmail.users.drafts
+                    .delete({
+                      userId: 'me',
+                      id: toolCall.draftId,
+                    })
+                    .catch(() => {});
 
-                  taskResults.push(`${stepPrefix}${langCode === 'es' ? 'Email enviado correctamente.' : langCode === 'fi' ? 'Sahkoposti lahetettiin onnistuneesti.' : langCode === 'sv' ? 'E-postmeddelandet skickades.' : 'Email sent successfully.'}`);
+                  taskResults.push(
+                    `${stepPrefix}${langCode === 'es' ? 'Email enviado correctamente.' : langCode === 'fi' ? 'Sahkoposti lahetettiin onnistuneesti.' : langCode === 'sv' ? 'E-postmeddelandet skickades.' : 'Email sent successfully.'}`
+                  );
                   continue;
                 }
 
-                taskResults.push(`${stepPrefix}${langCode === 'es' ? `Aun no puedo ejecutar en cadena la accion "${toolCall.tool}".` : `I cannot execute the chained action "${toolCall.tool}" yet.`}`);
+                taskResults.push(
+                  `${stepPrefix}${langCode === 'es' ? `Aun no puedo ejecutar en cadena la accion "${toolCall.tool}".` : `I cannot execute the chained action "${toolCall.tool}" yet.`}`
+                );
               } catch (error: any) {
                 taskResults.push(
                   `${stepPrefix}${
                     toolCall.tool?.toLowerCase().includes('calendar')
                       ? getCalendarToolErrorMessage(error, langCode)
-                      : toolCall.tool?.toLowerCase().includes('gmail') || toolCall.tool?.toLowerCase().includes('draft') || toolCall.tool === 'readGmailMessage'
+                      : toolCall.tool?.toLowerCase().includes('gmail') ||
+                          toolCall.tool?.toLowerCase().includes('draft') ||
+                          toolCall.tool === 'readGmailMessage'
                         ? getGmailToolErrorMessage(
                             error,
                             langCode,
@@ -4435,9 +5311,9 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                                     ? 'list'
                                     : 'read'
                           )
-                      : langCode === 'es'
-                        ? `La accion "${toolCall.tool}" fallo y continue con las demas.`
-                        : `The action "${toolCall.tool}" failed and I continued with the rest.`
+                        : langCode === 'es'
+                          ? `La accion "${toolCall.tool}" fallo y continue con las demas.`
+                          : `The action "${toolCall.tool}" failed and I continued with the rest.`
                   }`
                 );
               }
@@ -4449,7 +5325,7 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
           }
 
           if (false && functionCall.tool) {
-            console.log("   Tool:", functionCall.tool);
+            console.log('   Tool:', functionCall.tool);
 
             if (functionCall.tool === 'getCurrentTime') {
               responseText = getLocalizedCurrentTimeResponse(functionCall.location || '', langCode);
@@ -4458,7 +5334,10 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
             }
 
             // Get user tokens from Supabase
-            const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+            const supabaseAdmin = createClient(
+              supabaseUrl,
+              process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+            );
             const { data: tokenData } = await supabaseAdmin
               .from('user_google_tokens')
               .select('tokens')
@@ -4466,34 +5345,45 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
               .single();
 
             if (!userTokens) {
-              responseText = "Necesitas conectar tu cuenta de Google primero para usar el calendario. Ve a la sección de Calendario para conectarla.";
+              responseText =
+                'Necesitas conectar tu cuenta de Google primero para usar el calendario. Ve a la sección de Calendario para conectarla.';
             } else {
               // Execute the appropriate function
               if (functionCall.tool === 'createCalendarEvent') {
                 try {
-                const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
-                if (!dateInfo) {
-                  responseText = "No pude entender la fecha. Por favor, sé más específico (ej: 'mañana a las 3pm' o 'el lunes que viene').";
-                } else {
-                  const endDate =
-                    dateInfo.end ||
-                    new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
+                  const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
+                  if (!dateInfo) {
+                    responseText =
+                      "No pude entender la fecha. Por favor, sé más específico (ej: 'mañana a las 3pm' o 'el lunes que viene').";
+                  } else {
+                    const endDate =
+                      dateInfo.end ||
+                      new Date(
+                        dateInfo.start.getTime() +
+                          activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+                      );
 
-                  const eventData: CalendarEventData = {
-                    summary: functionCall.summary,
-                    description: functionCall.description,
-                    startDate: dateInfo.start,
-                    endDate: endDate,
-                    isAllDay: dateInfo.isAllDay,
-                  };
+                    const eventData: CalendarEventData = {
+                      summary: functionCall.summary,
+                      description: functionCall.description,
+                      startDate: dateInfo.start,
+                      endDate: endDate,
+                      isAllDay: dateInfo.isAllDay,
+                    };
 
-                  const createdEvent = await createCalendarEvent(userTokens, eventData);
-                  responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
-                  responseText = formatCalendarCreationResponse(activeStyleId, langCode, createdEvent.summary, dateInfo.start, createdEvent.htmlLink);
-                  console.log("   Created event:", createdEvent.id);
-                }
+                    const createdEvent = await createCalendarEvent(userTokens, eventData);
+                    responseText = `✅ Evento creado: "${createdEvent.summary}" para el ${dateInfo.start.toLocaleDateString(langCode)}.`;
+                    responseText = formatCalendarCreationResponse(
+                      activeStyleId,
+                      langCode,
+                      createdEvent.summary,
+                      dateInfo.start,
+                      createdEvent.htmlLink
+                    );
+                    console.log('   Created event:', createdEvent.id);
+                  }
                 } catch (calendarError: any) {
-                  console.error("   Error creating calendar event:", calendarError.message);
+                  console.error('   Error creating calendar event:', calendarError.message);
                   responseText = getCalendarToolErrorMessage(calendarError, langCode);
                 }
               } else if (functionCall.tool === 'listCalendarEvents') {
@@ -4502,76 +5392,130 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   // Default to today if date not understood
                   const today = new Date();
                   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                  const events = await listCalendarEvents(userTokens, today.toISOString().split('T')[0], tomorrow.toISOString().split('T')[0], functionCall.maxResults || 10);
+                  const events = await listCalendarEvents(
+                    userTokens,
+                    today.toISOString().split('T')[0],
+                    tomorrow.toISOString().split('T')[0],
+                    functionCall.maxResults || 10
+                  );
 
                   if (events.length === 0) {
-                    responseText = "No tienes eventos programados para hoy.";
+                    responseText = 'No tienes eventos programados para hoy.';
                   } else {
-                    responseText = "📅 Tus eventos de hoy:\n\n" + events.map((e: any) => {
-                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
-                      return `- ${start}: ${e.summary}`;
-                    }).join('\n');
+                    responseText =
+                      '📅 Tus eventos de hoy:\n\n' +
+                      events
+                        .map((e: any) => {
+                          const start = e.start.dateTime
+                            ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : 'Todo el día';
+                          return `- ${start}: ${e.summary}`;
+                        })
+                        .join('\n');
                   }
                 } else {
                   const startStr = dateInfo.start.toISOString().split('T')[0];
                   const endStr = (dateInfo.end || dateInfo.start).toISOString().split('T')[0];
-                  const events = await listCalendarEvents(userTokens, startStr, endStr, functionCall.maxResults || 10);
+                  const events = await listCalendarEvents(
+                    userTokens,
+                    startStr,
+                    endStr,
+                    functionCall.maxResults || 10
+                  );
 
                   if (events.length === 0) {
                     responseText = `No tienes eventos programados para ${functionCall.dateText}.`;
                   } else {
-                    responseText = `📅 Eventos para ${functionCall.dateText}:\n\n` + events.map((e: any) => {
-                      const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleTimeString(langCode, { hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
-                      return `- ${start}: ${e.summary}`;
-                    }).join('\n');
+                    responseText =
+                      `📅 Eventos para ${functionCall.dateText}:\n\n` +
+                      events
+                        .map((e: any) => {
+                          const start = e.start.dateTime
+                            ? new Date(e.start.dateTime).toLocaleTimeString(langCode, {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : 'Todo el día';
+                          return `- ${start}: ${e.summary}`;
+                        })
+                        .join('\n');
                   }
                 }
               } else if (functionCall.tool === 'searchCalendarEvents') {
-                const events = await searchCalendarEvents(userTokens, functionCall.query, functionCall.maxResults || 10);
+                const events = await searchCalendarEvents(
+                  userTokens,
+                  functionCall.query,
+                  functionCall.maxResults || 10
+                );
 
                 if (events.length === 0) {
                   responseText = `No encontré eventos que coincidan con "${functionCall.query}".`;
                 } else {
-                  responseText = `🔍 Eventos encontrados para "${functionCall.query}":\n\n` + events.map((e: any, i: number) => {
-                    const start = e.start.dateTime ? new Date(e.start.dateTime).toLocaleString(langCode, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Todo el día';
-                    return `${i + 1}. ${start}: ${e.summary} (ID: ${e.id})`;
-                  }).join('\n');
+                  responseText =
+                    `🔍 Eventos encontrados para "${functionCall.query}":\n\n` +
+                    events
+                      .map((e: any, i: number) => {
+                        const start = e.start.dateTime
+                          ? new Date(e.start.dateTime).toLocaleString(langCode, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : 'Todo el día';
+                        return `${i + 1}. ${start}: ${e.summary} (ID: ${e.id})`;
+                      })
+                      .join('\n');
                 }
               } else if (functionCall.tool === 'deleteCalendarEvent') {
                 try {
-                await deleteCalendarEvent(userTokens, functionCall.eventId);
-                responseText = "✅ Evento eliminado correctamente.";
-                responseText = formatCalendarDeleteResponse(activeStyleId);
+                  await deleteCalendarEvent(userTokens, functionCall.eventId);
+                  responseText = '✅ Evento eliminado correctamente.';
+                  responseText = formatCalendarDeleteResponse(activeStyleId);
                 } catch (calendarError: any) {
-                  console.error("   Error deleting calendar event:", calendarError.message);
+                  console.error('   Error deleting calendar event:', calendarError.message);
                   responseText = getCalendarToolErrorMessage(calendarError, langCode);
                 }
               } else if (functionCall.tool === 'updateCalendarEvent') {
                 try {
                   const updates: Partial<CalendarEventData> = {};
-                if (functionCall.summary) updates.summary = functionCall.summary;
-                if (functionCall.description) updates.description = functionCall.description;
-                if (functionCall.dateText) {
-                  const dateInfo = parseNaturalDate(functionCall.dateText, { language: langCode });
-                  if (dateInfo) {
-                    updates.startDate = dateInfo.start;
-                    updates.endDate = dateInfo.end || new Date(dateInfo.start.getTime() + activeStyle.calendarRules.defaultEventDuration * 60 * 1000);
-                    updates.isAllDay = dateInfo.isAllDay;
+                  if (functionCall.summary) updates.summary = functionCall.summary;
+                  if (functionCall.description) updates.description = functionCall.description;
+                  if (functionCall.dateText) {
+                    const dateInfo = parseNaturalDate(functionCall.dateText, {
+                      language: langCode,
+                    });
+                    if (dateInfo) {
+                      updates.startDate = dateInfo.start;
+                      updates.endDate =
+                        dateInfo.end ||
+                        new Date(
+                          dateInfo.start.getTime() +
+                            activeStyle.calendarRules.defaultEventDuration * 60 * 1000
+                        );
+                      updates.isAllDay = dateInfo.isAllDay;
+                    }
                   }
-                }
 
-                const updatedEvent = await updateCalendarEvent(userTokens, functionCall.eventId, updates);
-                responseText = formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary);
-                responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
+                  const updatedEvent = await updateCalendarEvent(
+                    userTokens,
+                    functionCall.eventId,
+                    updates
+                  );
+                  responseText = formatCalendarUpdateResponse(activeStyleId, updatedEvent.summary);
+                  responseText = `✅ Evento actualizado: "${updatedEvent.summary}".`;
                 } catch (calendarError: any) {
-                  console.error("   Error updating calendar event:", calendarError.message);
+                  console.error('   Error updating calendar event:', calendarError.message);
                   responseText = getCalendarToolErrorMessage(calendarError, langCode);
                 }
               }
               // GMAIL TOOLS EXECUTION
               else if (functionCall.tool === 'readGmailMessage') {
                 try {
-                  console.log("   Reading Gmail message:", functionCall.messageId);
+                  console.log('   Reading Gmail message:', functionCall.messageId);
                   const oauth2Client = getOAuth2Client();
                   oauth2Client.setCredentials(userTokens);
                   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -4579,25 +5523,24 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   const message = await gmail.users.messages.get({
                     userId: 'me',
                     id: functionCall.messageId,
-                    format: 'full'
+                    format: 'full',
                   });
 
                   const headers = message.data.payload?.headers || [];
-                  const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-                  const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-                  const date = headers.find(h => h.name === 'Date')?.value || '';
+                  const subject = headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
+                  const from = headers.find((h) => h.name === 'From')?.value || 'Unknown';
+                  const date = headers.find((h) => h.name === 'Date')?.value || '';
                   const bodyText = extractBody(message.data.payload);
 
                   responseText = `📧 Email de: ${from}\nAsunto: ${subject}\nFecha: ${date}\n\n${bodyText.substring(0, 500)}${bodyText.length > 500 ? '...' : ''}`;
-                  console.log("   Message read successfully");
+                  console.log('   Message read successfully');
                 } catch (error: any) {
-                  console.error("   Error reading message:", error.message);
-                  responseText = "No pude leer ese email. Asegúrate de que el ID sea correcto.";
+                  console.error('   Error reading message:', error.message);
+                  responseText = 'No pude leer ese email. Asegúrate de que el ID sea correcto.';
                 }
-              }
-              else if (functionCall.tool === 'createGmailDraft') {
+              } else if (functionCall.tool === 'createGmailDraft') {
                 try {
-                  console.log("   Creating Gmail draft...");
+                  console.log('   Creating Gmail draft...');
                   const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                   const oauth2Client = getOAuth2Client();
                   oauth2Client.setCredentials(writableTokens);
@@ -4614,48 +5557,50 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                   const draft = await gmail.users.drafts.create({
                     userId: 'me',
                     requestBody: {
-                      message: { raw }
-                    }
+                      message: { raw },
+                    },
                   });
 
                   responseText = `📝 Borrador creado exitosamente.\nPara: ${functionCall.to}\nAsunto: ${functionCall.subject}\n\nEl borrador está guardado. ¿Quieres que lo envíe o prefieres revisarlo primero?`;
-                  responseText = formatDraftCreatedResponse(activeStyleId, functionCall.to, functionCall.subject);
-                  console.log("   Draft created:", draft.data.id);
+                  responseText = formatDraftCreatedResponse(
+                    activeStyleId,
+                    functionCall.to,
+                    functionCall.subject
+                  );
+                  console.log('   Draft created:', draft.data.id);
                 } catch (error: any) {
-                  console.error("   Error creating draft:", error.message);
+                  console.error('   Error creating draft:', error.message);
                   responseText = isGoogleScopeError(error)
-                    ? "Necesito permiso de escritura en Gmail para crear ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
-                    : "No pude crear el borrador. Verifica los datos e intenta de nuevo.";
+                    ? 'Necesito permiso de escritura en Gmail para crear ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
+                    : 'No pude crear el borrador. Verifica los datos e intenta de nuevo.';
                 }
-              }
-              else if (functionCall.tool === 'listGmailDrafts') {
+              } else if (functionCall.tool === 'listGmailDrafts') {
                 try {
-                  console.log("   Listing Gmail drafts...");
+                  console.log('   Listing Gmail drafts...');
                   const oauth2Client = getOAuth2Client();
                   oauth2Client.setCredentials(userTokens);
                   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
                   const response = await gmail.users.drafts.list({
                     userId: 'me',
-                    maxResults: 10
+                    maxResults: 10,
                   });
 
                   if (!response.data.drafts || response.data.drafts.length === 0) {
-                    responseText = "📋 No tienes borradores guardados.";
+                    responseText = '📋 No tienes borradores guardados.';
                   } else {
-                    const draftsList = response.data.drafts.map((d: any, i: number) =>
-                      `${i + 1}. ID: ${d.id}`
-                    ).join('\n');
+                    const draftsList = response.data.drafts
+                      .map((d: any, i: number) => `${i + 1}. ID: ${d.id}`)
+                      .join('\n');
                     responseText = `📋 Borradores existentes:\n${draftsList}\n\n¿Quieres que envíe, edite o elimine alguno?`;
                   }
                 } catch (error: any) {
-                  console.error("   Error listing drafts:", error.message);
-                  responseText = "No pude listar los borradores. Intenta de nuevo.";
+                  console.error('   Error listing drafts:', error.message);
+                  responseText = 'No pude listar los borradores. Intenta de nuevo.';
                 }
-              }
-              else if (functionCall.tool === 'deleteGmailDraft') {
+              } else if (functionCall.tool === 'deleteGmailDraft') {
                 try {
-                  console.log("   Deleting Gmail draft:", functionCall.draftId);
+                  console.log('   Deleting Gmail draft:', functionCall.draftId);
                   const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                   const oauth2Client = getOAuth2Client();
                   oauth2Client.setCredentials(writableTokens);
@@ -4663,26 +5608,26 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
 
                   await gmail.users.drafts.delete({
                     userId: 'me',
-                    id: functionCall.draftId
+                    id: functionCall.draftId,
                   });
 
                   responseText = `🗑️ Borrador eliminado exitosamente.`;
-                  console.log("   Draft deleted");
+                  console.log('   Draft deleted');
                 } catch (error: any) {
-                  console.error("   Error deleting draft:", error.message);
+                  console.error('   Error deleting draft:', error.message);
                   responseText = isGoogleScopeError(error)
-                    ? "Necesito permiso de escritura en Gmail para eliminar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
-                    : "No pude eliminar el borrador. Verifica el ID e intenta de nuevo.";
+                    ? 'Necesito permiso de escritura en Gmail para eliminar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
+                    : 'No pude eliminar el borrador. Verifica el ID e intenta de nuevo.';
                 }
-              }
-              else if (functionCall.tool === 'sendGmailDraft') {
+              } else if (functionCall.tool === 'sendGmailDraft') {
                 // CRITICAL: Require explicit confirmation
                 if (!functionCall.confirmSend) {
-                  responseText = "⚠️ Para enviar el borrador necesito tu confirmación explícita. Por favor di 'sí, envía el borrador' o 'confirmo que quiero enviar este email'.";
-                  console.log("   Send rejected - no confirmation");
+                  responseText =
+                    "⚠️ Para enviar el borrador necesito tu confirmación explícita. Por favor di 'sí, envía el borrador' o 'confirmo que quiero enviar este email'.";
+                  console.log('   Send rejected - no confirmation');
                 } else {
                   try {
-                    console.log("   Sending Gmail draft:", functionCall.draftId);
+                    console.log('   Sending Gmail draft:', functionCall.draftId);
                     const writableTokens = await ensureGoogleWriteAccess(userTokens, 'gmail');
                     const oauth2Client = getOAuth2Client();
                     oauth2Client.setCredentials(writableTokens);
@@ -4691,23 +5636,25 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
                     const sent = await gmail.users.drafts.send({
                       userId: 'me',
                       requestBody: {
-                        id: functionCall.draftId
-                      }
+                        id: functionCall.draftId,
+                      },
                     });
 
                     // Delete draft after sending
-                    await gmail.users.drafts.delete({
-                      userId: 'me',
-                      id: functionCall.draftId
-                    }).catch(() => {});
+                    await gmail.users.drafts
+                      .delete({
+                        userId: 'me',
+                        id: functionCall.draftId,
+                      })
+                      .catch(() => {});
 
                     responseText = `🚀 Email enviado exitosamente.`;
-                    console.log("   Email sent:", sent.data.id);
+                    console.log('   Email sent:', sent.data.id);
                   } catch (error: any) {
-                    console.error("   Error sending draft:", error.message);
+                    console.error('   Error sending draft:', error.message);
                     responseText = isGoogleScopeError(error)
-                      ? "Necesito permiso de escritura en Gmail para enviar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo."
-                      : "No pude enviar el email. Verifica el borrador e intenta de nuevo.";
+                      ? 'Necesito permiso de escritura en Gmail para enviar ese borrador. Reconecta Google desde Perfil e intentalo de nuevo.'
+                      : 'No pude enviar el email. Verifica el borrador e intenta de nuevo.';
                   }
                 }
               }
@@ -4715,36 +5662,36 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
           }
         }
       } catch (functionError: any) {
-        console.error("❌ Function call error:", functionError.message);
+        console.error('❌ Function call error:', functionError.message);
         if (/unexpected end|json|parse/i.test(String(functionError.message || ''))) {
-          responseText = "No pude interpretar correctamente la accion solicitada. Intenta reformularla con mas detalle.";
+          responseText =
+            'No pude interpretar correctamente la accion solicitada. Intenta reformularla con mas detalle.';
         } else {
           responseText = `No pude completar la accion solicitada${functionError.message ? `: ${functionError.message}` : ''}`;
         }
       }
     }
 
-    console.log("✅ Sending response to client");
+    console.log('✅ Sending response to client');
     res.json({ text: responseText });
-
   } catch (error: any) {
-    console.error("═══════════════════════════════════════════");
-    console.error("❌ CHAT API ERROR:");
-    console.error("   Message:", error.message);
-    console.error("   Stack:", error.stack);
+    console.error('═══════════════════════════════════════════');
+    console.error('❌ CHAT API ERROR:');
+    console.error('   Message:', error.message);
+    console.error('   Stack:', error.stack);
 
     // Log specific error types for debugging
     if (error.message?.includes('API key')) {
-      console.error("   ⚠️  API Key issue detected");
+      console.error('   ⚠️  API Key issue detected');
     }
     if (error.message?.includes('model')) {
-      console.error("   ⚠️  Model name issue detected");
+      console.error('   ⚠️  Model name issue detected');
     }
     if (error.message?.includes('quota')) {
-      console.error("   ⚠️  Quota exceeded");
+      console.error('   ⚠️  Quota exceeded');
     }
 
-    console.error("═══════════�����═══════════════════════════════");
+    console.error('═══════════�����═══════════════════════════════');
 
     // Calculate request duration
     const duration = Date.now() - requestStart;
@@ -4754,23 +5701,23 @@ Si el usuario pide crear, editar o enviar borradores, responde de forma breve ex
     const langCode = language || 'en';
     const errorMessages: Record<string, string> = {
       en: "I'm sorry, I'm having trouble processing your request. Please try again in a moment.",
-      es: "Lo siento, estoy teniendo problemas para procesar tu solicitud. Por favor, intenta de nuevo en un momento.",
-      fi: "Anteeksi, minulla on vaikeuksia käsitellä pyyntöäsi. Yritä uudelleen hetken kuluttua.",
-      sv: "Förlåt, jag har problem med att bearbeta din begäran. Vänligen försök igen om en stund."
+      es: 'Lo siento, estoy teniendo problemas para procesar tu solicitud. Por favor, intenta de nuevo en un momento.',
+      fi: 'Anteeksi, minulla on vaikeuksia käsitellä pyyntöäsi. Yritä uudelleen hetken kuluttua.',
+      sv: 'Förlåt, jag har problem med att bearbeta din begäran. Vänligen försök igen om en stund.',
     };
 
     // Determine error code for frontend
-    let errorCode = "UNKNOWN_ERROR";
-    if (error.message?.includes('API key')) errorCode = "INVALID_API_KEY";
-    else if (error.message?.includes('model')) errorCode = "MODEL_ERROR";
-    else if (error.message?.includes('quota')) errorCode = "QUOTA_EXCEEDED";
-    else if (error.message?.includes('timeout')) errorCode = "TIMEOUT";
-    else if (error.message?.includes('network')) errorCode = "NETWORK_ERROR";
+    let errorCode = 'UNKNOWN_ERROR';
+    if (error.message?.includes('API key')) errorCode = 'INVALID_API_KEY';
+    else if (error.message?.includes('model')) errorCode = 'MODEL_ERROR';
+    else if (error.message?.includes('quota')) errorCode = 'QUOTA_EXCEEDED';
+    else if (error.message?.includes('timeout')) errorCode = 'TIMEOUT';
+    else if (error.message?.includes('network')) errorCode = 'NETWORK_ERROR';
 
     res.status(500).json({
       error: errorMessages[langCode] || errorMessages.en,
       errorCode,
-      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
     });
   }
 });
@@ -4801,33 +5748,39 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
       if (authHeader && supabaseUrl && supabaseAnonKey) {
         const token = authHeader.split(' ')[1];
         const supabase = createClient(supabaseUrl, supabaseAnonKey);
-        const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser(token);
 
         if (userError) {
-          console.error("Failed to get user from auth token:", userError.message);
+          console.error('Failed to get user from auth token:', userError.message);
         } else if (user) {
           // Delete tokens from Supabase
-          const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey);
+          const supabaseAdmin = createClient(
+            supabaseUrl,
+            process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+          );
           const { error: deleteError } = await supabaseAdmin
             .from('user_google_tokens')
             .delete()
             .eq('user_id', user.id);
 
           if (deleteError) {
-            console.error("Failed to delete tokens from Supabase:", deleteError.message);
+            console.error('Failed to delete tokens from Supabase:', deleteError.message);
           } else {
             console.log(`✅ Deleted invalid tokens for user ${user.id} from Supabase`);
           }
         }
       }
     } catch (e) {
-      console.error("Failed to delete invalid tokens from Supabase", e);
+      console.error('Failed to delete invalid tokens from Supabase', e);
     }
 
     return res.status(401).json({
       error: `${serviceName}_token_expired`,
       message: `Google authentication expired. Please reconnect your ${serviceName === 'gmail' ? 'Gmail' : 'Calendar'} account.`,
-      errorCode: 'TOKEN_EXPIRED'
+      errorCode: 'TOKEN_EXPIRED',
     });
   }
 
@@ -4843,7 +5796,7 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
           : 'Gmail needs write permission. Reconnect Google to grant compose and send access again.'
         : `Permission denied for ${serviceName}. Please check API is enabled in Google Cloud Console.`,
       errorCode: needsReconnect ? 'RECONNECT_REQUIRED' : 'PERMISSION_DENIED',
-      missingScopes: Array.isArray(error?.missingScopes) ? error.missingScopes : undefined
+      missingScopes: Array.isArray(error?.missingScopes) ? error.missingScopes : undefined,
     });
   }
 
@@ -4851,7 +5804,7 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
     return res.status(404).json({
       error: `${serviceName}_not_found`,
       message: `${serviceName} resource not found.`,
-      errorCode: 'NOT_FOUND'
+      errorCode: 'NOT_FOUND',
     });
   }
 
@@ -4860,7 +5813,7 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
     error: `${serviceName}_error`,
     message: `Failed to fetch ${serviceName}. Please try again.`,
     errorCode: 'UNKNOWN_ERROR',
-    details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
   });
 }
 
@@ -4869,15 +5822,15 @@ async function handleGoogleApiError(error: any, req: any, res: any, serviceName:
 async function getUserTokens(req: express.Request): Promise<any | null> {
   // First, try to get tokens from session (fastest) - with null safety
   if (req.session?.tokens) {
-    console.log("✅ Using tokens from session");
+    console.log('✅ Using tokens from session');
     return req.session.tokens;
   }
 
-  console.log("⏳ Session tokens not found, trying Supabase fallback...");
+  console.log('⏳ Session tokens not found, trying Supabase fallback...');
 
   const user = (req as any).user;
   if (!user) {
-    console.log("❌ No user object in request (middleware failed or bypassed)");
+    console.log('❌ No user object in request (middleware failed or bypassed)');
     return null;
   }
 
@@ -4887,12 +5840,12 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
     const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || '');
 
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error("❌ FATAL: SUPABASE_SERVICE_ROLE_KEY not configured");
+      console.error('❌ FATAL: SUPABASE_SERVICE_ROLE_KEY not configured');
       return null;
     }
 
     // Fetch tokens with timeout
-    console.log("💾 Fetching tokens from Supabase...");
+    console.log('💾 Fetching tokens from Supabase...');
     const { data: tokenData, error: tokenError } = await supabaseAdmin
       .from('user_google_tokens')
       .select('tokens')
@@ -4901,29 +5854,29 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     if (tokenError) {
       if (tokenError.code === 'PGRST116') {
-        console.log("ℹ️ No tokens found in Supabase for user:", user.id);
+        console.log('ℹ️ No tokens found in Supabase for user:', user.id);
       } else {
-        console.error("❌ Token fetch error:", tokenError.message);
+        console.error('❌ Token fetch error:', tokenError.message);
       }
       return null;
     }
 
     if (!tokenData || !tokenData.tokens) {
-      console.log("ℹ️ Token data is empty for user:", user.id);
+      console.log('ℹ️ Token data is empty for user:', user.id);
       return null;
     }
 
     // Decrypt and return tokens
     const tokens = JSON.parse(decrypt(tokenData.tokens));
     let resolvedTokens = { ...tokens };
-    console.log("✅ Successfully fetched tokens from Supabase fallback");
+    console.log('✅ Successfully fetched tokens from Supabase fallback');
 
     // Save to session for future requests (cache)
     req.session.tokens = resolvedTokens;
     try {
       await saveSession(req);
     } catch (err: any) {
-      console.log("⚠️ Failed to save tokens to session:", err);
+      console.log('⚠️ Failed to save tokens to session:', err);
     }
 
     // Set up auto-refresh listener if not already set
@@ -4969,24 +5922,25 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
 
     if (tokenExpiresSoon && resolvedTokens.refresh_token) {
       try {
-        console.log("🔄 Access token missing or expiring soon, forcing refresh...");
+        console.log('🔄 Access token missing or expiring soon, forcing refresh...');
         await oauth2Client.getAccessToken();
         resolvedTokens = { ...resolvedTokens, ...oauth2Client.credentials };
         req.session.tokens = resolvedTokens;
         await saveSession(req);
 
         const encrypted = encrypt(JSON.stringify(resolvedTokens));
-        await supabaseAdmin
-          .from('user_google_tokens')
-          .upsert({
+        await supabaseAdmin.from('user_google_tokens').upsert(
+          {
             user_id: user.id,
             tokens: encrypted,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
 
-        console.log("✅ Tokens refreshed proactively before API call");
+        console.log('✅ Tokens refreshed proactively before API call');
       } catch (refreshError: any) {
-        console.error("❌ Failed to refresh access token proactively:", refreshError.message);
+        console.error('❌ Failed to refresh access token proactively:', refreshError.message);
       }
     }
 
@@ -4994,31 +5948,31 @@ async function getUserTokens(req: express.Request): Promise<any | null> {
     if (googleScopeMetadataChanged(resolvedTokens, enrichedTokens)) {
       resolvedTokens = enrichedTokens;
       await persistGoogleTokens(user.id, resolvedTokens, req);
-      console.log("✅ Google scope metadata refreshed in session and Supabase");
+      console.log('✅ Google scope metadata refreshed in session and Supabase');
     }
 
     return resolvedTokens;
   } catch (error: any) {
-    console.error("❌ Error fetching tokens from Supabase:", error.message);
+    console.error('❌ Error fetching tokens from Supabase:', error.message);
     return null;
   }
 }
 
-app.get("/api/calendar/events", authenticateSupabaseUser, async (req, res) => {
-  console.log("📅 Calendar events request received");
+app.get('/api/calendar/events', authenticateSupabaseUser, async (req, res) => {
+  console.log('📅 Calendar events request received');
 
   // Try to get tokens from session or fallback to Supabase
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
-    console.log("❌ Calendar: No Google tokens found");
+    console.log('❌ Calendar: No Google tokens found');
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
   try {
-    console.log("✅ Calendar: Tokens retrieved, fetching events...");
+    console.log('✅ Calendar: Tokens retrieved, fetching events...');
     const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials(userTokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -5035,26 +5989,26 @@ app.get("/api/calendar/events", authenticateSupabaseUser, async (req, res) => {
     console.log(`✅ Calendar: Retrieved ${events.length} events`);
     res.json(events);
   } catch (error: any) {
-    console.error("❌ Calendar error:", error.message);
+    console.error('❌ Calendar error:', error.message);
     await handleGoogleApiError(error, req, res, 'calendar');
   }
 });
 
-app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
-  console.log("📧 Gmail messages request received");
+app.get('/api/gmail/messages', authenticateSupabaseUser, async (req, res) => {
+  console.log('📧 Gmail messages request received');
 
   // Try to get tokens from session or fallback to Supabase
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
-    console.log("❌ Gmail: No Google tokens found");
+    console.log('❌ Gmail: No Google tokens found');
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
   try {
-    console.log("✅ Gmail: Tokens retrieved, fetching messages...");
+    console.log('✅ Gmail: Tokens retrieved, fetching messages...');
     const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials(userTokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -5091,13 +6045,13 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
           userId: 'me',
           id: msg.id as string,
           format: 'metadata',
-          metadataHeaders: ['Subject', 'From', 'Date']
+          metadataHeaders: ['Subject', 'From', 'Date'],
         });
 
         const headers = msgData.data.payload?.headers;
-        const subject = headers?.find(h => h.name === 'Subject')?.value || 'No Subject';
-        const fromHeader = headers?.find(h => h.name === 'From')?.value || 'Unknown';
-        const date = headers?.find(h => h.name === 'Date')?.value || '';
+        const subject = headers?.find((h) => h.name === 'Subject')?.value || 'No Subject';
+        const fromHeader = headers?.find((h) => h.name === 'From')?.value || 'Unknown';
+        const date = headers?.find((h) => h.name === 'Date')?.value || '';
 
         // Clean up "From" name
         const fromMatch = fromHeader.match(/^(.*?)\s*</);
@@ -5142,14 +6096,14 @@ app.get("/api/gmail/messages", authenticateSupabaseUser, async (req, res) => {
 // ---- Gmail Message Full Content Endpoint ----
 
 // Get full message content by ID
-app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) => {
-  console.log("📧 Gmail message details request received");
+app.get('/api/gmail/messages/:id', authenticateSupabaseUser, async (req, res) => {
+  console.log('📧 Gmail message details request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5164,15 +6118,15 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
     const message = await gmail.users.messages.get({
       userId: 'me',
       id,
-      format: 'full'
+      format: 'full',
     });
 
     const headers = message.data.payload?.headers || [];
-    const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-    const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-    const to = headers.find(h => h.name === 'To')?.value || '';
-    const date = headers.find(h => h.name === 'Date')?.value || '';
-    const messageId = headers.find(h => h.name === 'Message-ID')?.value || '';
+    const subject = headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
+    const from = headers.find((h) => h.name === 'From')?.value || 'Unknown';
+    const to = headers.find((h) => h.name === 'To')?.value || '';
+    const date = headers.find((h) => h.name === 'Date')?.value || '';
+    const messageId = headers.find((h) => h.name === 'Message-ID')?.value || '';
 
     const bodyText = extractBody(message.data.payload);
     const bodyHtml = extractHtmlBody(message.data.payload);
@@ -5206,142 +6160,151 @@ app.get("/api/gmail/messages/:id", authenticateSupabaseUser, async (req, res) =>
       bodyHtml: bodyHtml || bodyText,
       snippet: message.data.snippet || '',
       attachments,
-      labels: message.data.labelIds || []
+      labels: message.data.labelIds || [],
     });
   } catch (error: any) {
-    console.error("❌ Error fetching Gmail message:", error.message);
+    console.error('❌ Error fetching Gmail message:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
-app.get("/api/gmail/messages/:messageId/attachments/:attachmentId", authenticateSupabaseUser, async (req, res) => {
-  console.log("📎 Gmail attachment request received");
+app.get(
+  '/api/gmail/messages/:messageId/attachments/:attachmentId',
+  authenticateSupabaseUser,
+  async (req, res) => {
+    console.log('📎 Gmail attachment request received');
 
-  const userTokens = await getUserTokens(req);
-  if (!userTokens) {
-    return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
-    });
-  }
-
-  try {
-    const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials(userTokens);
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    const { messageId, attachmentId } = req.params;
-    const analyze = req.query.analyze === 'true' || req.query.analyze === '1';
-    const language = typeof req.query.language === 'string' ? req.query.language : 'en';
-
-    const message = await gmail.users.messages.get({
-      userId: 'me',
-      id: messageId,
-      format: 'full'
-    });
-
-    const parts = collectMimeParts(message.data.payload);
-    const attachmentPart = parts.find((part: any) => part.body?.attachmentId === attachmentId);
-
-    if (!attachmentPart) {
-      return res.status(404).json({
-        error: "Attachment not found",
-        errorCode: "ATTACHMENT_NOT_FOUND"
+    const userTokens = await getUserTokens(req);
+    if (!userTokens) {
+      return res.status(401).json({
+        error: 'Unauthorized - No Google tokens found',
+        errorCode: 'NO_TOKENS',
       });
     }
 
-    const attachmentResponse = await gmail.users.messages.attachments.get({
-      userId: 'me',
-      messageId,
-      id: attachmentId,
-    });
+    try {
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials(userTokens);
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    const attachmentData = attachmentResponse.data.data || '';
-    const normalizedBase64 = attachmentData.replace(/-/g, '+').replace(/_/g, '/');
-    const mimeType = attachmentPart.mimeType || 'application/octet-stream';
-    const filename = attachmentPart.filename || 'attachment';
-    const size = attachmentPart.body?.size || 0;
+      const { messageId, attachmentId } = req.params;
+      const analyze = req.query.analyze === 'true' || req.query.analyze === '1';
+      const language = typeof req.query.language === 'string' ? req.query.language : 'en';
 
-    if (size > 10 * 1024 * 1024) {
-      return res.status(413).json({
-        error: "Attachment too large",
-        errorCode: "ATTACHMENT_TOO_LARGE",
-        message: language === 'es'
-          ? 'El adjunto supera el limite de 10MB.'
-          : 'The attachment exceeds the 10MB limit.',
+      const message = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
       });
-    }
 
-    if (!analyze) {
+      const parts = collectMimeParts(message.data.payload);
+      const attachmentPart = parts.find((part: any) => part.body?.attachmentId === attachmentId);
+
+      if (!attachmentPart) {
+        return res.status(404).json({
+          error: 'Attachment not found',
+          errorCode: 'ATTACHMENT_NOT_FOUND',
+        });
+      }
+
+      const attachmentResponse = await gmail.users.messages.attachments.get({
+        userId: 'me',
+        messageId,
+        id: attachmentId,
+      });
+
+      const attachmentData = attachmentResponse.data.data || '';
+      const normalizedBase64 = attachmentData.replace(/-/g, '+').replace(/_/g, '/');
+      const mimeType = attachmentPart.mimeType || 'application/octet-stream';
+      const filename = attachmentPart.filename || 'attachment';
+      const size = attachmentPart.body?.size || 0;
+
+      if (size > 10 * 1024 * 1024) {
+        return res.status(413).json({
+          error: 'Attachment too large',
+          errorCode: 'ATTACHMENT_TOO_LARGE',
+          message:
+            language === 'es'
+              ? 'El adjunto supera el limite de 10MB.'
+              : 'The attachment exceeds the 10MB limit.',
+        });
+      }
+
+      if (!analyze) {
+        return res.json({
+          filename,
+          mimeType,
+          size,
+          data: normalizedBase64,
+        });
+      }
+
+      const ai = getGenAI();
+      const supportedAnalysis = isSupportedAttachmentAnalysisMimeType(mimeType);
+
+      if (!supportedAnalysis) {
+        return res.status(400).json({
+          error: 'Attachment type not supported for analysis',
+          errorCode: 'ATTACHMENT_UNSUPPORTED',
+          message:
+            language === 'es'
+              ? 'Este tipo de adjunto todavia no se puede analizar automaticamente.'
+              : 'This attachment type cannot be analyzed automatically yet.',
+        });
+      }
+
+      const prompt = buildAttachmentAnalysisPrompt(language, filename, mimeType);
+
+      const analysisResponse = await ai.models.generateContent({
+        model:
+          mimeType === 'application/pdf' ||
+          mimeType.includes('officedocument') ||
+          mimeType.startsWith('application/vnd.ms-')
+            ? 'gemini-2.5-pro'
+            : 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType,
+                  data: normalizedBase64,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          maxOutputTokens: 1800,
+          temperature: 0.4,
+        },
+      });
+
       return res.json({
         filename,
         mimeType,
         size,
-        data: normalizedBase64,
+        analysis: analysisResponse.text || null,
       });
+    } catch (error: any) {
+      console.error('❌ Error fetching/analyzing Gmail attachment:', error.message);
+      await handleGoogleApiError(error, req, res, 'gmail');
     }
-
-    const ai = getGenAI();
-    const supportedAnalysis = isSupportedAttachmentAnalysisMimeType(mimeType);
-
-    if (!supportedAnalysis) {
-      return res.status(400).json({
-        error: "Attachment type not supported for analysis",
-        errorCode: "ATTACHMENT_UNSUPPORTED",
-        message: language === 'es'
-          ? 'Este tipo de adjunto todavia no se puede analizar automaticamente.'
-          : 'This attachment type cannot be analyzed automatically yet.',
-      });
-    }
-
-    const prompt = buildAttachmentAnalysisPrompt(language, filename, mimeType);
-
-    const analysisResponse = await ai.models.generateContent({
-      model: mimeType === 'application/pdf' || mimeType.includes('officedocument') || mimeType.startsWith('application/vnd.ms-')
-        ? 'gemini-2.5-pro'
-        : 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType,
-                data: normalizedBase64,
-              }
-            }
-          ]
-        }
-      ],
-      config: {
-        maxOutputTokens: 1800,
-        temperature: 0.4,
-      }
-    });
-
-    return res.json({
-      filename,
-      mimeType,
-      size,
-      analysis: analysisResponse.text || null,
-    });
-  } catch (error: any) {
-    console.error("❌ Error fetching/analyzing Gmail attachment:", error.message);
-    await handleGoogleApiError(error, req, res, 'gmail');
   }
-});
+);
 
 // ---- Gmail Draft Endpoints ----
 
-app.post("/api/gmail/messages/:id/draft-reply-ai", authenticateSupabaseUser, async (req, res) => {
-  console.log("📝 Gmail AI draft reply request received");
+app.post('/api/gmail/messages/:id/draft-reply-ai', authenticateSupabaseUser, async (req, res) => {
+  console.log('📝 Gmail AI draft reply request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5349,8 +6312,8 @@ app.post("/api/gmail/messages/:id/draft-reply-ai", authenticateSupabaseUser, asy
     const ai = getGenAI();
     if (!ai) {
       return res.status(503).json({
-        error: "AI service unavailable",
-        errorCode: "GEMINI_NOT_CONFIGURED"
+        error: 'AI service unavailable',
+        errorCode: 'GEMINI_NOT_CONFIGURED',
       });
     }
 
@@ -5363,16 +6326,17 @@ app.post("/api/gmail/messages/:id/draft-reply-ai", authenticateSupabaseUser, asy
     const messageResponse = await gmail.users.messages.get({
       userId: 'me',
       id: req.params.id,
-      format: 'full'
+      format: 'full',
     });
 
     const headers = messageResponse.data.payload?.headers || [];
-    const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-    const fromHeader = headers.find(h => h.name === 'From')?.value || '';
-    const messageIdHeader = headers.find(h => h.name === 'Message-ID')?.value || '';
+    const subject = headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
+    const fromHeader = headers.find((h) => h.name === 'From')?.value || '';
+    const messageIdHeader = headers.find((h) => h.name === 'Message-ID')?.value || '';
     const threadId = messageResponse.data.threadId || '';
     const recipientEmail = extractEmailAddress(fromHeader);
-    const sourceBody = extractBody(messageResponse.data.payload) || messageResponse.data.snippet || '';
+    const sourceBody =
+      extractBody(messageResponse.data.payload) || messageResponse.data.snippet || '';
     const safeBodyExcerpt = sourceBody.slice(0, 4000);
     const langInstruction = languageInstructions[language] || languageInstructions.en;
 
@@ -5389,7 +6353,7 @@ Return ONLY valid JSON with this shape: {"subject":"Re: ...","bodyHtml":"<p>...<
 Do not include markdown fences or extra commentary.`,
         temperature: 0.7,
         maxOutputTokens: 800,
-      }
+      },
     });
 
     const payloadText = extractJsonPayload(draftResponse.text || '');
@@ -5406,14 +6370,20 @@ Do not include markdown fences or extra commentary.`,
       }
     }
 
-    const raw = createEmailMessage(recipientEmail, draftSubject, draftBodyHtml, messageIdHeader, threadId);
+    const raw = createEmailMessage(
+      recipientEmail,
+      draftSubject,
+      draftBodyHtml,
+      messageIdHeader,
+      threadId
+    );
     const draft = await gmail.users.drafts.create({
       userId: 'me',
       requestBody: {
         message: {
-          raw
-        }
-      }
+          raw,
+        },
+      },
     });
 
     return res.json({
@@ -5425,20 +6395,20 @@ Do not include markdown fences or extra commentary.`,
       bodyHtml: draftBodyHtml,
     });
   } catch (error: any) {
-    console.error("❌ Error creating AI draft reply:", error.message);
+    console.error('❌ Error creating AI draft reply:', error.message);
     return handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Create a draft (SAFE - does not send)
-app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
-  console.log("📝 Gmail create draft request received");
+app.post('/api/gmail/draft', authenticateSupabaseUser, async (req, res) => {
+  console.log('📝 Gmail create draft request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5447,9 +6417,9 @@ app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
   // Validate required fields
   if (!to || !subject || !body) {
     return res.status(400).json({
-      error: "Missing required fields",
+      error: 'Missing required fields',
       required: ['to', 'subject', 'body'],
-      errorCode: "MISSING_FIELDS"
+      errorCode: 'MISSING_FIELDS',
     });
   }
 
@@ -5462,14 +6432,14 @@ app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
     // Create raw RFC 2822 message
     const raw = createEmailMessage(to, subject, body, inReplyTo, threadId);
 
-    console.log("📝 Creating draft...");
+    console.log('📝 Creating draft...');
     const draft = await gmail.users.drafts.create({
       userId: 'me',
       requestBody: {
         message: {
-          raw
-        }
-      }
+          raw,
+        },
+      },
     });
 
     console.log(`✅ Draft created: ${draft.data.id}`);
@@ -5478,23 +6448,23 @@ app.post("/api/gmail/draft", authenticateSupabaseUser, async (req, res) => {
       messageId: draft.data.message?.id,
       threadId: draft.data.message?.threadId,
       status: 'draft_created',
-      message: 'Borrador creado exitosamente. Revisa y envía cuando estés listo.'
+      message: 'Borrador creado exitosamente. Revisa y envía cuando estés listo.',
     });
   } catch (error: any) {
-    console.error("❌ Error creating draft:", error.message);
+    console.error('❌ Error creating draft:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // List all drafts
-app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
-  console.log("📋 Gmail list drafts request received");
+app.get('/api/gmail/drafts', authenticateSupabaseUser, async (req, res) => {
+  console.log('📋 Gmail list drafts request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5506,7 +6476,7 @@ app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
 
     const response = await gmail.users.drafts.list({
       userId: 'me',
-      maxResults: 20
+      maxResults: 20,
     });
 
     const drafts = [];
@@ -5515,7 +6485,7 @@ app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
         // Get full message details for each draft
         const message = await gmail.users.drafts.get({
           userId: 'me',
-          id: draft.id!
+          id: draft.id!,
         });
 
         const headers = message.data.message?.payload?.headers || [];
@@ -5523,31 +6493,31 @@ app.get("/api/gmail/drafts", authenticateSupabaseUser, async (req, res) => {
           draftId: draft.id,
           messageId: message.data.message?.id,
           threadId: message.data.message?.threadId,
-          subject: headers.find(h => h.name === 'Subject')?.value || 'No Subject',
-          to: headers.find(h => h.name === 'To')?.value || '',
-          from: headers.find(h => h.name === 'From')?.value || '',
-          date: headers.find(h => h.name === 'Date')?.value || '',
-          snippet: message.data.message?.snippet || ''
+          subject: headers.find((h) => h.name === 'Subject')?.value || 'No Subject',
+          to: headers.find((h) => h.name === 'To')?.value || '',
+          from: headers.find((h) => h.name === 'From')?.value || '',
+          date: headers.find((h) => h.name === 'Date')?.value || '',
+          snippet: message.data.message?.snippet || '',
         });
       }
     }
 
     res.json(drafts);
   } catch (error: any) {
-    console.error("❌ Error listing drafts:", error.message);
+    console.error('❌ Error listing drafts:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Get a specific draft
-app.get("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
-  console.log("📋 Gmail get draft request received");
+app.get('/api/gmail/drafts/:id', authenticateSupabaseUser, async (req, res) => {
+  console.log('📋 Gmail get draft request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5560,7 +6530,7 @@ app.get("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
     const { id } = req.params;
     const draft = await gmail.users.drafts.get({
       userId: 'me',
-      id
+      id,
     });
 
     const headers = draft.data.message?.payload?.headers || [];
@@ -5570,28 +6540,28 @@ app.get("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
       draftId: draft.data.id,
       messageId: draft.data.message?.id,
       threadId: draft.data.message?.threadId,
-      subject: headers.find(h => h.name === 'Subject')?.value || 'No Subject',
-      to: headers.find(h => h.name === 'To')?.value || '',
-      from: headers.find(h => h.name === 'From')?.value || '',
-      date: headers.find(h => h.name === 'Date')?.value || '',
+      subject: headers.find((h) => h.name === 'Subject')?.value || 'No Subject',
+      to: headers.find((h) => h.name === 'To')?.value || '',
+      from: headers.find((h) => h.name === 'From')?.value || '',
+      date: headers.find((h) => h.name === 'Date')?.value || '',
       bodyText,
-      snippet: draft.data.message?.snippet || ''
+      snippet: draft.data.message?.snippet || '',
     });
   } catch (error: any) {
-    console.error("❌ Error getting draft:", error.message);
+    console.error('❌ Error getting draft:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Update a draft
-app.put("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
-  console.log("✏️ Gmail update draft request received");
+app.put('/api/gmail/drafts/:id', authenticateSupabaseUser, async (req, res) => {
+  console.log('✏️ Gmail update draft request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5613,9 +6583,9 @@ app.put("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
       requestBody: {
         id,
         message: {
-          raw
-        }
-      }
+          raw,
+        },
+      },
     });
 
     res.json({
@@ -5623,23 +6593,23 @@ app.put("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
       messageId: updated.data.message?.id,
       threadId: updated.data.message?.threadId,
       status: 'draft_updated',
-      message: 'Borrador actualizado exitosamente.'
+      message: 'Borrador actualizado exitosamente.',
     });
   } catch (error: any) {
-    console.error("❌ Error updating draft:", error.message);
+    console.error('❌ Error updating draft:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Send a draft (REQUIRES EXPLICIT USER CONFIRMATION)
-app.post("/api/gmail/drafts/:id/send", authenticateSupabaseUser, async (req, res) => {
-  console.log("🚀 Gmail send draft request received");
+app.post('/api/gmail/drafts/:id/send', authenticateSupabaseUser, async (req, res) => {
+  console.log('🚀 Gmail send draft request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5649,9 +6619,10 @@ app.post("/api/gmail/drafts/:id/send", authenticateSupabaseUser, async (req, res
   // CRITICAL: Require explicit confirmation
   if (!confirmSend) {
     return res.status(400).json({
-      error: "Explicit confirmation required",
-      message: "Debes confirmar explícitamente que deseas enviar este email. Incluye { confirmSend: true } en el request.",
-      errorCode: "CONFIRMATION_REQUIRED"
+      error: 'Explicit confirmation required',
+      message:
+        'Debes confirmar explícitamente que deseas enviar este email. Incluye { confirmSend: true } en el request.',
+      errorCode: 'CONFIRMATION_REQUIRED',
     });
   }
 
@@ -5667,40 +6638,42 @@ app.post("/api/gmail/drafts/:id/send", authenticateSupabaseUser, async (req, res
     const sent = await gmail.users.drafts.send({
       userId: 'me',
       requestBody: {
-        id
-      }
+        id,
+      },
     });
 
     // Optionally delete the draft after sending
-    await gmail.users.drafts.delete({
-      userId: 'me',
-      id
-    }).catch(() => {
-      // Ignore delete errors
-    });
+    await gmail.users.drafts
+      .delete({
+        userId: 'me',
+        id,
+      })
+      .catch(() => {
+        // Ignore delete errors
+      });
 
     console.log(`✅ Email sent: ${sent.data.id}`);
     res.json({
       id: sent.data.id,
       threadId: sent.data.threadId,
       status: 'email_sent',
-      message: 'Email enviado exitosamente.'
+      message: 'Email enviado exitosamente.',
     });
   } catch (error: any) {
-    console.error("❌ Error sending draft:", error.message);
+    console.error('❌ Error sending draft:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Delete a draft
-app.delete("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) => {
-  console.log("🗑️ Gmail delete draft request received");
+app.delete('/api/gmail/drafts/:id', authenticateSupabaseUser, async (req, res) => {
+  console.log('🗑️ Gmail delete draft request received');
 
   const userTokens = await getUserTokens(req);
   if (!userTokens) {
     return res.status(401).json({
-      error: "Unauthorized - No Google tokens found",
-      errorCode: "NO_TOKENS"
+      error: 'Unauthorized - No Google tokens found',
+      errorCode: 'NO_TOKENS',
     });
   }
 
@@ -5712,23 +6685,29 @@ app.delete("/api/gmail/drafts/:id", authenticateSupabaseUser, async (req, res) =
     const { id } = req.params;
     await gmail.users.drafts.delete({
       userId: 'me',
-      id
+      id,
     });
 
     console.log(`✅ Draft deleted: ${id}`);
     res.json({
       id,
       status: 'draft_deleted',
-      message: 'Borrador eliminado exitosamente.'
+      message: 'Borrador eliminado exitosamente.',
     });
   } catch (error: any) {
-    console.error("❌ Error deleting draft:", error.message);
+    console.error('❌ Error deleting draft:', error.message);
     await handleGoogleApiError(error, req, res, 'gmail');
   }
 });
 
 // Helper function to create RFC 2822 email message
-function createEmailMessage(to: string, subject: string, body: string, inReplyTo?: string, threadId?: string): string {
+function createEmailMessage(
+  to: string,
+  subject: string,
+  body: string,
+  inReplyTo?: string,
+  threadId?: string
+): string {
   const lineBreak = '\r\n';
 
   let headers = [
@@ -5736,7 +6715,7 @@ function createEmailMessage(to: string, subject: string, body: string, inReplyTo
     `Subject: ${subject}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/html; charset="UTF-8"`,
-    `Content-Transfer-Encoding: 7bit`
+    `Content-Transfer-Encoding: 7bit`,
   ];
 
   // Add In-Reply-To header for threading
@@ -5750,11 +6729,7 @@ function createEmailMessage(to: string, subject: string, body: string, inReplyTo
     headers.push(`X-GM-THREAD-ID: ${threadId}`);
   }
 
-  const message = [
-    ...headers,
-    '',
-    body
-  ].join(lineBreak);
+  const message = [...headers, '', body].join(lineBreak);
 
   // Base64 encode the message
   return Buffer.from(message)
@@ -5832,7 +6807,11 @@ function isSupportedAttachmentAnalysisMimeType(mimeType: string): boolean {
   );
 }
 
-function buildAttachmentAnalysisPrompt(language: string, filename: string, mimeType: string): string {
+function buildAttachmentAnalysisPrompt(
+  language: string,
+  filename: string,
+  mimeType: string
+): string {
   if (language === 'es') {
     return `Analiza el archivo "${filename}" (${mimeType}). Devuelve: 1. resumen ejecutivo, 2. hallazgos clave, 3. detalles importantes o datos relevantes, 4. riesgos, dudas o informacion faltante, 5. siguientes pasos utiles. Si el archivo no se puede leer bien, dilo claramente.`;
   }
@@ -5920,17 +6899,23 @@ function classifyGmailMessage({
     /\buppdatering\b/,
   ];
 
-  const category = normalizedLabels.includes('CATEGORY_PROMOTIONS') || normalizedLabels.includes('CATEGORY_FORUMS') || newsletterPatterns.some((pattern) => pattern.test(haystack))
-    ? 'newsletters'
-    : normalizedLabels.includes('CATEGORY_UPDATES') || updatePatterns.some((pattern) => pattern.test(haystack))
-      ? 'updates'
-      : 'general';
+  const category =
+    normalizedLabels.includes('CATEGORY_PROMOTIONS') ||
+    normalizedLabels.includes('CATEGORY_FORUMS') ||
+    newsletterPatterns.some((pattern) => pattern.test(haystack))
+      ? 'newsletters'
+      : normalizedLabels.includes('CATEGORY_UPDATES') ||
+          updatePatterns.some((pattern) => pattern.test(haystack))
+        ? 'updates'
+        : 'general';
 
-  const urgency = normalizedLabels.includes('IMPORTANT') || urgentPatterns.some((pattern) => pattern.test(haystack))
-    ? 'high'
-    : category === 'newsletters'
-      ? 'low'
-      : 'normal';
+  const urgency =
+    normalizedLabels.includes('IMPORTANT') ||
+    urgentPatterns.some((pattern) => pattern.test(haystack))
+      ? 'high'
+      : category === 'newsletters'
+        ? 'low'
+        : 'normal';
 
   return { category, urgency };
 }
@@ -5941,10 +6926,10 @@ async function startServer() {
   // Vite middleware for development
   if (!IS_PROD) {
     console.log('🛠️ Registering Vite middleware (DEVELOPMENT MODE)');
-    const { createServer: createViteServer } = await import("vite");
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
@@ -5981,22 +6966,31 @@ async function startServer() {
       console.error(`   Checked paths: ${possiblePaths.join(', ')}`);
     }
 
-    app.use(express.static(staticPath, {
-      setHeaders: (res, filePath) => {
-        // Assets in staticPath/assets/* have content hashes and can be cached indefinitely
-        if (filePath.includes(path.join(staticPath, 'assets'))) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        }
-        // index.html and sw.js should never be cached
-        else if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        }
-      }
-    }));
+    app.use(
+      express.static(staticPath, {
+        setHeaders: (res, filePath) => {
+          // Assets in staticPath/assets/* have content hashes and can be cached indefinitely
+          if (filePath.includes(path.join(staticPath, 'assets'))) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+          // index.html, sw.js, version.json, and manifest must never be cached
+          else if (
+            filePath.endsWith('.html') ||
+            filePath.endsWith('sw.js') ||
+            filePath.endsWith('version.json') ||
+            filePath.endsWith('manifest.webmanifest')
+          ) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          }
+        },
+      })
+    );
 
-    app.get("*", (req, res) => {
+    app.get('*', (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      const indexPath = path.resolve(staticPath, "index.html");
+      const indexPath = path.resolve(staticPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
@@ -6014,29 +7008,92 @@ async function startServer() {
 
     server.on('error', (e: any) => {
       console.error(`❌ SERVER LISTEN ERROR:`, e);
-      logToFile("LISTEN ERROR", { code: e.code, message: e.message });
+      logToFile('LISTEN ERROR', { code: e.code, message: e.message });
     });
+
+    const shutdown = async (signal: string) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      console.log(`🛑 ${signal} received — starting graceful shutdown`);
+      logToFile(`GRACEFUL SHUTDOWN`, { signal });
+
+      const forceExitTimeout = setTimeout(() => {
+        console.error('⚠️ Forced shutdown after 15s — connections still active');
+        process.exit(1);
+      }, 15000);
+
+      server.close(() => {
+        console.log('✅ All connections closed');
+        clearTimeout(forceExitTimeout);
+
+        if (pgPool) {
+          pgPool
+            .end()
+            .then(() => {
+              console.log('✅ pg pool closed');
+              process.exit(0);
+            })
+            .catch(() => process.exit(1));
+        } else {
+          process.exit(0);
+        }
+      });
+    };
+
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+
+    return server;
   } catch (listenError: any) {
     console.error(`❌ CRITICAL: Failed to start listening:`, listenError);
+    return null;
   }
 }
 
+// Express error-handling middleware — catches unhandled errors in route handlers
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const errorMsg = `🔥 UNHANDLED ROUTE ERROR: ${err.message}`;
+  console.error(errorMsg, err.stack);
+  logToFile('ROUTE ERROR', {
+    method: req.method,
+    url: req.url,
+    message: err.message,
+    stack: err.stack,
+  });
+
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  res.status(err.status || 500).json({
+    error: 'Internal server error',
+    errorCode: 'UNHANDLED_ERROR',
+  });
+});
+
 // Global error handlers to prevent silent 503s
+let crashing = false;
 process.on('uncaughtException', (err) => {
   const errorMsg = `🔥 UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`;
   console.error(errorMsg);
-  logToFile("UNCAUGHT EXCEPTION", { message: err.message, stack: err.stack });
+  logToFile('UNCAUGHT EXCEPTION', { message: err.message, stack: err.stack });
+
+  if (!crashing) {
+    crashing = true;
+    console.error('💥 Process is in undefined state — exiting in 1s to allow log flush');
+    setTimeout(() => process.exit(1), 1000);
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   const errorMsg = `🔥 UNHANDLED REJECTION: ${reason}`;
   console.error(errorMsg);
-  logToFile("UNHANDLED REJECTION", { reason: String(reason) });
+  logToFile('UNHANDLED REJECTION', { reason: String(reason) });
 });
 
 console.log('🚀 Finalizing server initialization...');
-startServer().catch(err => {
-  console.error("🔥 CRITICAL SERVER STARTUP FAILURE:", err);
-  logToFile("CRITICAL STARTUP ERROR", { message: err.message, stack: err.stack });
+startServer().catch((err) => {
+  console.error('🔥 CRITICAL SERVER STARTUP FAILURE:', err);
+  logToFile('CRITICAL STARTUP ERROR', { message: err.message, stack: err.stack });
 });
-

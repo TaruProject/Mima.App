@@ -12,5 +12,5 @@
     "noEmit": false,
     "types": ["node"]
   },
-  "include": ["server.ts", "src/services/**/*.ts"]
+  "include": ["server.ts", "server/**/*.ts"]
 }

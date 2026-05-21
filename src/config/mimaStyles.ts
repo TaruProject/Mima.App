@@ -331,6 +331,8 @@ export const MIMA_STYLES: Record<MimaStyleId, MimaStyle> = {
 
 export const MIMA_STYLE_OPTIONS = Object.values(MIMA_STYLES);
 
+export { GLOBAL_MIMA_RULES };
+
 const LEGACY_STYLE_ALIASES: Record<string, MimaStyleId> = {
   neutral: 'neutral',
   'neutral mode': 'neutral',
@@ -358,11 +360,15 @@ export function getMimaStyle(styleId?: string | null): MimaStyle {
   return MIMA_STYLES[normalizeStyleId(styleId)];
 }
 
-export function buildSystemPrompt(styleId: string | null | undefined, context: MimaPromptContext): string {
+export function buildSystemPrompt(
+  styleId: string | null | undefined,
+  context: MimaPromptContext
+): string {
   const style = getMimaStyle(styleId);
-  const capabilities = context.capabilities && context.capabilities.length > 0
-    ? context.capabilities
-    : ['Conversacion general'];
+  const capabilities =
+    context.capabilities && context.capabilities.length > 0
+      ? context.capabilities
+      : ['Conversacion general'];
   const extraInstructions = context.extraInstructions?.filter(Boolean) || [];
 
   return [
@@ -379,5 +385,7 @@ export function buildSystemPrompt(styleId: string | null | undefined, context: M
     ...(extraInstructions.length > 0 ? ['', ...extraInstructions] : []),
     '',
     GLOBAL_MIMA_RULES,
-  ].join('\n').trim();
+  ]
+    .join('\n')
+    .trim();
 }

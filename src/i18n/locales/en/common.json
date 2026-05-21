@@ -55,7 +55,10 @@
     "action_menu": "Action menu",
     "error_message": "Sorry, something went wrong. Please try again.",
     "audio_error": "Error playing audio",
-    "voice_not_found": "Voice not configured. Please go to profile."
+    "voice_not_found": "Voice not configured. Please go to profile.",
+    "tts_generating": "Generating audio...",
+    "tts_cached": "Play cached audio",
+    "tts_unavailable": "Voice service temporarily unavailable"
   },
   "profile": {
     "title": "Profile",
@@ -149,6 +152,7 @@
     "reconnect_required": "Google Calendar needs write permissions. Reconnect Google so Mima can create and edit events again."
   },
   "auth": {
+    "select_language": "Choose your language",
     "welcome_back": "Welcome back",
     "create_account": "Create an account",
     "sign_in_subtitle": "Enter your details to access Mima.",
@@ -162,7 +166,19 @@
     "sign_up": "Sign Up",
     "no_account": "Don't have an account?",
     "have_account": "Already have an account?",
-    "google_error": "Google authentication failed. Please try again."
+    "google_error": "Google authentication failed. Please try again.",
+    "select_language_aria": "Select {{language}} language",
+    "error_database_save": "We could not create your account right now. Please try again shortly.",
+    "error_user_exists": "This email is already registered. Try signing in instead.",
+    "error_invalid_credentials": "Invalid email or password.",
+    "error_weak_password": "Your password is too weak. Use at least 6 characters.",
+    "error_generic": "Authentication failed. Please try again.",
+    "confirm_email_title": "Check your email",
+    "confirm_email_subtitle": "We sent a confirmation link to:",
+    "confirm_email_sign_in": "I confirmed my email, sign in",
+    "welcome_title": "Welcome to Mima",
+    "welcome_subtitle": "Your intelligent personal assistant to manage your day, emails, and much more.",
+    "change_language": "Change language"
   },
   "layout": {
     "chat": "Chat",
@@ -216,7 +232,12 @@
   "update": {
     "title": "Mandatory Update\nAvailable",
     "description": "A critical security patch and new features are ready. Please refresh to continue using Mima.",
-    "button": "Refresh & Update"
+    "button": "Refresh & Update",
+    "updating": "Updating...",
+    "network_error_title": "Connection Unstable",
+    "network_error_description": "Could not download the update. Please check your network and try again.",
+    "retry_button": "Retry Update",
+    "retry_count": "Attempt {{current}} of {{max}}"
   },
   "google_callback": {
     "processing_title": "Connecting...",

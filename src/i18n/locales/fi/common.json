@@ -55,7 +55,10 @@
     "action_menu": "Toimintovalikko",
     "error_message": "Anteeksi, jokin meni pieleen. Yrita uudelleen.",
     "audio_error": "Virhe aanen toistossa",
-    "voice_not_found": "Aanta ei ole maaritetty. Mene profiiliin."
+    "voice_not_found": "Aanta ei ole maaritetty. Mene profiiliin.",
+    "tts_generating": "Luodaan aanta...",
+    "tts_cached": "Toista vahvistettu aani",
+    "tts_unavailable": "Aanipalvelu tilapaisesti saavuttamattomissa"
   },
   "profile": {
     "title": "Profiili",
@@ -149,6 +152,7 @@
     "reconnect_required": "Google Calendar tarvitsee kirjoitusoikeudet. Yhdista Google uudelleen, jotta Mima voi taas luoda ja muokata tapahtumia."
   },
   "auth": {
+    "select_language": "Valitse kieli",
     "welcome_back": "Tervetuloa takaisin",
     "create_account": "Luo tili",
     "sign_in_subtitle": "Kirjaudu sisaan kayttaaksesi Mimaa.",
@@ -162,7 +166,19 @@
     "sign_up": "Rekisteroidy",
     "no_account": "Eiko sinulla ole tiliä?",
     "have_account": "Onko sinulla jo tili?",
-    "google_error": "Google-kirjautuminen epaonnistui. Yrita uudelleen."
+    "google_error": "Google-kirjautuminen epaonnistui. Yrita uudelleen.",
+    "select_language_aria": "Valitse kieli {{language}}",
+    "error_database_save": "Tilin luonti ei onnistunut juuri nyt. Yrita hetken kuluttua uudelleen.",
+    "error_user_exists": "Tama sahkoposti on jo rekisteroity. Kokeile kirjautumista.",
+    "error_invalid_credentials": "Virheellinen sahkoposti tai salasana.",
+    "error_weak_password": "Salasana on liian heikko. Kayta vahintaan 6 merkki?.",
+    "error_generic": "Tunnistautuminen epaonnistui. Yrita uudelleen.",
+    "confirm_email_title": "Tarkista sahkopostisi",
+    "confirm_email_subtitle": "Lahetimme vahvistuslinkin osoitteeseen:",
+    "confirm_email_sign_in": "Vahvistin sahkopostini, kirjaudu sisaan",
+    "welcome_title": "Tervetuloa Mimaan",
+    "welcome_subtitle": "Älykas henkilökohtainen avustajasi paivan, sahkopostien ja paljon muoren hallintaan.",
+    "change_language": "Vaihda kieli"
   },
   "layout": {
     "chat": "Chatti",
@@ -214,9 +230,14 @@
     "install_button": "Asenna"
   },
   "update": {
-    "title": "Pakollinen paivitys saatavilla",
-    "description": "Kriittinen tietoturvapaivitys ja uusia ominaisuuksia on valmiina. Paivita jatkaaksesi Miman kayttoa.",
-    "button": "Paivita"
+    "title": "Pakollinen päivitys\nsaatavilla",
+    "description": "Kriittinen tietoturvapäivitys ja uusia ominaisuuksia on valmiina. Päivitä jatkaaksesi Miman käyttöä.",
+    "button": "Päivitä",
+    "updating": "Päivitetään...",
+    "network_error_title": "Yhteys epävakaa",
+    "network_error_description": "Päivityksen lataaminen epäonnistui. Tarkista verkkoyhteytesi ja yritä uudelleen.",
+    "retry_button": "Yritä päivitystä uudelleen",
+    "retry_count": "Yritys {{current}} / {{max}}"
   },
   "google_callback": {
     "processing_title": "Yhdistetaan...",

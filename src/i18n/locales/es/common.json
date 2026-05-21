@@ -55,7 +55,10 @@
     "action_menu": "Menu de acciones",
     "error_message": "Lo siento, algo salio mal. Intentalo de nuevo.",
     "audio_error": "Error al reproducir audio",
-    "voice_not_found": "Voz no configurada. Ve al perfil, por favor."
+    "voice_not_found": "Voz no configurada. Ve al perfil, por favor.",
+    "tts_generating": "Generando audio...",
+    "tts_cached": "Reproducir audio en cache",
+    "tts_unavailable": "Servicio de voz temporalmente no disponible"
   },
   "profile": {
     "title": "Perfil",
@@ -149,6 +152,7 @@
     "reconnect_required": "Google Calendar necesita permisos de escritura. Reconecta Google para que Mima pueda volver a crear y editar eventos."
   },
   "auth": {
+    "select_language": "Elige tu idioma",
     "welcome_back": "Bienvenido de nuevo",
     "create_account": "Crear una cuenta",
     "sign_in_subtitle": "Ingresa tus datos para acceder a Mima.",
@@ -162,7 +166,19 @@
     "sign_up": "Registrarse",
     "no_account": "No tienes cuenta?",
     "have_account": "Ya tienes cuenta?",
-    "google_error": "La autenticacion con Google fallo. Intentalo de nuevo."
+    "google_error": "La autenticacion con Google fallo. Intentalo de nuevo.",
+    "select_language_aria": "Seleccionar idioma {{language}}",
+    "error_database_save": "No pudimos crear tu cuenta en este momento. Intentalo de nuevo en unos minutos.",
+    "error_user_exists": "Este correo ya esta registrado. Intenta iniciar sesion.",
+    "error_invalid_credentials": "Correo o contrasena invalidos.",
+    "error_weak_password": "La contrasena es demasiado debil. Usa al menos 6 caracteres.",
+    "error_generic": "La autenticacion fallo. Intentalo de nuevo.",
+    "confirm_email_title": "Revisa tu correo",
+    "confirm_email_subtitle": "Enviamos un enlace de confirmacion a:",
+    "confirm_email_sign_in": "Ya confirme mi correo, iniciar sesion",
+    "welcome_title": "Bienvenido a Mima",
+    "welcome_subtitle": "Tu asistente personal inteligente para gestionar tu dia, correos y mucho mas.",
+    "change_language": "Cambiar idioma"
   },
   "layout": {
     "chat": "Chat",
@@ -214,9 +230,14 @@
     "install_button": "Instalar"
   },
   "update": {
-    "title": "Actualizacion obligatoria disponible",
-    "description": "Hay un parche critico y nuevas funciones listas. Actualiza para seguir usando Mima.",
-    "button": "Actualizar"
+    "title": "Actualización obligatoria\ndisponible",
+    "description": "Hay un parche crítico y nuevas funciones listas. Actualiza para seguir usando Mima.",
+    "button": "Actualizar",
+    "updating": "Actualizando...",
+    "network_error_title": "Conexión inestable",
+    "network_error_description": "No se pudo descargar la actualización. Verifica tu conexión e inténtalo de nuevo.",
+    "retry_button": "Reintentar actualización",
+    "retry_count": "Intento {{current}} de {{max}}"
   },
   "google_callback": {
     "processing_title": "Conectando...",

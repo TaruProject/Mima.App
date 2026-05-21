@@ -55,7 +55,10 @@
     "action_menu": "Atgardsmeny",
     "error_message": "Tyvarr, nagot gick fel. Forsok igen.",
     "audio_error": "Fel vid uppspelning av ljud",
-    "voice_not_found": "Rost inte konfigurerad. Ga till profilen."
+    "voice_not_found": "Rost inte konfigurerad. Ga till profilen.",
+    "tts_generating": "Genererar ljud...",
+    "tts_cached": "Spela upp cachat ljud",
+    "tts_unavailable": "Rosttjanst tillfallet otillganglig"
   },
   "profile": {
     "title": "Profil",
@@ -149,6 +152,7 @@
     "reconnect_required": "Google Calendar behover skrivbehorigheter. Anslut Google pa nytt sa att Mima kan skapa och redigera handelser igen."
   },
   "auth": {
+    "select_language": "Välj ditt språk",
     "welcome_back": "Valkommen tillbaka",
     "create_account": "Skapa ett konto",
     "sign_in_subtitle": "Ange dina uppgifter for att komma at Mima.",
@@ -162,7 +166,19 @@
     "sign_up": "Registrera dig",
     "no_account": "Har du inget konto?",
     "have_account": "Har du redan ett konto?",
-    "google_error": "Google-autentisering misslyckades. Forsok igen."
+    "google_error": "Google-autentisering misslyckades. Forsok igen.",
+    "select_language_aria": "Valj sprak {{language}}",
+    "error_database_save": "Kontot kunde inte skapas just nu. Forsok igen om en stund.",
+    "error_user_exists": "Den har e-postadressen ar redan registrerad. Prova att logga in.",
+    "error_invalid_credentials": "Fel e-postadress eller losenord.",
+    "error_weak_password": "Losenordet ar for svagt. Anvand minst 6 tecken.",
+    "error_generic": "Autentisering misslyckades. Forsok igen.",
+    "confirm_email_title": "Kontrollera din e-post",
+    "confirm_email_subtitle": "Vi skickade en bekräftelselank till:",
+    "confirm_email_sign_in": "Jag har bekriftat min e-post, logga in",
+    "welcome_title": "Valkommen till Mima",
+    "welcome_subtitle": "Din intelligenta personliga assistent for att hantera din dag, e-post och mycket mer.",
+    "change_language": "Byt sprak"
   },
   "layout": {
     "chat": "Chatt",
@@ -214,9 +230,14 @@
     "install_button": "Installera"
   },
   "update": {
-    "title": "Obligatorisk uppdatering tillganglig",
-    "description": "En kritisk sakerhetsuppdatering och nya funktioner ar klara. Uppdatera for att fortsatta anvanda Mima.",
-    "button": "Uppdatera"
+    "title": "Obligatorisk uppdatering\ntillgänglig",
+    "description": "En kritisk säkerhetsuppdatering och nya funktioner är klara. Uppdatera för att fortsätta använda Mima.",
+    "button": "Uppdatera",
+    "updating": "Uppdaterar...",
+    "network_error_title": "Instabil anslutning",
+    "network_error_description": "Det gick inte att ladda ner uppdateringen. Kontrollera nätverket och försök igen.",
+    "retry_button": "Försök uppdatera igen",
+    "retry_count": "Försök {{current}} av {{max}}"
   },
   "google_callback": {
     "processing_title": "Ansluter...",
